@@ -327,8 +327,10 @@ class Generator {
     const dens = { [BI.forest]: 9, [BI.birch_forest]: 8, [BI.dark_forest]: 12, [BI.taiga]: 8, [BI.snowy_taiga]: 6, [BI.jungle]: 14, [BI.savanna]: 1.2, [BI.plains]: 0.25, [BI.sunflower_plains]: 0.2, [BI.mangrove_swamp]: 5, [BI.mountains]: 1.5, [BI.snowy_plains]: 0.15 }[b] || 0;
     let n = Math.floor(dens) + (r() < dens % 1 ? 1 : 0);
     const S = new SB(ch, this);
+    const clear = this.clearZones(x0 + 8, z0 + 8);
     for (let i = 0; i < n; i++) {
       const tx = x0 + ((r() * 16) | 0), tz = z0 + ((r() * 16) | 0); const c = this.col(tx, tz);
+      if (clear.some(q => Math.abs(q.x - tx) < q.r && Math.abs(q.z - tz) < q.r)) continue;
       const rr = r(); const tr = mulberry32((this.seed ^ Math.imul(tx, 7919) ^ Math.imul(tz, 104729)) >>> 0);
       if (c.biome === BI.mangrove_swamp) { if (c.h >= SEA - 3) treeMangrove(S, tx, c.h + 1, tz, tr); continue; }
       if (c.h < SEA || c.river || c.lake) continue;
@@ -462,6 +464,12 @@ class Generator {
       }
     }
   }
+  clearZones(x, z) {
+    const out = []; if (this.dim !== 'overworld') return out;
+    for (const st of STRUCTS) { if (!st.clearR || st.dim !== this.dim) continue; const sp = st.spacing * 16; const rx = Math.floor(x / sp), rz = Math.floor(z / sp);
+      for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) { const c = this.candidate(st, rx + dx, rz + dz); if (c && Math.abs(c.x - x) < st.clearR + 24 && Math.abs(c.z - z) < st.clearR + 24) out.push({ x: c.x, z: c.z, r: st.clearR }); } }
+    return out;
+  }
   candidate(st, rx, rz) {
     const key = st.name + rx + ',' + rz; let c = this.structCache.get(key);
     if (c === undefined) {
@@ -577,7 +585,7 @@ const VMAT = {
 function flatEnough(gen, x, z, rad, maxd) { const h0 = gen.col(x, z).h; for (const [dx, dz] of [[rad, 0], [-rad, 0], [0, rad], [0, -rad], [rad, rad], [-rad, -rad]]) if (Math.abs(gen.col(x + dx, z + dz).h - h0) > maxd) return false; return true; }
 // 1. ALDEA ---------------------------------------------------------
 defStruct({
-  name: 'village', dim: 'overworld', spacing: 26, radius: 64, sep: 6,
+  name: 'village', clearR: 48, dim: 'overworld', spacing: 26, radius: 64, sep: 6,
   place(gen, x, z) {
     const c = gen.col(x, z); const b = c.biome; let style = null;
     if (b === BI.plains || b === BI.sunflower_plains) style = 'plains'; else if (b === BI.desert) style = 'desert'; else if (b === BI.savanna) style = 'savanna'; else if (b === BI.taiga) style = 'taiga'; else if (b === BI.snowy_plains) style = 'snowy';
@@ -728,7 +736,7 @@ defStruct({
 });
 // 5. MANSIÓN DEL BOSQUE -------------------------------------------
 defStruct({
-  name: 'mansion', dim: 'overworld', spacing: 40, radius: 26, sep: 10,
+  name: 'mansion', clearR: 24, dim: 'overworld', spacing: 40, radius: 26, sep: 10,
   place(gen, x, z) { const c = gen.col(x, z); if (c.biome !== BI.dark_forest || !flatEnough(gen, x, z, 14, 10)) return null; return {}; },
   build(S, c, r) {
     const y = S.colH(c.x, c.z) + 1; const W = 18, D = 14;
@@ -781,7 +789,7 @@ defStruct({
 });
 // 7. PIRÁMIDE DEL DESIERTO ----------------------------------------
 defStruct({
-  name: 'desert_pyramid', dim: 'overworld', spacing: 30, radius: 13, sep: 6,
+  name: 'desert_pyramid', clearR: 13, dim: 'overworld', spacing: 30, radius: 13, sep: 6,
   place(gen, x, z) { const c = gen.col(x, z); if (c.biome !== BI.desert) return null; return {}; },
   build(S, c, r) {
     const y = S.colH(c.x, c.z); const R = 10;
@@ -801,7 +809,7 @@ defStruct({
 });
 // 8. PUESTO DE SAQUEADORES ----------------------------------------
 defStruct({
-  name: 'pillager_outpost', dim: 'overworld', spacing: 30, radius: 10, sep: 6, chance: 0.6,
+  name: 'pillager_outpost', clearR: 8, dim: 'overworld', spacing: 30, radius: 10, sep: 6, chance: 0.6,
   place(gen, x, z) { const c = gen.col(x, z); const ok = [BI.plains, BI.savanna, BI.taiga, BI.desert, BI.snowy_plains, BI.sunflower_plains]; if (!ok.includes(c.biome) || c.h < SEA + 1) return null; return {}; },
   build(S, c, r) {
     const y = S.colH(c.x, c.z) + 1; const R = 4;
@@ -854,7 +862,7 @@ defStruct({
 });
 // 11. TEMPLO DE LA JUNGLA -----------------------------------------
 defStruct({
-  name: 'jungle_temple', dim: 'overworld', spacing: 30, radius: 10, sep: 6,
+  name: 'jungle_temple', clearR: 9, dim: 'overworld', spacing: 30, radius: 10, sep: 6,
   place(gen, x, z) { const c = gen.col(x, z); if (c.biome !== BI.jungle) return null; return {}; },
   build(S, c, r) {
     const y = S.colH(c.x, c.z); const M = (x, yy, z) => hash3(c.seed, x, yy, z) < 0.45 ? ID.mossy_cobblestone : ID.cobblestone;

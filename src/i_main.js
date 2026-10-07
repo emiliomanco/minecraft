@@ -513,5 +513,7 @@ function boot() {
   // anfitrión tras cargar
   setInterval(() => { if (G.mode === 'game' && G.pendingHost) { G.pendingHost = false; startHost().then(code => { showTitle('Código: ' + code, 'Comparte este código con tus amigos'); }); } }, 500);
   requestAnimationFrame(frame);
+  // si la pestaña del anfitrión queda en segundo plano, el mundo sigue funcionando
+  setInterval(() => { if (document.hidden && G.mode === 'game' && G.net) { try { gameTick(); } catch (e) { console.error(e); } } }, 50);
 }
 boot();
