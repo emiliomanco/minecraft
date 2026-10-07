@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Minecraft 2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+<style>
+:root{--sl:40px;--ui:1}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%;height:100%;overflow:hidden;background:#000;font-family:'VT323',ui-monospace,monospace;color:#fff;user-select:none;-webkit-user-select:none}
+#gl{position:fixed;inset:0;width:100%;height:100%;display:block;image-rendering:auto}
+.screen{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;z-index:20;overflow:auto;padding:16px}
+.screen.on{display:flex}
+.dim{background:rgba(0,0,0,.55)}
+.dirt{background-color:#2a1f17;background-size:64px 64px;image-rendering:pixelated}
+.btn{width:400px;max-width:calc(100vw - 32px);height:40px;margin:4px 0;font:inherit;font-size:24px;color:#e0e0e0;background:#6f6f6f;border:2px solid #000;box-shadow:inset 2px 2px 0 #a9a9a9,inset -2px -3px 0 #4a4a4a;text-shadow:2px 2px 0 #3a3a3a;cursor:pointer;image-rendering:pixelated;background-image:linear-gradient(rgba(255,255,255,.04),rgba(0,0,0,.08))}
+.btn:hover{border-color:#fff;color:#ffffa0;background-color:#7c86c8;box-shadow:inset 2px 2px 0 #b8c0f0,inset -2px -3px 0 #4f5790}
+.btn:disabled{color:#a0a0a0;background:#2c2c2c;box-shadow:none;border-color:#111;cursor:default}
+.btn.small{width:196px}.btn.tiny{width:96px}
+.row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;max-width:100%}
+input.tf,select.tf{width:400px;max-width:calc(100vw - 32px);height:40px;background:#000;border:2px solid #a0a0a0;color:#e0e0e0;font:inherit;font-size:24px;padding:0 8px;outline:none}
+input.tf:focus{border-color:#fff}
+.label{color:#a0a0a0;font-size:21px;text-align:left;width:400px;max-width:calc(100vw - 32px);margin-top:8px}
+.title{font-size:32px;margin-bottom:14px;text-shadow:2px 2px 0 #3f3f3f}
+.note{color:#a0a0a0;font-size:19px;max-width:520px;text-align:center;margin:6px 0}
+#logoWrap{position:relative;margin-bottom:34px;margin-top:-30px}
+#logo{display:block;max-width:92vw;image-rendering:pixelated}
+#edition{position:absolute;left:50%;transform:translateX(-50%);bottom:-18px;font-size:30px;color:#ddd;letter-spacing:4px;text-shadow:2px 2px 0 #222,-1px -1px 0 #555;white-space:nowrap}
+#splash{position:absolute;right:-10px;bottom:6px;color:#ff0;font-size:28px;text-shadow:2px 2px 0 #3f3f00;transform:rotate(-20deg);white-space:nowrap;animation:spl .5s infinite alternate ease-in-out;transform-origin:center}
+@keyframes spl{from{transform:rotate(-20deg) scale(1)}to{transform:rotate(-20deg) scale(1.08)}}
+.footer{position:fixed;bottom:4px;font-size:20px;color:#fff;text-shadow:2px 2px 0 #333;z-index:21}
+.footer.l{left:6px}.footer.r{right:6px}
+#menuShade{position:fixed;inset:0;z-index:5;background:radial-gradient(ellipse at center,rgba(0,0,0,0) 40%,rgba(0,0,0,.45));display:none;pointer-events:none}
+.list{width:620px;max-width:calc(100vw - 32px);height:52vh;background:rgba(0,0,0,.55);border-top:2px solid #000;border-bottom:2px solid #000;overflow-y:auto;padding:6px}
+.witem{display:flex;gap:10px;align-items:center;padding:6px;border:2px solid transparent;cursor:pointer}
+.witem.sel{border-color:#aaa;background:rgba(0,0,0,.6)}
+.witem .ic{width:64px;height:64px;background:#555;flex:none;image-rendering:pixelated;background-size:cover}
+.witem .nm{font-size:24px}.witem .ds{font-size:19px;color:#888}
+.opt{display:grid;grid-template-columns:repeat(2,minmax(0,310px));gap:8px;max-width:calc(100vw - 32px)}
+.slider{position:relative;width:100%;height:40px;background:#000;border:2px solid #555;font-size:22px;color:#e0e0e0;text-align:center;line-height:36px;text-shadow:2px 2px 0 #333;cursor:pointer}
+.slider input{position:absolute;inset:0;opacity:0;width:100%;cursor:pointer}
+.slider .knob{position:absolute;top:0;width:16px;height:36px;background:#7a7a7a;box-shadow:inset 2px 2px 0 #aaa,inset -2px -2px 0 #444;pointer-events:none}
+.slider span{position:relative;pointer-events:none}
+.opt .btn{width:100%}
+.keys{width:620px;max-width:calc(100vw - 32px);height:56vh;overflow-y:auto;background:rgba(0,0,0,.5);padding:8px}
+.krow{display:flex;justify-content:space-between;align-items:center;font-size:22px;padding:2px 6px}
+.krow .btn{width:180px;height:34px;font-size:20px;margin:1px}
+.krow .btn.wait{color:#ff0}
+/* HUD */
+#hud{position:fixed;inset:0;pointer-events:none;z-index:10;display:none}
+#crosshair{position:absolute;left:50%;top:50%;width:20px;height:20px;transform:translate(-50%,-50%);mix-blend-mode:difference}
+#crosshair:before,#crosshair:after{content:'';position:absolute;background:#ddd}
+#crosshair:before{left:9px;top:0;width:2px;height:20px}#crosshair:after{top:9px;left:0;height:2px;width:20px}
+#hotwrap{position:absolute;bottom:4px;left:50%;transform:translateX(-50%) scale(var(--ui));transform-origin:bottom center;display:flex;flex-direction:column;align-items:center}
+#stats{width:364px;display:flex;flex-direction:column;gap:1px;margin-bottom:2px}
+.srow{display:flex;justify-content:space-between;height:18px}
+.srow>div{display:flex;gap:0}.srow img{width:18px;height:18px;image-rendering:pixelated;margin-right:-1px}
+#food{flex-direction:row-reverse}#food img{transform:scaleX(-1)}
+#air{flex-direction:row-reverse}
+#xpbar{width:364px;height:10px;background:#000;border:1px solid #111;margin-bottom:3px;position:relative}
+#xpfill{height:100%;width:0;background:linear-gradient(#a6ff4d,#4fa816)}
+#xplvl{position:absolute;left:50%;top:-14px;transform:translateX(-50%);color:#80ff20;font-size:22px;text-shadow:1px 1px 0 #000,-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000}
+#hotbar{display:flex;background:rgba(0,0,0,.35);border:2px solid #111;box-shadow:inset 0 0 0 2px #777}
+.hslot{width:40px;height:40px;position:relative;border:2px solid rgba(140,140,140,.55)}
+.hslot.sel{border:3px solid #fff;margin:-1px;box-shadow:0 0 0 1px #000;z-index:2}
+.hslot img,.slot img{position:absolute;left:4px;top:4px;width:28px;height:28px;image-rendering:pixelated}
+.cnt{position:absolute;right:1px;bottom:-3px;font-size:22px;color:#fff;text-shadow:2px 2px 0 #3f3f3f}
+.dur{position:absolute;left:5px;right:5px;bottom:3px;height:3px;background:#000}.dur div{height:2px}
+#itemName{position:absolute;bottom:118px;left:50%;transform:translateX(-50%);font-size:24px;text-shadow:2px 2px 0 #333;transition:opacity .5s}
+.dbg{position:absolute;top:2px;font-size:19px;line-height:20px;display:none;white-space:pre}
+.dbg div{display:table;background:rgba(80,80,80,.55);padding:0 2px;color:#e0e0e0;margin-bottom:0}
+#debugL{left:2px}#debugR{right:2px;text-align:right}#debugR div{margin-left:auto}
+#chatLog{position:absolute;left:4px;bottom:72px;width:min(520px,70vw);max-height:46vh;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end}
+.cmsg{font-size:21px;background:rgba(0,0,0,.45);padding:0 4px;text-shadow:1px 1px 0 #333;transition:opacity 1s}
+#chatLog.open .cmsg{opacity:1!important}
+#chatIn{position:absolute;left:4px;right:4px;bottom:4px;height:30px;background:rgba(0,0,0,.6);border:none;color:#fff;font:inherit;font-size:22px;padding:0 6px;outline:none;display:none;pointer-events:auto}
+#chatIn.on{display:block}
+#titleWrap{position:absolute;top:28%;left:0;right:0;text-align:center;opacity:0;transition:opacity .6s}
+#bigTitle{font-size:72px;text-shadow:4px 4px 0 #333}#subTitle{font-size:32px;text-shadow:2px 2px 0 #333}
+#bossbar{position:absolute;top:8px;left:50%;transform:translateX(-50%);text-align:center;display:none;font-size:22px;text-shadow:2px 2px 0 #333}
+#bossbar .bar{width:364px;height:10px;background:#3a0a3a;border:1px solid #000;margin-top:2px}#bossbar .fill{height:100%;background:#e43be4}
+.fx{position:absolute;inset:0;opacity:0;pointer-events:none}
+#fxHurt{background:radial-gradient(ellipse at center,rgba(255,0,0,0) 40%,rgba(200,0,0,.8))}
+#fxPortal{background:radial-gradient(ellipse at center,rgba(150,40,255,.35),rgba(120,0,200,.85));transition:opacity .2s}
+#fxSleep{background:#000;transition:opacity 1.5s}
+#fxFire{background:linear-gradient(transparent 55%,rgba(255,120,0,.55));}
+#fxSpy{background:radial-gradient(circle at center,transparent 32%,#000 33%)}
+#fxPumpkin{background:radial-gradient(ellipse at center,transparent 30%,rgba(60,30,0,.9))}
+#nametags{position:absolute;inset:0}
+.ntag{position:absolute;transform:translate(-50%,-100%);background:rgba(0,0,0,.35);padding:0 4px;font-size:20px;white-space:nowrap}
+#plist{position:absolute;top:30px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.5);padding:6px 14px;font-size:22px;display:none;min-width:240px}
+#netInfo{position:absolute;top:4px;left:50%;transform:translateX(-50%);font-size:20px;color:#aaa;text-shadow:1px 1px 0 #000}
+/* Inventario */
+#sInv{z-index:30}
+.panel{background:#c6c6c6;border:3px solid #fff;border-right-color:#555;border-bottom-color:#555;outline:2px solid #000;padding:10px;color:#3f3f3f;position:relative;transform:scale(var(--ui));transform-origin:center}
+.ptitle{font-size:22px;color:#404040;margin:0 0 4px 2px}
+.grid{display:grid;gap:0}
+.slot{width:var(--sl);height:var(--sl);background:#8b8b8b;border:2px solid #373737;border-right-color:#fff;border-bottom-color:#fff;position:relative;cursor:pointer}
+.slot:hover{background:#a8a8a8}
+.slot.big{width:52px;height:52px}.slot.big img{left:10px;top:10px}
+.slot.armor:empty::after{content:'';position:absolute;inset:6px;opacity:.25;background:#555;clip-path:polygon(15% 0,85% 0,100% 30%,85% 100%,15% 100%,0 30%)}
+.slot.trash{background:#8b3a3a}.slot.trash::after{content:'✕';position:absolute;inset:0;text-align:center;line-height:34px;font-size:28px;color:#eee}
+.row2{display:flex;gap:10px;align-items:flex-start;margin-bottom:6px}
+.pview{width:100px;height:140px;background:#000;border:2px solid #373737;image-rendering:pixelated}
+.offc{display:flex;align-items:flex-end;height:140px}
+.craftbox{display:flex;flex-direction:column;margin-left:8px}
+.crow{display:flex;align-items:center;gap:10px}
+.farrow{width:44px;height:24px;position:relative;background:linear-gradient(90deg,#8b8b8b,#8b8b8b);clip-path:polygon(0 30%,60% 30%,60% 0,100% 50%,60% 100%,60% 70%,0 70%)}
+.farrow div{height:100%;width:0;background:#fff}
+.furn{display:flex;align-items:center;gap:14px;margin:4px 0 8px 40px}
+.fcol{display:flex;flex-direction:column;align-items:center;gap:2px}
+.flame{width:26px;height:26px;background:radial-gradient(ellipse at 50% 80%,#ffef6a,#ff7a00 45%,transparent 70%);opacity:.1}
+.sec.bot{margin-top:6px}
+.hint{font-size:17px;color:#555;max-width:340px}
+#cursorItem{position:fixed;width:36px;height:36px;pointer-events:none;z-index:40;display:none}
+#cursorItem img{width:32px;height:32px;image-rendering:pixelated}
+#tooltip{position:fixed;z-index:41;background:#100010;border:2px solid #2a0a5e;padding:3px 7px;color:#fff;font-size:21px;pointer-events:none;display:none;max-width:320px}
+.ctabs{display:flex;flex-wrap:wrap;gap:2px;margin-bottom:6px;max-width:400px}
+.ctab{font:inherit;font-size:18px;background:#8b8b8b;border:2px solid #555;color:#222;padding:0 6px;cursor:pointer}
+.ctab.on{background:#c6c6c6;border-color:#fff #555 #c6c6c6 #fff}
+.cscroll{height:250px;overflow-y:auto;margin-bottom:8px}
+.csearch{width:100%;height:30px;font-size:20px;margin-bottom:4px}
+.cbot{display:flex}
+#loadBar{width:400px;max-width:80vw;height:8px;background:#333;margin-top:12px}#loadFill{height:100%;width:0;background:#80ff20}
+#sDeath{background:rgba(120,0,0,.5)}#sDeath .title{font-size:64px}
+.codebox{font-size:42px;letter-spacing:6px;color:#ff0;background:#000;padding:4px 16px;border:2px solid #aaa;user-select:text;-webkit-user-select:text;margin:6px 0}
+.err{color:#f66;font-size:21px;max-width:500px;text-align:center}
+#sCredits{background:#000}
+#credText{max-width:640px;text-align:center;font-size:24px;line-height:1.4;color:#ddd}
+@media (max-width:720px){.opt{grid-template-columns:1fr}.btn.small{width:calc(50vw - 24px)}}
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="menuShade"></div>
+<div id="hud">
+  <div id="crosshair"></div>
+  <div id="nametags"></div>
+  <div id="bossbar"><div id="bossName">Ender Dragon</div><div class="bar"><div class="fill" id="bossFill"></div></div></div>
+  <div id="netInfo"></div>
+  <div id="titleWrap"><div id="bigTitle"></div><div id="subTitle"></div></div>
+  <div id="itemName"></div>
+  <div id="hotwrap">
+    <div id="stats"><div class="srow"><div id="armor"></div><div id="air"></div></div><div class="srow"><div id="hearts"></div><div id="food"></div></div></div>
+    <div id="xpbar"><div id="xpfill"></div><div id="xplvl"></div></div>
+    <div id="hotbar"></div>
+  </div>
+  <div id="debugL" class="dbg"></div><div id="debugR" class="dbg"></div>
+  <div id="chatLog"></div>
+  <input id="chatIn" maxlength="200" autocomplete="off">
+  <div id="plist"></div>
+  <div class="fx" id="fxPortal"></div><div class="fx" id="fxFire"></div><div class="fx" id="fxSpy"></div><div class="fx" id="fxHurt"></div><div class="fx" id="fxSleep"></div>
+</div>
+
+<div id="sMain" class="screen">
+  <div id="logoWrap"><canvas id="logo"></canvas><div id="edition">EDICIÓN WEB</div><div id="splash"></div></div>
+  <button class="btn" data-go="single">Un jugador</button>
+  <button class="btn" data-go="multi">Multijugador</button>
+  <button class="btn" data-go="realms" title="Próximamente">Reinos de Minecraft 2</button>
+  <div class="row" style="margin-top:12px"><button class="btn small" data-go="options">Opciones...</button><button class="btn small" data-go="quit">Salir del juego</button></div>
+</div>
+<div class="footer l" id="footL">Minecraft 2 v2.0 (HTML5 / WebGL2)</div>
+<div class="footer r" id="footR">Juego fan no oficial · No afiliado a Mojang ni Microsoft</div>
+
+<div id="sWorlds" class="screen dirt">
+  <div class="title">Seleccionar mundo</div>
+  <div class="list" id="worldList"></div>
+  <div class="row" style="margin-top:8px"><button class="btn small" id="wPlay" disabled>Jugar mundo seleccionado</button><button class="btn small" id="wNew">Crear nuevo mundo</button></div>
+  <div class="row"><button class="btn tiny" id="wExport" disabled>Exportar</button><button class="btn tiny" id="wImport">Importar</button><button class="btn tiny" id="wDelete" disabled>Borrar</button><button class="btn tiny" id="wBack">Cancelar</button></div>
+  <div class="note">Los mundos se guardan en tu navegador. Usa «Exportar» para descargar un archivo <b>.mc2world</b> con todas las construcciones, inventarios, cofres y entidades, e «Importar» para cargarlo.</div>
+  <input type="file" id="fileIn" accept=".mc2world,.json,.gz" style="display:none">
+</div>
+
+<div id="sCreate" class="screen dirt">
+  <div class="title">Crear nuevo mundo</div>
+  <div class="label">Nombre del mundo</div><input class="tf" id="cName" value="Nuevo mundo" maxlength="32">
+  <div class="label">Semilla para el generador (vacío = aleatoria)</div><input class="tf" id="cSeed" maxlength="40">
+  <div class="row" style="margin-top:12px"><button class="btn small" id="cMode">Modo: Supervivencia</button><button class="btn small" id="cDiff">Dificultad: Normal</button></div>
+  <div class="row"><button class="btn small" id="cCheats">Trucos: SÍ</button><button class="btn small" id="cStruct">Estructuras: SÍ</button></div>
+  <div class="row" style="margin-top:14px"><button class="btn small" id="cGo">Crear nuevo mundo</button><button class="btn small" id="cBack">Cancelar</button></div>
+</div>
+
+<div id="sMulti" class="screen dirt">
+  <div class="title">Multijugador</div>
+  <div class="label">Tu nombre</div><input class="tf" id="mName" maxlength="16">
+  <div class="label">Código del mundo (te lo da el anfitrión)</div><input class="tf" id="mCode" maxlength="6" style="text-transform:uppercase;letter-spacing:4px">
+  <div class="row" style="margin-top:12px"><button class="btn small" id="mJoin">Unirse (Internet)</button><button class="btn small" id="mJoinLan">Unirse (LAN local)</button></div>
+  <div class="row"><button class="btn small" id="mHost">Alojar un mundo</button><button class="btn small" id="mBack">Volver</button></div>
+  <div class="err" id="mErr"></div>
+  <div class="note">Para alojar: abre (o crea) un mundo y, en el menú de pausa (Esc), pulsa «Abrir a la red». Comparte el código de 6 letras. «Internet» usa conexiones P2P (WebRTC); «LAN local» conecta pestañas del mismo navegador.</div>
+</div>
+
+<div id="sOptions" class="screen dirt">
+  <div class="title">Opciones</div>
+  <div class="opt" id="optGrid"></div>
+  <div class="row" style="margin-top:12px"><button class="btn small" id="oControls">Controles...</button><button class="btn small" id="oDone">Hecho</button></div>
+</div>
+
+<div id="sControls" class="screen dirt">
+  <div class="title">Controles</div>
+  <div class="keys" id="keyList"></div>
+  <div class="row" style="margin-top:10px"><button class="btn small" id="kReset">Restablecer todo</button><button class="btn small" id="kDone">Hecho</button></div>
+</div>
+
+<div id="sPause" class="screen dim">
+  <div class="title">Menú del juego</div>
+  <button class="btn" id="pResume">Volver al juego</button>
+  <div class="row"><button class="btn small" id="pOptions">Opciones...</button><button class="btn small" id="pLan">Abrir a la red</button></div>
+  <div id="pCodeWrap" style="display:none;text-align:center"><div class="note">Código para tus amigos:</div><div class="codebox" id="pCode"></div></div>
+  <button class="btn" id="pExport">Guardar y descargar archivo del mundo</button>
+  <button class="btn" id="pQuit">Guardar y salir al título</button>
+</div>
+
+<div id="sDeath" class="screen">
+  <div class="title">¡Has muerto!</div>
+  <div class="note" id="deathMsg" style="color:#fff"></div>
+  <div class="note" id="deathScore" style="color:#ff0"></div>
+  <button class="btn" id="dRespawn">Reaparecer</button>
+  <button class="btn" id="dTitle">Pantalla de título</button>
+</div>
+
+<div id="sLoading" class="screen dirt">
+  <div class="title" id="loadTitle">Generando mundo</div>
+  <div class="note" id="loadMsg">Construyendo terreno...</div>
+  <div id="loadBar"><div id="loadFill"></div></div>
+</div>
+
+<div id="sInv" class="screen dim"><div id="invPanel" class="panel"></div></div>
+<div id="cursorItem"></div><div id="tooltip"></div>
+
+<div id="sQuit" class="screen dirt"><div class="title">¡Gracias por jugar a Minecraft 2!</div><div class="note">Puedes cerrar esta pestaña.</div><button class="btn" id="qBack">Volver al menú</button></div>
+<div id="sCredits" class="screen"><div id="credText"></div><button class="btn" id="crBack" style="margin-top:20px">Continuar</button></div>
+<script id="mc2shared">
