@@ -93,8 +93,17 @@ const M4 = {
 // ---------------------------------------------------------------- base64 / RLE
 function u8ToB64(u8) { let s = ''; const CH = 0x8000; for (let i = 0; i < u8.length; i += CH) s += String.fromCharCode.apply(null, u8.subarray(i, i + CH)); return btoa(s); }
 function b64ToU8(b) { const s = atob(b); const u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; }
-function rleEncode(arr) { const out = []; let i = 0; const n = arr.length; while (i < n) { const v = arr[i]; let c = 1; while (i + c < n && arr[i + c] === v && c < 255) c++; out.push(c, v); i += c; } return u8ToB64(new Uint8Array(out)); }
-function rleDecode(b64, len) { const d = b64ToU8(b64); const out = new Uint8Array(len); let p = 0; for (let i = 0; i < d.length; i += 2) { out.fill(d[i + 1], p, p + d[i]); p += d[i]; } return out; }
+function rleEncode(arr) {
+  const wide = arr instanceof Uint16Array; const out = []; let i = 0; const n = arr.length;
+  while (i < n) { const v = arr[i]; let c = 1; while (i + c < n && arr[i + c] === v && c < 255) c++; if (wide) out.push(c, v & 255, v >> 8); else out.push(c, v); i += c; }
+  return (wide ? 'W' : '') + u8ToB64(new Uint8Array(out));
+}
+function rleDecode(b64, len, wide) {
+  const W = b64[0] === 'W'; const d = b64ToU8(W ? b64.slice(1) : b64); const out = wide ? new Uint16Array(len) : new Uint8Array(len); let p = 0;
+  if (W) { for (let i = 0; i < d.length; i += 3) { out.fill(d[i + 1] | (d[i + 2] << 8), p, p + d[i]); p += d[i]; } }
+  else for (let i = 0; i < d.length; i += 2) { out.fill(d[i + 1], p, p + d[i]); p += d[i]; }
+  return out;
+}
 
 // ---------------------------------------------------------------- settings
 const DEFAULT_KEYS = {

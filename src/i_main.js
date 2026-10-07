@@ -19,7 +19,7 @@ function tone(t, dur, f0, f1, vol, type = 'sine', dest) { const c = AU.ctx; cons
 function playSound(type, x, y, z, vol = 1, extra) {
   if (!AU.ctx || SETTINGS.vol <= 0) return; const c = AU.ctx; const t = c.currentTime;
   if (G.player && x !== 0 && G.mode === 'game') { const d = Math.hypot(G.player.x - x, G.player.y - y, G.player.z - z); vol *= Math.max(0, 1 - d / (type === 'explode' ? 80 : 24)); if (vol <= 0.01) return; }
-  const m = extra !== undefined && typeof extra === 'number' && extra < 256 ? MAT_SND(extra) : 'stone';
+  const m = extra !== undefined && typeof extra === 'number' && extra < ITEM_BASE ? MAT_SND(extra) : 'stone';
   const mf = { stone: [1800, 2], wood: [700, 3], grass: [2600, 0.8], sand: [3800, 0.6], gravel: [1500, 0.9], glass: [4200, 5], wool: [500, 0.6] }[m];
   switch (type) {
     case 'dig': noiseHit(t, 0.08, mf[0], mf[1], 0.25 * vol); break;
@@ -84,7 +84,7 @@ function serializeWorld() {
   const players = Object.assign({}, G.playerStates || {}); players.__local = playerState(G.player); players.__local.name = G.player.name;
   if (G.net && G.net.role === 'host') for (const c of G.net.conns.values()) if (c.ent && c.ent.state) players[c.ent.name] = c.ent.state;
   const ents = []; for (const e of G.entities.values()) { if (e.proxy || e.remotePlayer || e.removed || e.dead) continue; if (e instanceof Mob && (e.persist || !e.def.hostile)) ents.push({ k: 'mob', ty: e.type, d: e.dim, x: e.x, y: e.y, z: e.z, hp: e.hp, c: e.color, p: e.persist, n: e.name }); else if (e.type === 'item') ents.push({ k: 'item', d: e.dim, x: e.x, y: e.y, z: e.z, s: e.stack }); }
-  return { format: 'minecraft2-world', version: 2, name: G.worldName, seed: G.seed, seedStr: G.seedStr, gameMode: G.defaultMode || G.gameMode, curMode: G.gameMode, difficulty: G.difficulty, cheats: G.cheats, time: G.time, rain: G.rain, rainTimer: G.rainTimer, worldSpawn: G.worldSpawn, dragonKilled: G.dragonKilled, endInit: G.endInit, gateway: G.gateway, keepInventory: G.keepInventory, containers: G.containers, spawned: [...G.spawned], dims, players, entities: ents, created: G.created || Date.now(), lastPlayed: Date.now(), structures: G.structures !== false };
+  return { format: 'minecraft2-world', version: 3, name: G.worldName, seed: G.seed, seedStr: G.seedStr, gameMode: G.defaultMode || G.gameMode, curMode: G.gameMode, difficulty: G.difficulty, cheats: G.cheats, time: G.time, rain: G.rain, rainTimer: G.rainTimer, worldSpawn: G.worldSpawn, dragonKilled: G.dragonKilled, endInit: G.endInit, gateway: G.gateway, keepInventory: G.keepInventory, containers: G.containers, spawned: [...G.spawned], dims, players, entities: ents, created: G.created || Date.now(), lastPlayed: Date.now(), structures: G.structures !== false };
 }
 function worldIcon() { try { const c = document.createElement('canvas'); c.width = 64; c.height = 64; c.getContext('2d').drawImage($('gl'), ($('gl').width - $('gl').height) / 2, 0, $('gl').height, $('gl').height, 0, 0, 64, 64); return c.toDataURL('image/jpeg', 0.7); } catch (e) { return null; } }
 async function saveWorld(silent) {
@@ -104,8 +104,17 @@ function resetGameState() {
   G.entities = new Map(); G.particles = []; G.containers = {}; G.spawned = new Set(); G.tick = 0; G.dragonKilled = false; G.endInit = false; G.gateway = null; G.creditsShown = false; G.playerStates = {}; G.rain = 0; G.rainLevel = 0; G.rainTimer = 12000 + Math.random() * 24000;
   TICK_TIMERS.length = 0; NETBATCH.length = 0; R.plights = []; UI.open = null; G.paused = false; G.wardenWarn = 0;
 }
+function migrateWorld(data) { // v2 -> v3: los objetos pasaron de id 256+ a 1000+
+  if (!data.version || data.version >= 3) return data;
+  const fix = s => { if (s && s.id >= 256) s.id += ITEM_BASE - 256; return s; };
+  const fixArr = a => { if (a) a.forEach(fix); };
+  for (const k in data.players || {}) { const p = data.players[k]; if (!p) continue; fixArr(p.inv); fixArr(p.armor); fixArr(p.ender); fix(p.off); }
+  for (const k in data.containers || {}) fixArr(data.containers[k].items);
+  for (const e of data.entities || []) if (e.s) fix(e.s);
+  data.version = 3; return data;
+}
 function startWorld(data, isNew, netWelcome) {
-  resetGameState(); audioInit();
+  data = migrateWorld(data); resetGameState(); audioInit();
   G.worldName = data.name; G.seed = data.seed >>> 0; G.seedStr = data.seedStr; G.difficulty = data.difficulty ?? 2; G.cheats = data.cheats !== false; G.time = data.time ?? 1000; G.keepInventory = !!data.keepInventory;
   G.defaultMode = data.gameMode || 'survival'; G.gameMode = data.curMode || data.gameMode || 'survival'; G.created = data.created || Date.now(); G.structures = data.structures !== false;
   G.worlds = { overworld: new World('overworld', G.seed), nether: new World('nether', G.seed), end: new World('end', G.seed) };
@@ -341,6 +350,7 @@ function emitterFX(w, dt) {
     for (let i = 0; i < E.length; i += 4) {
       const x = E[i], y = E[i + 1], z = E[i + 2], id = E[i + 3];
       if (id === ID.fire) { fireFX(w, x, y, z, dt); fires.push([x + 0.5, y + 0.6, z + 0.5]); }
+      else if (id === ID.campfire) { if (Math.random() < 5 * dt) flame(x + 0.3 + Math.random() * 0.4, y + 0.35, z + 0.3 + Math.random() * 0.4, { size: 0.35, vy: 0.8 }); if (Math.random() < 2.5 * dt) smoke(x + 0.5, y + 0.9, z + 0.5, { r: 0.22, g: 0.21, b: 0.2, a: 0.5, size: 0.5, grow: 0.5, life: 7, vy: 2.2, drag: 0.1, wind: true }); fires.push([x + 0.5, y + 0.5, z + 0.5]); }
       else if (id === ID.lava) { if (Math.random() < dt * 0.15) { P_({ x: x + Math.random(), y: y + 0.95, z: z + Math.random(), vx: (Math.random() - 0.5) * 2, vy: 4 + Math.random() * 3, vz: (Math.random() - 0.5) * 2, life: 1.5, size: 0.07, add: true, emis: 8, r: 1, g: 0.55, b: 0.15, layer: TEX.ember, grav: 16, collide: true }); } if (Math.random() < dt * 0.05) smoke(x + 0.5, y + 1, z + 0.5, { r: 0.12, g: 0.11, b: 0.1, size: 0.4, life: 2, a: 0.35 }); if (Math.random() < 0.02) fires.push([x + 0.5, y + 1, z + 0.5, 1]); }
       else if (id === ID.torch || id === ID.soul_torch || id === ID.redstone_torch) { const m = w.getMeta(x, y, z); const o = m >= 1 && m <= 4 ? [[0, 0.32], [-0.32, 0], [0, -0.32], [0.32, 0]][m - 1] : [0, 0]; const ty = y + 0.72 + (m ? 0.2 : 0); if (Math.random() < dt * 4) { const soul = id === ID.soul_torch, red = id === ID.redstone_torch; P_({ x: x + 0.5 + o[0], y: ty, z: z + 0.5 + o[1], vy: 0.25, life: 0.4, size: 0.12, grow: -0.2, add: true, emis: 3, r: soul ? 0.4 : 1, g: soul ? 0.9 : red ? 0.15 : 0.6, b: soul ? 1 : 0.2, layer: TEX['flame_' + (Math.random() * 3 | 0)] }); } if (Math.random() < dt * 0.8) smoke(x + 0.5 + o[0], ty + 0.1, z + 0.5 + o[1], { size: 0.12, grow: 0.15, life: 1.5, a: 0.3, vy: 0.5, r: 0.2, g: 0.2, b: 0.2 }); }
       else if (id === ID.end_rod && Math.random() < dt) P_({ x: x + 0.5, y: y + 0.5 + Math.random() * 0.5, z: z + 0.5, vx: (Math.random() - 0.5) * 0.4, vy: (Math.random() - 0.5) * 0.4, vz: (Math.random() - 0.5) * 0.4, life: 2, size: 0.08, add: true, emis: 3, layer: TEX.spark, r: 1, g: 1, b: 1 });
@@ -381,6 +391,7 @@ function drawOverlays(trans) {
     const h = G.hit; const lines = [];
     if (h && !h.ent && !hudHidden && G.gameMode !== 'spectator') {
       const d = REG[h.id]; let b = d.box ? d.box.map(v => v / 16) : d.render === 'snow' ? [0, 0, 0, 1, Math.max(1, w.getMeta(h.x, h.y, h.z)) / 8, 1] : [0, 0, 0, 1, 1, 1]; if (d.fenceH) b = [b[0], 0, b[2], b[3], 1, b[5]];
+      if (d.shape) { const bx = shapeBoxes(d, w.getMeta(h.x, h.y, h.z), (dx, dz) => w.get(h.x + dx, h.y, h.z + dz)); b = [1, 1, 1, 0, 0, 0]; for (const q of bx) for (let i = 0; i < 3; i++) { b[i] = Math.min(b[i], q[i] / 16); b[i + 3] = Math.max(b[i + 3], q[i + 3] / 16); } }
       if (d.id === ID.torch || d.id === ID.soul_torch) { const m = w.getMeta(h.x, h.y, h.z); if (m >= 1 && m <= 4) { const o = [[0, 0.32], [-0.32, 0], [0, -0.32], [0.32, 0]][m - 1]; b = [b[0] + o[0], b[1] + 0.2, b[2] + o[1], b[3] + o[0], b[4] + 0.2, b[5] + o[1]]; } }
       const e = 0.002; lines.push(...boxLines(h.x + b[0] - e, h.y + b[1] - e, h.z + b[2] - e, h.x + b[3] + e, h.y + b[4] + e, h.z + b[5] + e));
       if (MINE.target && MINE.prog > 0 && G.gameMode !== 'creative') { // grietas

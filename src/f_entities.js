@@ -4,10 +4,11 @@
 const G = { tick: 0, time: 1000, worlds: null, world: null, player: null, entities: new Map(), mode: 'menu', gameMode: 'survival', difficulty: 2, seed: 0, net: null, particles: [], rain: 0, rainLevel: 0, rainTimer: 12000, containers: {}, spawned: new Set(), dragonKilled: false, endInit: false, shake: 0, paused: false };
 let nextEid = 1;
 // ------------------------------------------------------------ colisiones
-function blockBoxes(id, meta, x, y, z, out) {
+function blockBoxes(id, meta, x, y, z, out, world) {
   if (id < 0) { out.push([x, y, z, x + 1, y + 1, z + 1]); return; }
   const d = REG[id]; if (!d || !d.solid) return;
   if (d.render === 'snow') { const h = (Math.max(1, meta) - 1) / 8; if (h > 0) out.push([x, y, z, x + 1, y + h, z + 1]); return; }
+  if (d.shape) { if (d.shape === 'gate' && (meta & 4)) return; const tall = d.shape === 'fence' || d.shape === 'wall' || d.shape === 'gate'; for (const b of shapeBoxes(d, meta, (dx, dz) => world ? world.get(x + dx, y, z + dz) : 0, true)) out.push([x + b[0] / 16, y + b[1] / 16, z + b[2] / 16, x + b[3] / 16, y + (tall ? 24 : b[4]) / 16, z + b[5] / 16]); return; }
   if (d.box) { const b = d.box; const top = d.fenceH ? d.fenceH : b[4] / 16; out.push([x + b[0] / 16, y + b[1] / 16, z + b[2] / 16, x + b[3] / 16, y + top, z + b[5] / 16]); return; }
   if (d.id === ID.cactus) { out.push([x + 1 / 16, y, z + 1 / 16, x + 15 / 16, y + 1, z + 15 / 16]); return; }
   out.push([x, y, z, x + 1, y + 1, z + 1]);
@@ -16,7 +17,7 @@ const _bx = [];
 function collect(world, x0, y0, z0, x1, y1, z1) {
   _bx.length = 0;
   for (let x = Math.floor(x0); x <= Math.floor(x1); x++) for (let z = Math.floor(z0); z <= Math.floor(z1); z++) for (let y = Math.floor(y0) - 1; y <= Math.floor(y1); y++) {
-    const id = world.get(x, y, z); if (id === 0) continue; blockBoxes(id, world.getMeta(x, y, z), x, y, z, _bx);
+    const id = world.get(x, y, z); if (id === 0) continue; blockBoxes(id, world.getMeta(x, y, z), x, y, z, _bx, world);
   }
   return _bx;
 }
@@ -406,7 +407,7 @@ function playerTick(p) {
   const fireB = entityInBlock(w, p, d => d.id === ID.fire); if (fireB && survival) { p.fire = Math.max(p.fire, 160); if (G.tick % 10 === 0) p.damage(1, 'fire'); }
   if (p.fire > 0) { p.fire--; if (p.inWater) p.fire = 0; if (survival && G.tick % 20 === 0 && !p.inLava) p.damage(1, 'fire'); if (Math.random() < 0.5) flame(p.x + (Math.random() - 0.5) * 0.6, p.y + Math.random() * 1.6, p.z + (Math.random() - 0.5) * 0.6, { size: 0.35 }); }
   const hurtB = entityInBlock(w, p, d => d.id === ID.cactus); const under = blockAt(w, p.x, p.y - 0.1, p.z);
-  if ((hurtB || (under === ID.magma_block && !p.sneaking)) && survival && G.tick % 10 === 0) p.damage(1, under === ID.magma_block ? 'fire' : 'cactus');
+  if ((hurtB || ((under === ID.magma_block || under === ID.campfire) && !p.sneaking) || entityInBlock(w, p, d => d.campfire)) && survival && G.tick % 10 === 0) p.damage(1, hurtB ? 'cactus' : 'fire');
   if (!survival) { p.food = 20; p.air = 300; return; }
   // hambre
   if (p.exh >= 4) { p.exh -= 4; if (p.sat > 0) p.sat = Math.max(0, p.sat - 1); else if (G.difficulty > 0) p.food = Math.max(0, p.food - 1); }

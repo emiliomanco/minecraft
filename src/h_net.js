@@ -139,7 +139,7 @@ function clientHandle(m, resolve, reject) {
     case 'kick': G.net = null; disconnected(m.m); break;
   }
 }
-function applyNetChunk(c) { const w = G.worlds[c.d]; if (!w) return; const ex = w.chunks.get(c.k); if (ex) { ex.blocks = rleDecode(c.b, 256 * w.H); ex.meta = rleDecode(c.m, 256 * w.H); ex.modified = true; ex.calcTop(); ex.dirty = true; ex.urgent = true; } else w.saved[c.k] = { b: c.b, m: c.m }; }
+function applyNetChunk(c) { const w = G.worlds[c.d]; if (!w) return; const ex = w.chunks.get(c.k); if (ex) { ex.blocks = rleDecode(c.b, 256 * w.H, true); ex.meta = rleDecode(c.m, 256 * w.H); ex.modified = true; ex.calcTop(); ex.dirty = true; ex.urgent = true; } else w.saved[c.k] = { b: c.b, m: c.m }; }
 function updateProxyPlayers(list) {
   const seen = new Set();
   for (const o of list) {

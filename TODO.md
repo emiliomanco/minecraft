@@ -6,8 +6,9 @@
 - [ ] Redstone funcional: repetidor, comparador, observador, pistones, dispensador, soltador, tolvas, placas/botones activos
 - [ ] Comercio con aldeanos
 - [ ] Cortapiedras, compostador, telar, cajas de shulker
-- [ ] Puertas, trampillas, escaleras (stairs), vallas conectadas, paneles de cristal
-- [ ] Agricultura completa: zanahorias, patatas, remolacha, calabaza/sandía en tallo
+- [x] Puertas, trampillas, escaleras (stairs), vallas conectadas, paneles de cristal
+- [x] Cultivos: trigo, zanahorias, patatas y remolacha con etapas de crecimiento
+- [ ] Calabaza/sandía en tallo
 - [ ] Pesca, botes, minecarts, montar caballos/cerdos
 - [ ] Ballesta (cargar), tridente lanzable con encantos, maza completa
 - [ ] Peces, calamares, ajolotes, abejas, lobos (domesticar), fantasmas (phantoms)
@@ -16,6 +17,6 @@
 - [ ] Faro (beacon), Wither, canalizador
 
 ## Rendimiento / técnica
-- [ ] Generación y mallado de chunks en Web Workers
+- [x] Generación y mallado de chunks en Web Workers
 - [ ] Oclusión de cuevas (cave culling) y LOD de chunks lejanos
 - [ ] Sincronización multijugador de contenedores concurrentes

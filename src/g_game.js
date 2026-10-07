@@ -81,6 +81,13 @@ shapeless('glow_ink_sac', 1, ['ink_sac', 'glowstone_dust']);
 shaped('sea_lantern', 1, ['SPS', 'PPP', 'SPS'], { S: 'prismarine_shard', P: 'prismarine_shard' }); shaped('prismarine', 1, ['SS', 'SS'], { S: 'prismarine_shard' });
 shaped('purpur_block', 4, ['CC', 'CC'], { C: 'chorus_fruit' }); shaped('purpur_pillar', 1, ['P', 'P'], { P: 'purpur_block' });
 shaped('netherite_upgrade', 2, ['DND', 'DSD', 'DDD'], { D: 'diamond', N: 'netherite_upgrade', S: 'netherrack' });
+const STAIR_MAT = { oak: 'oak_planks', spruce: 'spruce_planks', birch: 'birch_planks', dark_oak: 'dark_oak_planks', jungle: 'jungle_planks', acacia: 'acacia_planks', cherry: 'cherry_planks', cobblestone: 'cobblestone', stone_brick: 'stone_bricks', sandstone: 'sandstone', brick: 'bricks', nether_brick: 'nether_bricks', blackstone: 'polished_blackstone_bricks', deepslate_brick: 'deepslate_bricks', purpur: 'purpur_block', mud_brick: 'mud_bricks' };
+for (const k in STAIR_MAT) shaped(k + '_stairs', 4, ['X  ', 'XX ', 'XXX'], { X: STAIR_MAT[k] });
+for (const k of ['oak', 'spruce', 'birch', 'dark_oak']) { shaped(k + '_door', 3, ['XX', 'XX', 'XX'], { X: k + '_planks' }); shaped(k + '_trapdoor', 2, ['XXX', 'XXX'], { X: k + '_planks' }); }
+shaped('iron_door', 3, ['XX', 'XX', 'XX'], { X: 'iron_ingot' }); shaped('iron_trapdoor', 1, ['XX', 'XX'], { X: 'iron_ingot' });
+shaped('glass_pane', 16, ['GGG', 'GGG'], { G: 'glass' }); shaped('oak_fence_gate', 1, ['SPS', 'SPS'], { S: 'stick', P: 'oak_planks' });
+shaped('campfire', 1, [' S ', 'SCS', 'LLL'], { S: 'stick', C: '#coal', L: '#logs' });
+shapeless('beetroot_soup', 1, ['beetroot', 'beetroot', 'beetroot', 'beetroot', 'beetroot', 'beetroot']);
 function matchRecipe(grid, w) {
   // grid: array w*w de ids o null
   let minX = w, minY = w, maxX = -1, maxY = -1; const ids = [];
@@ -128,7 +135,8 @@ function raycast(w, ox, oy, oz, dx, dy, dz, maxD, liquids) {
     if (b > 0) {
       const d = REG[b];
       if (d.liquid ? (liquids && w.getMeta(x, y, z) === 0) : (d.render !== 'none')) {
-        if (d.box || d.render === 'snow') { const bb = d.render === 'snow' ? [0, 0, 0, 16, Math.max(1, w.getMeta(x, y, z)) * 2, 16] : d.box; const hit = rayBox(ox, oy, oz, dx, dy, dz, x + bb[0] / 16, y + bb[1] / 16, z + bb[2] / 16, x + bb[3] / 16, y + Math.min(16, bb[4]) / 16, z + bb[5] / 16); if (hit && hit.t <= maxD) return { x, y, z, id: b, n: hit.n, t: hit.t }; }
+        if (d.shape) { let best = null; for (const bb of shapeBoxes(d, w.getMeta(x, y, z), (dx, dz) => w.get(x + dx, y, z + dz))) { const hit = rayBox(ox, oy, oz, dx, dy, dz, x + bb[0] / 16, y + bb[1] / 16, z + bb[2] / 16, x + bb[3] / 16, y + bb[4] / 16, z + bb[5] / 16); if (hit && (!best || hit.t < best.t)) best = hit; } if (best && best.t <= maxD) return { x, y, z, id: b, n: best.n, t: best.t }; }
+        else if (d.box || d.render === 'snow') { const bb = d.render === 'snow' ? [0, 0, 0, 16, Math.max(1, w.getMeta(x, y, z)) * 2, 16] : d.box; const hit = rayBox(ox, oy, oz, dx, dy, dz, x + bb[0] / 16, y + bb[1] / 16, z + bb[2] / 16, x + bb[3] / 16, y + Math.min(16, bb[4]) / 16, z + bb[5] / 16); if (hit && hit.t <= maxD) return { x, y, z, id: b, n: hit.n, t: hit.t }; }
         else return { x, y, z, id: b, n: face, t };
       }
     }
@@ -174,7 +182,12 @@ function dropBlockItems(w, x, y, z, id, stack, explosion) {
   if (tool && tool.type === 'shears' && (d.leaves || id === ID.vine || id === ID.tall_grass || id === ID.cobweb)) { dropItem(w.dim, x + 0.5, y + 0.5, z + 0.5, { id: id === ID.cobweb ? ID.cobweb : id, c: 1 }); return; }
   if (d.leaves) { const r = Math.random(); const sap = ID[d.leaves + '_sapling']; if (r < 0.05 && sap) dropItem(w.dim, x + 0.5, y + 0.5, z + 0.5, { id: sap, c: 1 }); else if (r < 0.07) dropItem(w.dim, x + 0.5, y + 0.5, z + 0.5, { id: ID.stick, c: 1 + (Math.random() * 2 | 0) }); if ((d.leaves === 'oak' || d.leaves === 'dark_oak') && Math.random() < 0.005) dropItem(w.dim, x + 0.5, y + 0.5, z + 0.5, { id: ID.apple, c: 1 }); return; }
   if (id === ID.gravel && Math.random() < 0.1) { dropItem(w.dim, x + 0.5, y + 0.5, z + 0.5, { id: ID.flint, c: 1 }); return; }
-  if (id === ID.wheat) { const m = w.getMeta(x, y, z); dropItem(w.dim, x + 0.5, y + 0.5, z + 0.5, { id: ID.wheat_seeds, c: 1 + (m >= 7 ? (Math.random() * 3 | 0) : 0) }); if (m >= 7) dropItem(w.dim, x + 0.5, y + 0.5, z + 0.5, { id: ID.wheat, c: 1 }); return; }
+  if (d.crop) { const m = w.getMeta(x, y, z); const ripe = m >= 7; const D = (n, c) => dropItem(w.dim, x + 0.5, y + 0.5, z + 0.5, { id: ID[n], c });
+    if (d.crop === 'wheat') { D('wheat_seeds', 1 + (ripe ? (Math.random() * 3 | 0) : 0)); if (ripe) D('wheat', 1); }
+    else if (d.crop === 'carrots') D('carrot', ripe ? 2 + (Math.random() * 3 | 0) : 1);
+    else if (d.crop === 'potatoes') D('potato', ripe ? 2 + (Math.random() * 3 | 0) : 1);
+    else if (d.crop === 'beetroots') { D('beetroot_seeds', 1 + (ripe ? (Math.random() * 3 | 0) : 0)); if (ripe) D('beetroot', 1); }
+    return; }
   if (id === ID.snow) { const m = Math.max(1, w.getMeta(x, y, z)); if (tool && tool.type === 'shovel') dropItem(w.dim, x + 0.5, y + 0.5, z + 0.5, { id: ID.snowball, c: Math.max(1, m >> 1) }); return; }
   if (d.drop === null) return;
   if (d.dropChance && Math.random() > d.dropChance) return;
@@ -211,6 +224,7 @@ function onBlockSet(w, x, y, z, old, id, meta) {
     if (dy === 1 && needsSupport(d)) w.scheduleTick(x, y + 1, z, 1, 2);
     if (dy !== 0 || dx !== 0 || dz !== 0) if (b === ID.torch || b === ID.soul_torch || b === ID.redstone_torch || b === ID.ladder || b === ID.vine || b === ID.cave_vines || b === ID.weeping_vines || b === ID.pointed_dripstone) w.scheduleTick(x + dx, y + dy, z + dz, 1, 2);
   }
+  if (old > 0 && REG[old].shape === 'door' && id !== old) for (const dy of [1, -1]) if (w.get(x, y + dy, z) === old) w.set(x, y + dy, z, 0);
   // romper portal si se rompe el marco
   if ((old === ID.obsidian || old === ID.nether_portal) && id !== ID.nether_portal) for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) if (w.get(x + dx, y + dy, z + dz) === ID.nether_portal) w.scheduleTick(x + dx, y + dy, z + dz, 1, 3);
   // contenedores rotos sueltan contenido
@@ -334,7 +348,7 @@ function randomTicks(w, cx, cz) {
     const x = Math.random() * 16 | 0, z = Math.random() * 16 | 0, y = (s << 4) + (Math.random() * 16 | 0); if (y >= H) continue;
     const b = c.blocks[x | z << 4 | y << 8]; if (!b) continue; const wx = cx * 16 + x, wz = cz * 16 + z; const d = REG[b];
     if (d.sapling) { if (Math.random() < 0.15 && w.light(wx, y + 1, wz)[0] >= 9) growSapling(w, wx, y, wz, b); }
-    else if (b === ID.wheat) { const m = w.getMeta(wx, y, wz); if (m < 7 && Math.random() < 0.3) w.set(wx, y, wz, ID.wheat, m + 1); }
+    else if (d.crop) { const m = w.getMeta(wx, y, wz); if (m < 7 && Math.random() < 0.35 && w.light(wx, y, wz)[0] + w.light(wx, y, wz)[1] >= 9) w.set(wx, y, wz, b, m + 1); }
     else if (b === ID.grass_block) { const a = w.get(wx, y + 1, wz); if (a > 0 && T_FULL[a]) w.set(wx, y, wz, ID.dirt); else for (let i = 0; i < 2; i++) { const nx = wx + (Math.random() * 3 | 0) - 1, ny = y + (Math.random() * 3 | 0) - 1, nz = wz + (Math.random() * 3 | 0) - 1; if (w.get(nx, ny, nz) === ID.dirt && w.get(nx, ny + 1, nz) === 0 && w.light(nx, ny + 1, nz)[0] >= 9) w.set(nx, ny, nz, ID.grass_block); } }
     else if (d.leaves && !(w.getMeta(wx, y, wz) & 1)) { let found = false; for (let dx = -4; dx <= 4 && !found; dx++) for (let dy = -4; dy <= 4 && !found; dy++) for (let dz = -4; dz <= 4 && !found; dz++) { const o = w.get(wx + dx, y + dy, wz + dz); if (o > 0 && REG[o].log) found = true; } if (!found) { w.set(wx, y, wz, 0); dropBlockItems(w, wx, y, wz, b, null, true); } }
     else if ((b === ID.sugar_cane || b === ID.cactus) && w.get(wx, y + 1, wz) === 0 && Math.random() < 0.2) { let h = 1; while (w.get(wx, y - h, wz) === b) h++; if (h < 3) w.set(wx, y + 1, wz, b); }

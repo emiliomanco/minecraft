@@ -329,8 +329,17 @@ const M4 = {
 // ---------------------------------------------------------------- base64 / RLE
 function u8ToB64(u8) { let s = ''; const CH = 0x8000; for (let i = 0; i < u8.length; i += CH) s += String.fromCharCode.apply(null, u8.subarray(i, i + CH)); return btoa(s); }
 function b64ToU8(b) { const s = atob(b); const u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return u; }
-function rleEncode(arr) { const out = []; let i = 0; const n = arr.length; while (i < n) { const v = arr[i]; let c = 1; while (i + c < n && arr[i + c] === v && c < 255) c++; out.push(c, v); i += c; } return u8ToB64(new Uint8Array(out)); }
-function rleDecode(b64, len) { const d = b64ToU8(b64); const out = new Uint8Array(len); let p = 0; for (let i = 0; i < d.length; i += 2) { out.fill(d[i + 1], p, p + d[i]); p += d[i]; } return out; }
+function rleEncode(arr) {
+  const wide = arr instanceof Uint16Array; const out = []; let i = 0; const n = arr.length;
+  while (i < n) { const v = arr[i]; let c = 1; while (i + c < n && arr[i + c] === v && c < 255) c++; if (wide) out.push(c, v & 255, v >> 8); else out.push(c, v); i += c; }
+  return (wide ? 'W' : '') + u8ToB64(new Uint8Array(out));
+}
+function rleDecode(b64, len, wide) {
+  const W = b64[0] === 'W'; const d = b64ToU8(W ? b64.slice(1) : b64); const out = wide ? new Uint16Array(len) : new Uint8Array(len); let p = 0;
+  if (W) { for (let i = 0; i < d.length; i += 3) { out.fill(d[i + 1] | (d[i + 2] << 8), p, p + d[i]); p += d[i]; } }
+  else for (let i = 0; i < d.length; i += 2) { out.fill(d[i + 1], p, p + d[i]); p += d[i]; }
+  return out;
+}
 
 // ---------------------------------------------------------------- settings
 const DEFAULT_KEYS = {
@@ -363,7 +372,7 @@ const TEXNAMES = [];     // layer -> name
 const TEX = {};          // name -> layer
 function texLayer(name) { if (TEX[name] === undefined) { TEX[name] = TEXNAMES.length; TEXNAMES.push(name); } return TEX[name]; }
 
-let _nextBlock = 0, _nextItem = 256;
+let _nextBlock = 0, _nextItem = 1000; const ITEM_BASE = 1000;
 // render: cube | cross | liquid | box | snow | none
 function defB(name, disp, o = {}) {
   const id = _nextBlock++;
@@ -378,7 +387,7 @@ function defB(name, disp, o = {}) {
   if (typeof t === 'string') t = { top: t, bottom: t, side: t };
   t = Object.assign({}, t); if (!t.bottom) t.bottom = t.top; if (!t.front) t.front = t.side; if (!t.back) t.back = t.side;
   d.faces = [texLayer(t.side), texLayer(t.side), texLayer(t.top), texLayer(t.bottom), texLayer(t.back), texLayer(t.front)];
-  d.texNames = t;
+  d.texNames = t; if (o.texTop) d.layerTop = texLayer(o.texTop);
   if (d.blast === null) d.blast = d.hard < 0 ? 3600000 : d.hard * 2.5;
   REG[id] = d; ID[name] = id; return id;
 }
@@ -469,7 +478,10 @@ defB('jack_o_lantern', 'Calabaza iluminada', { tex: { top: 'pumpkin_top', side: 
 defB('melon', 'Sandía', { tex: { top: 'melon_top', side: 'melon_side' }, hard: 1, tool: 'axe', drop: 'melon_slice', dropN: 5 });
 defB('hay_block', 'Fardo de heno', { tex: { top: 'hay_top', side: 'hay_side' }, hard: 0.5, flammable: true });
 defB('farmland', 'Tierra de cultivo', { render: 'box', box: [0, 0, 0, 16, 15, 16], tex: { top: 'farmland', side: 'dirt' }, hard: 0.6, tool: 'shovel', drop: 'dirt' });
-defB('wheat', 'Trigo', Object.assign({}, PL, { drop: 'wheat', dropN: 1 }));
+defB('wheat', 'Trigo', Object.assign({}, PL, { drop: 'wheat', dropN: 1, crop: 'wheat' }));
+defB('carrots', 'Zanahorias', Object.assign({}, PL, { drop: 'carrot', crop: 'carrots', tex: 'carrots_3' }));
+defB('potatoes', 'Patatas', Object.assign({}, PL, { drop: 'potato', crop: 'potatoes', tex: 'potatoes_3' }));
+defB('beetroots', 'Remolachas', Object.assign({}, PL, { drop: 'beetroot', crop: 'beetroots', tex: 'beetroots_3' }));
 defB('dirt_path', 'Camino de tierra', { render: 'box', box: [0, 0, 0, 16, 15, 16], tex: { top: 'path_top', side: 'path_side', bottom: 'dirt' }, hard: 0.65, tool: 'shovel', drop: 'dirt' });
 defB('obsidian', 'Obsidiana', { hard: 50, tool: 'pickaxe', lvl: 4, blast: 3600 });
 defB('crying_obsidian', 'Obsidiana llorosa', { hard: 50, tool: 'pickaxe', lvl: 4, light: 10, blast: 3600 });
@@ -488,9 +500,9 @@ defB('sugar_cane', 'Caña de azúcar', Object.assign({}, PL, { drop: 'sugar_cane
 defB('lily_pad', 'Nenúfar', { render: 'box', box: [0, 0, 0, 16, 1, 16], hard: 0, trans: 1, tint: 2, drop: 'lily_pad' });
 defB('vine', 'Enredadera', Object.assign({}, PL, { tint: 2, replace: true, drop: null, climb: true }));
 defB('ladder', 'Escalera de mano', Object.assign({}, PL, { climb: true, drop: 'ladder', hard: 0.4 }));
-defB('iron_bars', 'Barrotes de hierro', { trans: 1, hard: 5, tool: 'pickaxe', cullSelf: true });
-defB('oak_fence', 'Valla de roble', { render: 'box', box: [6, 0, 6, 10, 16, 10], tex: 'oak_planks', hard: 2, tool: 'axe', fenceH: 1.5 });
-defB('dark_oak_fence', 'Valla de roble oscuro', { render: 'box', box: [6, 0, 6, 10, 16, 10], tex: 'dark_oak_planks', hard: 2, tool: 'axe', fenceH: 1.5 });
+defB('iron_bars', 'Barrotes de hierro', { render: 'shape', shape: 'pane', trans: 1, hard: 5, tool: 'pickaxe', solid: true });
+defB('oak_fence', 'Valla de roble', { render: 'shape', shape: 'fence', solid: true, tex: 'oak_planks', hard: 2, tool: 'axe', fenceH: 1.5 });
+defB('dark_oak_fence', 'Valla de roble oscuro', { render: 'shape', shape: 'fence', solid: true, tex: 'dark_oak_planks', hard: 2, tool: 'axe', fenceH: 1.5 });
 defB('rail', 'Raíl', { render: 'box', box: [0, 0, 0, 16, 1, 16], trans: 1, solid: false, hard: 0.7 });
 // minerales en bloque
 for (const [m, dn] of [['iron', 'hierro'], ['gold', 'oro'], ['diamond', 'diamante'], ['emerald', 'esmeralda'], ['netherite', 'netherita'], ['coal', 'carbón'], ['lapis', 'lapislázuli'], ['redstone', 'redstone'], ['copper', 'cobre']])
@@ -519,7 +531,7 @@ defB('dark_prismarine', 'Prismarina oscura', { hard: 1.5, tool: 'pickaxe', lvl: 
 defB('sea_lantern', 'Linterna marina', { hard: 0.3, light: 15, emissive: true });
 defB('kelp', 'Algas', Object.assign({}, PL, { wave: 2, inWater: true }));
 defB('seagrass', 'Pasto marino', Object.assign({}, PL, { wave: 2, inWater: true, replace: true }));
-defB('cobblestone_wall', 'Muro de roca', { render: 'box', box: [4, 0, 4, 12, 16, 12], tex: 'cobblestone', hard: 2, tool: 'pickaxe', lvl: 1, fenceH: 1.5 });
+defB('cobblestone_wall', 'Muro de roca', { render: 'shape', shape: 'wall', solid: true, tex: 'cobblestone', hard: 2, tool: 'pickaxe', lvl: 1, fenceH: 1.5 });
 // nether
 defB('netherrack', 'Netherrack', { hard: 0.4, tool: 'pickaxe', lvl: 1, infiniteFire: true });
 defB('soul_sand', 'Arena de almas', { hard: 0.5, tool: 'shovel', slowWalk: true });
@@ -527,7 +539,7 @@ defB('soul_soil', 'Tierra de almas', { hard: 0.5, tool: 'shovel' });
 defB('glowstone', 'Piedra luminosa', { hard: 0.3, light: 15, drop: 'glowstone_dust', dropN: 3, emissive: true });
 defB('nether_bricks', 'Ladrillos del Nether', { hard: 2, tool: 'pickaxe', lvl: 1 });
 defB('red_nether_bricks', 'Ladrillos del Nether rojos', { hard: 2, tool: 'pickaxe', lvl: 1 });
-defB('nether_brick_fence', 'Valla de ladrillo del Nether', { render: 'box', box: [6, 0, 6, 10, 16, 10], tex: 'nether_bricks', hard: 2, tool: 'pickaxe', lvl: 1, fenceH: 1.5 });
+defB('nether_brick_fence', 'Valla de ladrillo del Nether', { render: 'shape', shape: 'fence', solid: true, tex: 'nether_bricks', hard: 2, tool: 'pickaxe', lvl: 1, fenceH: 1.5 });
 defB('nether_quartz_ore', 'Mena de cuarzo del Nether', { tex: 'nether_quartz_ore', hard: 3, tool: 'pickaxe', lvl: 1, drop: 'quartz' });
 defB('nether_gold_ore', 'Mena de oro del Nether', { hard: 3, tool: 'pickaxe', lvl: 1, drop: 'gold_nugget', dropN: 4 });
 defB('ancient_debris', 'Escombros ancestrales', { tex: { top: 'ancient_debris_top', side: 'ancient_debris_side' }, hard: 30, tool: 'pickaxe', lvl: 4, blast: 3600 });
@@ -597,8 +609,22 @@ defB('mud_bricks', 'Ladrillos de barro', { hard: 1.5, tool: 'pickaxe' });
 defB('honeycomb_block', 'Bloque de panal', { hard: 0.6 });
 defB('bee_nest', 'Colmena', { tex: { top: 'bee_nest_top', side: 'bee_nest_side', front: 'bee_nest_front' }, hard: 0.3, tool: 'axe', orient: true });
 defB('mushroom_stem', 'Tallo de champiñón', { hard: 0.2, tool: 'axe', drop: null });
+
+// ---- construcción: escaleras, puertas, trampillas, paneles
+for (const [n, dn, tex, tool] of [['oak', 'roble', 'oak_planks', 'axe'], ['spruce', 'abeto', 'spruce_planks', 'axe'], ['birch', 'abedul', 'birch_planks', 'axe'], ['dark_oak', 'roble oscuro', 'dark_oak_planks', 'axe'], ['jungle', 'jungla', 'jungle_planks', 'axe'], ['acacia', 'acacia', 'acacia_planks', 'axe'], ['cherry', 'cerezo', 'cherry_planks', 'axe'],
+  ['cobblestone', 'roca', 'cobblestone', 'pickaxe'], ['stone_brick', 'ladrillos de piedra', 'stone_bricks', 'pickaxe'], ['sandstone', 'arenisca', 'sandstone_top', 'pickaxe'], ['brick', 'ladrillos', 'bricks', 'pickaxe'], ['nether_brick', 'ladrillos del Nether', 'nether_bricks', 'pickaxe'],
+  ['blackstone', 'piedra negra', 'polished_blackstone_bricks', 'pickaxe'], ['deepslate_brick', 'ladrillos de pizarra', 'deepslate_bricks', 'pickaxe'], ['purpur', 'púrpur', 'purpur_block', 'pickaxe'], ['mud_brick', 'ladrillos de barro', 'mud_bricks', 'pickaxe']])
+  defB(n + '_stairs', 'Escaleras de ' + dn, { render: 'shape', shape: 'stairs', solid: true, tex, hard: 2, tool, lvl: tool === 'pickaxe' ? 1 : 0, flammable: tool === 'axe' });
+for (const [n, dn, tool] of [['oak', 'roble', 'axe'], ['spruce', 'abeto', 'axe'], ['birch', 'abedul', 'axe'], ['dark_oak', 'roble oscuro', 'axe'], ['iron', 'hierro', 'pickaxe']]) {
+  defB(n + '_door', 'Puerta de ' + dn, { render: 'shape', shape: 'door', solid: true, trans: 1, tex: n + '_door_bottom', texTop: n + '_door_top', hard: n === 'iron' ? 5 : 3, tool, lvl: n === 'iron' ? 1 : 0, drop: n + '_door' });
+  defB(n + '_trapdoor', 'Trampilla de ' + dn, { render: 'shape', shape: 'trapdoor', solid: true, trans: 1, tex: n + '_trapdoor', hard: n === 'iron' ? 5 : 3, tool, lvl: n === 'iron' ? 1 : 0 });
+}
+defB('glass_pane', 'Panel de cristal', { render: 'shape', shape: 'pane', trans: 1, tex: 'glass', solid: true, hard: 0.3, drop: null });
+defB('oak_fence_gate', 'Puerta de valla de roble', { render: 'shape', shape: 'gate', solid: true, tex: 'oak_planks', hard: 2, tool: 'axe' });
+defB('campfire', 'Fogata', { render: 'box', box: [0, 0, 0, 16, 7, 16], tex: { top: 'campfire_top', side: 'campfire_side', bottom: 'oak_log' }, light: 15, hard: 2, tool: 'axe', drop: 'charcoal', dropN: 2, hurt: 1, campfire: true });
+for (const d of REG) if (d && d.crop) d.stages = [0, 1, 2, 3].map(i => texLayer(d.crop + '_' + i));
 const BLOCK_COUNT = _nextBlock;
-if (BLOCK_COUNT > 255) console.error('Demasiados bloques', BLOCK_COUNT);
+if (BLOCK_COUNT >= ITEM_BASE) console.error('Demasiados bloques', BLOCK_COUNT);
 
 // -------------------------------------------------------------------- OBJETOS
 defI('stick', 'Palo', { fuel: 100 });
@@ -637,7 +663,7 @@ defI('prismarine_shard', 'Fragmento de prismarina'); defI('shulker_shell', 'Capa
 defI('ink_sac', 'Saco de tinta'); defI('glow_ink_sac', 'Saco de tinta luminosa'); defI('phantom_membrane', 'Membrana de phantom'); defI('nether_star', 'Estrella del Nether'); defI('dragon_breath', 'Aliento de dragón');
 defI('nether_wart', 'Verruga del Nether'); defI('amethyst_shard', 'Fragmento de amatista'); defI('honeycomb', 'Panal');
 defI('firework_rocket', 'Cohete de fuegos artificiales', { rocket: true }); defI('book', 'Libro'); defI('glass_bottle', 'Frasco de cristal', { stack: 16 });
-defI('carrot', 'Zanahoria', { food: [3, 3.6] }); defI('potato', 'Patata', { food: [1, 0.6] }); defI('baked_potato', 'Patata asada', { food: [5, 6] }); defI('golden_carrot', 'Zanahoria dorada', { food: [6, 14.4] });
+defI('carrot', 'Zanahoria', { food: [3, 3.6], places: 'carrots' }); defI('potato', 'Patata', { food: [1, 0.6], places: 'potatoes' }); defI('beetroot', 'Remolacha', { food: [1, 1.2] }); defI('beetroot_seeds', 'Semillas de remolacha', { places: 'beetroots' }); defI('beetroot_soup', 'Sopa de remolacha', { food: [6, 7.2], stack: 1 }); defI('baked_potato', 'Patata asada', { food: [5, 6] }); defI('golden_carrot', 'Zanahoria dorada', { food: [6, 14.4] });
 defI('salmon', 'Salmón crudo', { food: [2, 0.4] }); defI('cooked_salmon', 'Salmón cocinado', { food: [6, 9.6] }); defI('sweet_berries', 'Bayas dulces', { food: [2, 0.4] });
 defI('cookie', 'Galleta', { food: [2, 0.4] }); defI('pumpkin_pie', 'Tarta de calabaza', { food: [8, 4.8] }); defI('mushroom_stew', 'Estofado de champiñones', { food: [6, 7.2], stack: 1 });
 defI('milk_bucket', 'Cubo de leche', { stack: 1, milk: true }); defI('sugar', 'Azúcar');
@@ -1049,6 +1075,18 @@ Object.assign(TEXGEN, {
   bee_nest_side: p => { p.noise([200, 160, 80], 10); p.rect(0, 5, 15, 5, [160, 120, 50]); p.rect(0, 10, 15, 10, [160, 120, 50]); }, bee_nest_top: p => { p.noise([210, 170, 90], 8); p.border([160, 120, 50]); }, bee_nest_front: p => { p.copy('bee_nest_side'); p.rect(6, 7, 9, 9, [40, 30, 20]); },
   mushroom_stem: p => { p.noise([220, 215, 200], 6); },
 });
+
+const doorTex = (p, c, top, iron) => { if (iron) { p.noise([200, 200, 205], 5); p.border([120, 120, 125]); p.rect(3, 2, 12, 13, [175, 175, 180], 4); if (top) { p.rect(4, 3, 11, 9, [0, 0, 0, 0]); for (let x = 4; x < 12; x += 2) p.rect(x, 3, x, 9, [150, 150, 155]); } return; } planks(p, c); p.border(c.map(v => v * 0.6)); if (top) { p.rect(3, 3, 6, 8, [0, 0, 0, 0]); p.rect(9, 3, 12, 8, [0, 0, 0, 0]); } else { p.rect(12, 7, 13, 9, [60, 60, 60]); p.rect(3, 3, 12, 12, c.map(v => v * 0.85)); } };
+for (const [n, c] of [['oak', [162, 130, 78]], ['spruce', [115, 85, 50]], ['birch', [196, 179, 123]], ['dark_oak', [66, 43, 20]], ['iron', [200, 200, 205]]]) {
+  TEXGEN[n + '_door_top'] = p => doorTex(p, c, true, n === 'iron'); TEXGEN[n + '_door_bottom'] = p => doorTex(p, c, false, n === 'iron');
+  TEXGEN[n + '_trapdoor'] = p => { if (n === 'iron') { p.noise(c, 5); p.border([120, 120, 125]); for (let y = 3; y < 13; y += 4) p.rect(3, y, 12, y + 1, [0, 0, 0, 0]); } else { planks(p, c); p.border(c.map(v => v * 0.6)); p.rect(3, 3, 6, 6, [0, 0, 0, 0]); p.rect(9, 3, 12, 6, [0, 0, 0, 0]); p.rect(3, 9, 6, 12, [0, 0, 0, 0]); p.rect(9, 9, 12, 12, [0, 0, 0, 0]); } };
+}
+const cropTex = (p, stage, kind) => { p.clear(); const h = 4 + stage * 3.5; const col = kind === 'wheat' ? (stage >= 3 ? [200, 175, 70] : [80 + stage * 20, 150, 50]) : [70, 140, 50];
+  for (const x of [2, 5, 9, 12]) for (let y = 15; y > 15 - h; y--) { p.set(x + (y % 3 === 0 ? 1 : 0), y, col.map(v => v + (p.r() - 0.5) * 30)); if (kind !== 'wheat' && y < 15 - h / 2 && p.r() < 0.5) p.set(x + 1, y, [60, 130, 45]); }
+  if (stage === 3) { const t = { carrots: [240, 130, 30], potatoes: [200, 160, 90], beetroots: [180, 30, 50] }[kind]; if (t) for (const x of [2, 5, 9, 12]) p.rect(x, 14, x + 1, 15, t); if (kind === 'wheat') for (const x of [2, 5, 9, 12]) p.rect(x - 1, 15 - h, x + 1, 17 - h, [220, 195, 90]); } };
+for (const k of ['wheat', 'carrots', 'potatoes', 'beetroots']) for (let i = 0; i < 4; i++) TEXGEN[k + '_' + i] = p => cropTex(p, i, k);
+TEXGEN.campfire_top = p => { p.clear(); for (const y of [3, 8, 12]) p.rect(1, y, 14, y + 1, [100, 75, 45]); p.rect(5, 5, 10, 10, [255, 160, 40]); };
+TEXGEN.campfire_side = p => { p.clear(); p.rect(0, 11, 15, 15, [100, 75, 45]); for (let x = 3; x < 13; x++) { const h = 3 + p.r() * 7; for (let y = 11 - h; y < 11; y++) p.set(x, y | 0, [255, 120 + p.r() * 100, 30]); } };
 // --------------------------------------------------- iconos de objetos (16x16)
 function itemTexAuto(p, name) {
   const d = REG[ID[name]]; p.clear();
@@ -1108,6 +1146,7 @@ function itemTexAuto(p, name) {
     crossbow: () => { for (let i = 0; i < 10; i++) p.set(3 + i, 12 - i, [110, 80, 45]); for (let i = 0; i < 8; i++) { p.set(4 + i, 3 + (i >> 2), [80, 80, 85]); p.set(12 - (i >> 2), 4 + i, [80, 80, 85]); } outline(p); },
     mace: () => { for (let i = 0; i < 9; i++) p.set(3 + i, 12 - i, [120, 100, 80]); p.rect(9, 2, 13, 6, [90, 90, 100]); outline(p); }, heavy_core: () => blob([70, 70, 80], 5),
     brush: () => { for (let i = 0; i < 7; i++) p.set(3 + i, 12 - i, [150, 110, 60]); p.rect(9, 2, 13, 6, [220, 200, 160]); outline(p); }, fishing_rod: () => { for (let i = 0; i < 12; i++) p.set(2 + i, 13 - i, [120, 90, 50]); for (let y = 2; y < 14; y++) p.set(13, y, [230, 230, 230]); },
+    beetroot: () => { blob([170, 30, 50], 4.5); p.rect(7, 2, 8, 4, [60, 140, 40]); }, beetroot_seeds: () => { for (let i = 0; i < 6; i++) p.set(4 + ((p.r() * 8) | 0), 6 + ((p.r() * 6) | 0), [150, 110, 60]); }, beetroot_soup: () => { for (let y = 7; y < 13; y++) for (let x = 3; x < 13; x++) if (Math.hypot((x - 7.5) / 5, (y - 7) / 5.5) < 1) p.set(x, y, [140, 100, 60]); p.rect(4, 7, 11, 8, [170, 30, 50]); outline(p); },
     saddle: () => blob([120, 70, 40], 5), name_tag: () => { p.rect(3, 5, 12, 10, [220, 210, 180]); outline(p); }, netherite_upgrade: () => { p.rect(3, 2, 12, 13, [60, 50, 50]); p.rect(5, 4, 10, 11, [110, 90, 85]); outline(p); },
   };
   if (M[name]) M[name](); else blob([200, 0, 200], 5);
@@ -1214,7 +1253,7 @@ BI.small_end_islands = defBiome('small_end_islands');
 class Chunk {
   constructor(world, cx, cz) {
     this.world = world; this.cx = cx; this.cz = cz; this.H = world.H;
-    this.blocks = new Uint8Array(256 * this.H); this.meta = new Uint8Array(256 * this.H);
+    this.blocks = new Uint16Array(256 * this.H); this.meta = new Uint8Array(256 * this.H);
     this.light = null; this.biomes = new Uint8Array(256); this.loot = {}; this.spawners = {};
     this.dirty = true; this.modified = false; this.mesh = null; this.top = 0; this.spawns = null;
   }
@@ -1239,7 +1278,7 @@ class World {
   adopt(c) {
     const k = ckey(c.cx, c.cz); const ex = this.chunks.get(k); if (ex) return ex;
     const sv = this.saved[k];
-    if (sv) { c.blocks = rleDecode(sv.b, 256 * this.H); c.meta = rleDecode(sv.m, 256 * this.H); c.modified = true; c.loot = sv.loot || {}; c.spawners = sv.sp || c.spawners; delete this.saved[k]; c.calcTop(); }
+    if (sv) { c.blocks = rleDecode(sv.b, 256 * this.H, true); c.meta = rleDecode(sv.m, 256 * this.H); c.modified = true; c.loot = sv.loot || {}; c.spawners = sv.sp || c.spawners; delete this.saved[k]; c.calcTop(); }
     this.chunks.set(k, c);
     if (typeof onChunkGenerated === 'function') onChunkGenerated(this, c);
     return c;
@@ -1813,7 +1852,7 @@ function villageHouse(S, x, z, M, r, door, n, style, half) {
 function villageFarm(S, x, z, r) {
   const y = S.colH(x, z); for (let dx = -3; dx <= 3; dx++) for (let dz = -2; dz <= 2; dz++) {
     const edge = Math.abs(dx) === 3 || Math.abs(dz) === 2; if (edge) { S.set(x + dx, y, z + dz, ID.oak_log); S.set(x + dx, y + 1, z + dz, 0); }
-    else if (dz === 0) S.set(x + dx, y, z + dz, ID.water); else { S.set(x + dx, y, z + dz, ID.farmland); S.set(x + dx, y + 1, z + dz, ID.wheat, 4 + ((r() * 4) | 0)); }
+    else if (dz === 0) S.set(x + dx, y, z + dz, ID.water); else { S.set(x + dx, y, z + dz, ID.farmland); S.set(x + dx, y + 1, z + dz, [ID.wheat, ID.wheat, ID.carrots, ID.potatoes, ID.beetroots][(Math.abs(x + z) >> 2) % 5], 4 + ((r() * 4) | 0)); }
   }
 }
 // 2. FORTALEZA (STRONGHOLD) ---------------------------------------
@@ -2166,22 +2205,22 @@ function rollLoot(table, seed) {
 // ============================================================================
 const F_CUT = 8, F_LEAF = 16, F_PLANT = 32, F_WATER = 64, F_LAVA = 128, F_EMIS = 256, F_PORTAL = 512, F_ENDP = 1024, F_SNOW = 2048, F_FIRE = 4096, F_GLASS = 8192, F_FOLI = 16384;
 // tablas rápidas
-const T_OPQ = new Uint8Array(256), T_ATT = new Uint8Array(256), T_EMIT = new Uint8Array(256), T_SKYPASS = new Uint8Array(256), T_FULL = new Uint8Array(256);
+const T_OPQ = new Uint8Array(65536), T_ATT = new Uint8Array(65536), T_EMIT = new Uint8Array(65536), T_SKYPASS = new Uint8Array(65536), T_FULL = new Uint8Array(65536); const B_PAD = 65535;
 function buildTables() {
-  for (let i = 0; i < 256; i++) {
+  for (let i = 0; i < ITEM_BASE; i++) {
     const d = REG[i]; if (!d) { T_OPQ[i] = 1; continue; }
     T_OPQ[i] = d.opaque && d.render === 'cube' ? 1 : 0; T_FULL[i] = T_OPQ[i];
     T_ATT[i] = d.liquid === 1 ? 1 : d.liquid === 2 ? 14 : d.att || 0; T_EMIT[i] = d.light || 0;
     T_SKYPASS[i] = (!T_OPQ[i] && !T_ATT[i]) ? 1 : 0;
   }
-  T_OPQ[255] = 1; T_FULL[255] = 1;
+  T_OPQ[B_PAD] = 1; T_FULL[B_PAD] = 1;
 }
 const LP = 14, LR = 16 + LP * 2 + 2, LRR = LR * LR;
 let regB = null, regM = null, regS = null, regL = null, regH = 0, lq = new Int32Array(1 << 21);
 function buildRegion(world, ch) {
   const H = world.H; const size = LRR * (H + 2);
-  if (!regB || regH !== H) { regB = new Uint8Array(size); regM = new Uint8Array(size); regS = new Uint8Array(size); regL = new Uint8Array(size); regH = H; }
-  regB.fill(255); regM.fill(0);
+  if (!regB || regH !== H) { regB = new Uint16Array(size); regM = new Uint8Array(size); regS = new Uint8Array(size); regL = new Uint8Array(size); regH = H; }
+  regB.fill(B_PAD); regM.fill(0);
   const bx = ch.cx * 16 - LP - 1, bz = ch.cz * 16 - LP - 1;
   for (let lz = 1; lz < LR - 1; lz++) {
     const wz = bz + lz; const ccz = wz >> 4;
@@ -2264,6 +2303,43 @@ const FACE = [
   { n: [0, 0, -1], a: 2, t1: 0, t2: 1, c: [[1, 0, 0], [0, 0, 0], [0, 1, 0], [1, 1, 0]] }
 ];
 function faceUV(f, x, y, z) { switch (f) { case 0: return [1 - z, 1 - y]; case 1: return [z, 1 - y]; case 2: return [x, z]; case 3: return [x, 1 - z]; case 4: return [x, 1 - y]; default: return [1 - x, 1 - y]; } }
+
+// ---------------------------------------------------------- formas compuestas (escaleras, puertas, vallas...)
+const PANEL = [[0, 0, 0, 16, 16, 3], [13, 0, 0, 16, 16, 16], [0, 0, 13, 16, 16, 16], [0, 0, 0, 3, 16, 16]]; // lados: -z, +x, +z, -x
+const DIR4 = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+function connects(d, nb) {
+  if (nb <= 0 || nb === B_PAD) return false; const n = REG[nb]; if (!n) return false;
+  if (T_FULL[nb]) return true;
+  if (d.shape === 'fence') return n.shape === 'fence' || n.shape === 'gate';
+  if (d.shape === 'wall') return n.shape === 'wall';
+  if (d.shape === 'pane') return n.shape === 'pane';
+  return false;
+}
+// devuelve cajas en 1/16. nb(dx,dz) -> id del vecino en el mismo nivel
+function shapeBoxes(d, meta, nb, forCollision) {
+  const f = meta & 3; const out = [];
+  switch (d.shape) {
+    case 'stairs': {
+      const up = meta & 4; out.push(up ? [0, 8, 0, 16, 16, 16] : [0, 0, 0, 16, 8, 16]);
+      const t = [[0, 0, 0, 16, 8, 8], [8, 0, 0, 16, 8, 16], [0, 0, 8, 16, 8, 16], [0, 0, 0, 8, 8, 16]][f].slice(); if (!up) { t[1] += 8; t[4] += 8; } out.push(t); break;
+    }
+    case 'door': { const open = meta & 4; const side = (f + 2) % 4; out.push(PANEL[open ? (side + 1) % 4 : side]); break; }
+    case 'trapdoor': { if (meta & 4) out.push(PANEL[(f + 2) % 4]); else out.push(meta & 8 ? [0, 13, 0, 16, 16, 16] : [0, 0, 0, 16, 3, 16]); break; }
+    case 'gate': { const ax = f & 1; if (meta & 4) { out.push(ax ? [0, 0, 6, 2, 16, 10] : [6, 0, 0, 10, 16, 2]); out.push(ax ? [14, 0, 6, 16, 16, 10] : [6, 0, 14, 10, 16, 16]); } else out.push(ax ? [7, 0, 0, 9, 16, 16] : [0, 0, 7, 16, 16, 9]); break; }
+    case 'fence': case 'wall': case 'pane': {
+      const pw = d.shape === 'wall' ? 4 : d.shape === 'fence' ? 2 : 1, aw = d.shape === 'wall' ? 3 : 1;
+      out.push([8 - pw, 0, 8 - pw, 8 + pw, 16, 8 + pw]);
+      for (let i = 0; i < 4; i++) {
+        if (!connects(d, nb(DIR4[i][0], DIR4[i][1]))) continue;
+        const [dx, dz] = DIR4[i]; const lo = (a, s) => a < 0 ? 0 : a > 0 ? 8 + s : 8 - s, hi = (a, s) => a < 0 ? 8 - s : a > 0 ? 16 : 8 + s;
+        if (d.shape === 'fence' && !forCollision) { for (const [y0, y1] of [[6, 9], [12, 15]]) out.push([lo(dx, aw), y0, lo(dz, aw), hi(dx, aw), y1, hi(dz, aw)]); }
+        else out.push([lo(dx, aw), 0, lo(dz, aw), hi(dx, aw), d.shape === 'wall' ? 14 : 16, hi(dz, aw)]);
+      }
+      break;
+    }
+  }
+  return out;
+}
 const ORIENT_FRONT = [5, 0, 4, 1];
 const OPP = [1, 0, 3, 2, 5, 4];
 function faceLayer(d, f, meta) {
@@ -2304,7 +2380,7 @@ function meshRegion(world, ch) {
         const layer = faceLayer(d, f, meta); emitFace(B, f, x, y, z, ri, nri, layer, flags, tintFor(d, f, ch, x, z), d.log && meta ? 1 : 0, 0, 1, null);
       }
     } else if (d.render === 'cross' || d.render === 'fire') {
-      const li = ri; const sky = regS[li], blk = regL[li]; const layer = d.faces[0];
+      const li = ri; const sky = regS[li], blk = regL[li]; const layer = d.stages ? d.stages[Math.min(3, meta >> 1)] : d.faces[0];
       let flags = F_CUT | 6 | F_FOLI; if (d.emissive) flags |= F_EMIS; if (d.render === 'fire') flags |= F_FIRE;
       const tint = d.tint ? (d.tint === 1 ? 1 + ch.biomes[x | z << 4] : 64 + ch.biomes[x | z << 4]) : 0;
       const h = d.render === 'fire' ? 1.2 : 1; const wv = d.wave === 2 ? F_PLANT : 0;
@@ -2322,6 +2398,9 @@ function meshRegion(world, ch) {
       if (d.inWater) emitLiquid(MB_W, x, y, z, ri, 1, ch, meta);
     } else if (d.render === 'box') {
       emitBox(d, x, y, z, ri, meta, ch);
+    } else if (d.render === 'shape') {
+      const boxes = shapeBoxes(d, meta, (dx, dz) => regB[ri + dx + dz * LR]); const lay = d.shape === 'door' && (meta & 8) ? d.layerTop : undefined;
+      for (const b of boxes) emitBox(d, x, y, z, ri, meta, ch, b, lay);
     } else if (d.render === 'liquid') {
       emitLiquid(d.liquid === 1 ? MB_W : O, x, y, z, ri, d.liquid, ch, meta);
     } else if (d.render === 'snow') {
@@ -2358,8 +2437,8 @@ function emitFace(B, f, x, y, z, ri, nri, layer, flags, tint, rot, h0, h1, box) 
   }
   B.quad(aos[0] + aos[2] < aos[1] + aos[3]);
 }
-function emitBox(d, x, y, z, ri, meta, ch) {
-  let [x0, y0, z0, x1, y1, z1] = d.box.map(v => v / 16);
+function emitBox(d, x, y, z, ri, meta, ch, boxOv, layerOv) {
+  let [x0, y0, z0, x1, y1, z1] = (boxOv || d.box).map(v => v / 16);
   if ((d.id === ID.torch) && meta >= 1 && meta <= 4) { const o = [[0, 0.32], [-0.32, 0], [0, -0.32], [0.32, 0]][meta - 1]; x0 += o[0]; x1 += o[0]; z0 += o[1]; z1 += o[1]; y0 += 0.2; y1 += 0.2; }
   if (d.id === ID.pointed_dripstone && meta === 1) { /* colgante: misma caja */ }
   const sky = Math.max(regS[ri], regS[ri + LRR]), blk = Math.max(regL[ri], regL[ri + LRR]);
@@ -2371,7 +2450,7 @@ function emitBox(d, x, y, z, ri, meta, ch) {
     const F = FACE[f]; const atEdge = (f === 0 && x1 >= 1) || (f === 1 && x0 <= 0) || (f === 2 && y1 >= 1) || (f === 3 && y0 <= 0) || (f === 4 && z1 >= 1) || (f === 5 && z0 <= 0);
     if (atEdge) { const nb = regB[ri + F.n[0] + F.n[1] * LRR + F.n[2] * LR]; if (T_FULL[nb]) continue; }
     if (d.endPortal && f !== 2) continue;
-    const layer = faceLayer(d, f, meta); B.grow(); const p = P[f]; const ao = (f === 3) ? 2 : 3;
+    const layer = layerOv !== undefined ? layerOv : faceLayer(d, f, meta); B.grow(); const p = P[f]; const ao = (f === 3) ? 2 : 3;
     const shadeSide = f === 2 ? 1 : 0.92;
     for (let k = 0; k < 4; k++) {
       const px = p[k * 3], py = p[k * 3 + 1], pz = p[k * 3 + 2];
@@ -3189,10 +3268,11 @@ function boxLines(x0, y0, z0, x1, y1, z1) {
 const G = { tick: 0, time: 1000, worlds: null, world: null, player: null, entities: new Map(), mode: 'menu', gameMode: 'survival', difficulty: 2, seed: 0, net: null, particles: [], rain: 0, rainLevel: 0, rainTimer: 12000, containers: {}, spawned: new Set(), dragonKilled: false, endInit: false, shake: 0, paused: false };
 let nextEid = 1;
 // ------------------------------------------------------------ colisiones
-function blockBoxes(id, meta, x, y, z, out) {
+function blockBoxes(id, meta, x, y, z, out, world) {
   if (id < 0) { out.push([x, y, z, x + 1, y + 1, z + 1]); return; }
   const d = REG[id]; if (!d || !d.solid) return;
   if (d.render === 'snow') { const h = (Math.max(1, meta) - 1) / 8; if (h > 0) out.push([x, y, z, x + 1, y + h, z + 1]); return; }
+  if (d.shape) { if (d.shape === 'gate' && (meta & 4)) return; const tall = d.shape === 'fence' || d.shape === 'wall' || d.shape === 'gate'; for (const b of shapeBoxes(d, meta, (dx, dz) => world ? world.get(x + dx, y, z + dz) : 0, true)) out.push([x + b[0] / 16, y + b[1] / 16, z + b[2] / 16, x + b[3] / 16, y + (tall ? 24 : b[4]) / 16, z + b[5] / 16]); return; }
   if (d.box) { const b = d.box; const top = d.fenceH ? d.fenceH : b[4] / 16; out.push([x + b[0] / 16, y + b[1] / 16, z + b[2] / 16, x + b[3] / 16, y + top, z + b[5] / 16]); return; }
   if (d.id === ID.cactus) { out.push([x + 1 / 16, y, z + 1 / 16, x + 15 / 16, y + 1, z + 15 / 16]); return; }
   out.push([x, y, z, x + 1, y + 1, z + 1]);
@@ -3201,7 +3281,7 @@ const _bx = [];
 function collect(world, x0, y0, z0, x1, y1, z1) {
   _bx.length = 0;
   for (let x = Math.floor(x0); x <= Math.floor(x1); x++) for (let z = Math.floor(z0); z <= Math.floor(z1); z++) for (let y = Math.floor(y0) - 1; y <= Math.floor(y1); y++) {
-    const id = world.get(x, y, z); if (id === 0) continue; blockBoxes(id, world.getMeta(x, y, z), x, y, z, _bx);
+    const id = world.get(x, y, z); if (id === 0) continue; blockBoxes(id, world.getMeta(x, y, z), x, y, z, _bx, world);
   }
   return _bx;
 }
@@ -3591,7 +3671,7 @@ function playerTick(p) {
   const fireB = entityInBlock(w, p, d => d.id === ID.fire); if (fireB && survival) { p.fire = Math.max(p.fire, 160); if (G.tick % 10 === 0) p.damage(1, 'fire'); }
   if (p.fire > 0) { p.fire--; if (p.inWater) p.fire = 0; if (survival && G.tick % 20 === 0 && !p.inLava) p.damage(1, 'fire'); if (Math.random() < 0.5) flame(p.x + (Math.random() - 0.5) * 0.6, p.y + Math.random() * 1.6, p.z + (Math.random() - 0.5) * 0.6, { size: 0.35 }); }
   const hurtB = entityInBlock(w, p, d => d.id === ID.cactus); const under = blockAt(w, p.x, p.y - 0.1, p.z);
-  if ((hurtB || (under === ID.magma_block && !p.sneaking)) && survival && G.tick % 10 === 0) p.damage(1, under === ID.magma_block ? 'fire' : 'cactus');
+  if ((hurtB || ((under === ID.magma_block || under === ID.campfire) && !p.sneaking) || entityInBlock(w, p, d => d.campfire)) && survival && G.tick % 10 === 0) p.damage(1, hurtB ? 'cactus' : 'fire');
   if (!survival) { p.food = 20; p.air = 300; return; }
   // hambre
   if (p.exh >= 4) { p.exh -= 4; if (p.sat > 0) p.sat = Math.max(0, p.sat - 1); else if (G.difficulty > 0) p.food = Math.max(0, p.food - 1); }
@@ -4124,6 +4204,13 @@ shapeless('glow_ink_sac', 1, ['ink_sac', 'glowstone_dust']);
 shaped('sea_lantern', 1, ['SPS', 'PPP', 'SPS'], { S: 'prismarine_shard', P: 'prismarine_shard' }); shaped('prismarine', 1, ['SS', 'SS'], { S: 'prismarine_shard' });
 shaped('purpur_block', 4, ['CC', 'CC'], { C: 'chorus_fruit' }); shaped('purpur_pillar', 1, ['P', 'P'], { P: 'purpur_block' });
 shaped('netherite_upgrade', 2, ['DND', 'DSD', 'DDD'], { D: 'diamond', N: 'netherite_upgrade', S: 'netherrack' });
+const STAIR_MAT = { oak: 'oak_planks', spruce: 'spruce_planks', birch: 'birch_planks', dark_oak: 'dark_oak_planks', jungle: 'jungle_planks', acacia: 'acacia_planks', cherry: 'cherry_planks', cobblestone: 'cobblestone', stone_brick: 'stone_bricks', sandstone: 'sandstone', brick: 'bricks', nether_brick: 'nether_bricks', blackstone: 'polished_blackstone_bricks', deepslate_brick: 'deepslate_bricks', purpur: 'purpur_block', mud_brick: 'mud_bricks' };
+for (const k in STAIR_MAT) shaped(k + '_stairs', 4, ['X  ', 'XX ', 'XXX'], { X: STAIR_MAT[k] });
+for (const k of ['oak', 'spruce', 'birch', 'dark_oak']) { shaped(k + '_door', 3, ['XX', 'XX', 'XX'], { X: k + '_planks' }); shaped(k + '_trapdoor', 2, ['XXX', 'XXX'], { X: k + '_planks' }); }
+shaped('iron_door', 3, ['XX', 'XX', 'XX'], { X: 'iron_ingot' }); shaped('iron_trapdoor', 1, ['XX', 'XX'], { X: 'iron_ingot' });
+shaped('glass_pane', 16, ['GGG', 'GGG'], { G: 'glass' }); shaped('oak_fence_gate', 1, ['SPS', 'SPS'], { S: 'stick', P: 'oak_planks' });
+shaped('campfire', 1, [' S ', 'SCS', 'LLL'], { S: 'stick', C: '#coal', L: '#logs' });
+shapeless('beetroot_soup', 1, ['beetroot', 'beetroot', 'beetroot', 'beetroot', 'beetroot', 'beetroot']);
 function matchRecipe(grid, w) {
   // grid: array w*w de ids o null
   let minX = w, minY = w, maxX = -1, maxY = -1; const ids = [];
@@ -4171,7 +4258,8 @@ function raycast(w, ox, oy, oz, dx, dy, dz, maxD, liquids) {
     if (b > 0) {
       const d = REG[b];
       if (d.liquid ? (liquids && w.getMeta(x, y, z) === 0) : (d.render !== 'none')) {
-        if (d.box || d.render === 'snow') { const bb = d.render === 'snow' ? [0, 0, 0, 16, Math.max(1, w.getMeta(x, y, z)) * 2, 16] : d.box; const hit = rayBox(ox, oy, oz, dx, dy, dz, x + bb[0] / 16, y + bb[1] / 16, z + bb[2] / 16, x + bb[3] / 16, y + Math.min(16, bb[4]) / 16, z + bb[5] / 16); if (hit && hit.t <= maxD) return { x, y, z, id: b, n: hit.n, t: hit.t }; }
+        if (d.shape) { let best = null; for (const bb of shapeBoxes(d, w.getMeta(x, y, z), (dx, dz) => w.get(x + dx, y, z + dz))) { const hit = rayBox(ox, oy, oz, dx, dy, dz, x + bb[0] / 16, y + bb[1] / 16, z + bb[2] / 16, x + bb[3] / 16, y + bb[4] / 16, z + bb[5] / 16); if (hit && (!best || hit.t < best.t)) best = hit; } if (best && best.t <= maxD) return { x, y, z, id: b, n: best.n, t: best.t }; }
+        else if (d.box || d.render === 'snow') { const bb = d.render === 'snow' ? [0, 0, 0, 16, Math.max(1, w.getMeta(x, y, z)) * 2, 16] : d.box; const hit = rayBox(ox, oy, oz, dx, dy, dz, x + bb[0] / 16, y + bb[1] / 16, z + bb[2] / 16, x + bb[3] / 16, y + Math.min(16, bb[4]) / 16, z + bb[5] / 16); if (hit && hit.t <= maxD) return { x, y, z, id: b, n: hit.n, t: hit.t }; }
         else return { x, y, z, id: b, n: face, t };
       }
     }
@@ -4217,7 +4305,12 @@ function dropBlockItems(w, x, y, z, id, stack, explosion) {
   if (tool && tool.type === 'shears' && (d.leaves || id === ID.vine || id === ID.tall_grass || id === ID.cobweb)) { dropItem(w.dim, x + 0.5, y + 0.5, z + 0.5, { id: id === ID.cobweb ? ID.cobweb : id, c: 1 }); return; }
   if (d.leaves) { const r = Math.random(); const sap = ID[d.leaves + '_sapling']; if (r < 0.05 && sap) dropItem(w.dim, x + 0.5, y + 0.5, z + 0.5, { id: sap, c: 1 }); else if (r < 0.07) dropItem(w.dim, x + 0.5, y + 0.5, z + 0.5, { id: ID.stick, c: 1 + (Math.random() * 2 | 0) }); if ((d.leaves === 'oak' || d.leaves === 'dark_oak') && Math.random() < 0.005) dropItem(w.dim, x + 0.5, y + 0.5, z + 0.5, { id: ID.apple, c: 1 }); return; }
   if (id === ID.gravel && Math.random() < 0.1) { dropItem(w.dim, x + 0.5, y + 0.5, z + 0.5, { id: ID.flint, c: 1 }); return; }
-  if (id === ID.wheat) { const m = w.getMeta(x, y, z); dropItem(w.dim, x + 0.5, y + 0.5, z + 0.5, { id: ID.wheat_seeds, c: 1 + (m >= 7 ? (Math.random() * 3 | 0) : 0) }); if (m >= 7) dropItem(w.dim, x + 0.5, y + 0.5, z + 0.5, { id: ID.wheat, c: 1 }); return; }
+  if (d.crop) { const m = w.getMeta(x, y, z); const ripe = m >= 7; const D = (n, c) => dropItem(w.dim, x + 0.5, y + 0.5, z + 0.5, { id: ID[n], c });
+    if (d.crop === 'wheat') { D('wheat_seeds', 1 + (ripe ? (Math.random() * 3 | 0) : 0)); if (ripe) D('wheat', 1); }
+    else if (d.crop === 'carrots') D('carrot', ripe ? 2 + (Math.random() * 3 | 0) : 1);
+    else if (d.crop === 'potatoes') D('potato', ripe ? 2 + (Math.random() * 3 | 0) : 1);
+    else if (d.crop === 'beetroots') { D('beetroot_seeds', 1 + (ripe ? (Math.random() * 3 | 0) : 0)); if (ripe) D('beetroot', 1); }
+    return; }
   if (id === ID.snow) { const m = Math.max(1, w.getMeta(x, y, z)); if (tool && tool.type === 'shovel') dropItem(w.dim, x + 0.5, y + 0.5, z + 0.5, { id: ID.snowball, c: Math.max(1, m >> 1) }); return; }
   if (d.drop === null) return;
   if (d.dropChance && Math.random() > d.dropChance) return;
@@ -4254,6 +4347,7 @@ function onBlockSet(w, x, y, z, old, id, meta) {
     if (dy === 1 && needsSupport(d)) w.scheduleTick(x, y + 1, z, 1, 2);
     if (dy !== 0 || dx !== 0 || dz !== 0) if (b === ID.torch || b === ID.soul_torch || b === ID.redstone_torch || b === ID.ladder || b === ID.vine || b === ID.cave_vines || b === ID.weeping_vines || b === ID.pointed_dripstone) w.scheduleTick(x + dx, y + dy, z + dz, 1, 2);
   }
+  if (old > 0 && REG[old].shape === 'door' && id !== old) for (const dy of [1, -1]) if (w.get(x, y + dy, z) === old) w.set(x, y + dy, z, 0);
   // romper portal si se rompe el marco
   if ((old === ID.obsidian || old === ID.nether_portal) && id !== ID.nether_portal) for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) if (w.get(x + dx, y + dy, z + dz) === ID.nether_portal) w.scheduleTick(x + dx, y + dy, z + dz, 1, 3);
   // contenedores rotos sueltan contenido
@@ -4377,7 +4471,7 @@ function randomTicks(w, cx, cz) {
     const x = Math.random() * 16 | 0, z = Math.random() * 16 | 0, y = (s << 4) + (Math.random() * 16 | 0); if (y >= H) continue;
     const b = c.blocks[x | z << 4 | y << 8]; if (!b) continue; const wx = cx * 16 + x, wz = cz * 16 + z; const d = REG[b];
     if (d.sapling) { if (Math.random() < 0.15 && w.light(wx, y + 1, wz)[0] >= 9) growSapling(w, wx, y, wz, b); }
-    else if (b === ID.wheat) { const m = w.getMeta(wx, y, wz); if (m < 7 && Math.random() < 0.3) w.set(wx, y, wz, ID.wheat, m + 1); }
+    else if (d.crop) { const m = w.getMeta(wx, y, wz); if (m < 7 && Math.random() < 0.35 && w.light(wx, y, wz)[0] + w.light(wx, y, wz)[1] >= 9) w.set(wx, y, wz, b, m + 1); }
     else if (b === ID.grass_block) { const a = w.get(wx, y + 1, wz); if (a > 0 && T_FULL[a]) w.set(wx, y, wz, ID.dirt); else for (let i = 0; i < 2; i++) { const nx = wx + (Math.random() * 3 | 0) - 1, ny = y + (Math.random() * 3 | 0) - 1, nz = wz + (Math.random() * 3 | 0) - 1; if (w.get(nx, ny, nz) === ID.dirt && w.get(nx, ny + 1, nz) === 0 && w.light(nx, ny + 1, nz)[0] >= 9) w.set(nx, ny, nz, ID.grass_block); } }
     else if (d.leaves && !(w.getMeta(wx, y, wz) & 1)) { let found = false; for (let dx = -4; dx <= 4 && !found; dx++) for (let dy = -4; dy <= 4 && !found; dy++) for (let dz = -4; dz <= 4 && !found; dz++) { const o = w.get(wx + dx, y + dy, wz + dz); if (o > 0 && REG[o].log) found = true; } if (!found) { w.set(wx, y, wz, 0); dropBlockItems(w, wx, y, wz, b, null, true); } }
     else if ((b === ID.sugar_cane || b === ID.cactus) && w.get(wx, y + 1, wz) === 0 && Math.random() < 0.2) { let h = 1; while (w.get(wx, y - h, wz) === b) h++; if (h < 3) w.set(wx, y + 1, wz, b); }
@@ -4871,6 +4965,8 @@ function placeBlock(hit, stack) {
   if (bd.log) meta = hit.n[1] ? 0 : hit.n[0] ? 1 : 2;
   if (id === ID.torch || id === ID.soul_torch || id === ID.redstone_torch) { if (hit.n[1] === -1) return false; if (hit.n[1] === 0) meta = hit.n[2] === -1 ? 1 : hit.n[0] === 1 ? 2 : hit.n[2] === 1 ? 3 : 4; }
   if (bd.leaves) meta = 1;
+  if (bd.shape && bd.shape !== 'fence' && bd.shape !== 'wall' && bd.shape !== 'pane') { const dx = -Math.sin(p.yaw), dz = -Math.cos(p.yaw); meta = Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? 1 : 3) : (dz > 0 ? 2 : 0); if ((bd.shape === 'stairs' || bd.shape === 'trapdoor') && hit.n[1] === -1) meta |= bd.shape === 'stairs' ? 4 : 8; }
+  if (bd.shape === 'door') { const up = w.get(tx, ty + 1, tz); if (up !== 0 && !(up > 0 && REG[up].replace)) return false; const below = w.get(tx, ty - 1, tz); if (!(below > 0 && REG[below].solid)) return false; }
   if (id === ID.pointed_dripstone && hit.n[1] === -1) meta = 1;
   if (id === ID.snow) meta = 1;
   if (bd.solid && bd.render !== 'cross') { // no colocar dentro de entidades
@@ -4878,9 +4974,9 @@ function placeBlock(hit, stack) {
     for (const e of [p, ...G.entities.values()]) { if (e.dim !== p.dim || e.type === 'item' || e instanceof Projectile || e.removed) continue; const hw = e.w / 2; if (e.x + hw > tx + box[0] && e.x - hw < tx + box[3] && e.z + hw > tz + box[2] && e.z - hw < tz + box[5] && e.y < ty + box[4] && e.y + e.h > ty + box[1]) return false; }
   }
   const tmp = { x: tx, y: ty, z: tz };
-  if ((bd.render === 'cross' || id === ID.wheat) && !bd.inWater) { const below = w.get(tx, ty - 1, tz); const ok = id === ID.wheat ? below === ID.farmland : bd.sapling || bd.name.includes('flower') || [ID.poppy, ID.dandelion, ID.blue_orchid, ID.cornflower, ID.oxeye_daisy, ID.tall_grass, ID.fern].includes(id) ? [ID.grass_block, ID.dirt, ID.moss_block, ID.mud, ID.farmland, ID.snowy_grass, ID.podzol].includes(below) : id === ID.sugar_cane ? [ID.sand, ID.dirt, ID.grass_block, ID.sugar_cane].includes(below) : (id === ID.crimson_fungus || id === ID.warped_fungus) ? [ID.crimson_nylium, ID.warped_nylium, ID.soul_soil, ID.netherrack].includes(below) : below > 0 && REG[below].solid; if (!ok) return false; }
+  if ((bd.render === 'cross' || bd.crop) && !bd.inWater) { const below = w.get(tx, ty - 1, tz); const ok = bd.crop ? below === ID.farmland : bd.sapling || bd.name.includes('flower') || [ID.poppy, ID.dandelion, ID.blue_orchid, ID.cornflower, ID.oxeye_daisy, ID.tall_grass, ID.fern].includes(id) ? [ID.grass_block, ID.dirt, ID.moss_block, ID.mud, ID.farmland, ID.snowy_grass, ID.podzol].includes(below) : id === ID.sugar_cane ? [ID.sand, ID.dirt, ID.grass_block, ID.sugar_cane].includes(below) : (id === ID.crimson_fungus || id === ID.warped_fungus) ? [ID.crimson_nylium, ID.warped_nylium, ID.soul_soil, ID.netherrack].includes(below) : below > 0 && REG[below].solid; if (!ok) return false; }
   if (id === ID.cactus) { const below = w.get(tx, ty - 1, tz); if (below !== ID.sand && below !== ID.red_sand && below !== ID.cactus) return false; }
-  setBlockNet(w, tx, ty, tz, id, meta);
+  setBlockNet(w, tx, ty, tz, id, meta); if (bd.shape === 'door') setBlockNet(w, tx, ty + 1, tz, id, meta | 8);
   playSound('place', tx, ty, tz, 0.8, id); p.swing = 1; consumeHeld(p);
   return true;
 }
@@ -4906,6 +5002,7 @@ function useItem(hit) {
     if (bd.ui === 'bed') { useBed(hit); return true; }
     if (bd.ui === 'vault') { if (s && s.id === ID.ominous_key && w.getMeta(hit.x, hit.y, hit.z) === 0) { consumeHeld(p); setBlockNet(w, hit.x, hit.y, hit.z, ID.vault, 1); for (const it of rollLoot('vault', Math.random() * 1e9 | 0)) if (it) dropItem(p.dim, hit.x + 0.5, hit.y + 1.2, hit.z + 0.5, it, 0, 3, 0); playSound('levelup', hit.x, hit.y, hit.z, 1); } else chatMsg(w.getMeta(hit.x, hit.y, hit.z) ? 'Esta bóveda ya fue abierta.' : 'Necesitas una llave de desafío.', '#ccc'); return true; }
     if (b === ID.note_block) { playSound('note', hit.x, hit.y, hit.z, 1, (Math.random() * 24) | 0); P_({ x: hit.x + 0.5, y: hit.y + 1.2, z: hit.z + 0.5, vy: 1, life: 0.8, size: 0.2, layer: TEX.spark, add: true, emis: 3, r: Math.random(), g: 1, b: Math.random() }); return true; }
+    if (bd.shape === 'door' || bd.shape === 'trapdoor' || bd.shape === 'gate') { const m = w.getMeta(hit.x, hit.y, hit.z) ^ 4; setBlockNet(w, hit.x, hit.y, hit.z, b, m); if (bd.shape === 'door') { const oy = m & 8 ? -1 : 1; if (w.get(hit.x, hit.y + oy, hit.z) === b) setBlockNet(w, hit.x, hit.y + oy, hit.z, b, m ^ 8); } playSound(m & 4 ? 'chest_open' : 'chest_close', hit.x, hit.y, hit.z, 0.5); return true; }
     if (b === ID.lever) { setBlockNet(w, hit.x, hit.y, hit.z, b, w.getMeta(hit.x, hit.y, hit.z) ^ 1); playSound('click', hit.x, hit.y, hit.z, 0.5); return true; }
     if (b === ID.tnt && s && (s.id === ID.flint_and_steel || s.id === ID.fire_charge)) { setBlockNet(w, hit.x, hit.y, hit.z, 0); igniteTNT(w, hit.x, hit.y, hit.z); damageItem(p.inv, p.sel, 1); return true; }
     if (b === ID.end_portal_frame && s && s.id === ID.eye_of_ender) { setBlockNet(w, hit.x, hit.y, hit.z, ID.end_portal_frame_eye, w.getMeta(hit.x, hit.y, hit.z)); consumeHeld(p); for (let i = 0; i < 12; i++) P_({ x: hit.x + 0.5, y: hit.y + 1, z: hit.z + 0.5, vx: (Math.random() - 0.5) * 2, vy: Math.random() * 2, vz: (Math.random() - 0.5) * 2, life: 1, size: 0.12, layer: TEX.portal_p, add: true, emis: 3, r: 0.4, g: 1, b: 0.6 }); checkEndPortalFrame(w, hit.x, hit.y, hit.z); return true; }
@@ -4946,7 +5043,7 @@ function useItem(hit) {
     if (w.get(tx, ty, tz) === 0) { if (!tryLightPortal(w, tx, ty, tz)) setBlockNet(w, tx, ty, tz, ID.fire); damageItem(p.inv, p.sel, 1); playSound('ignite', tx, ty, tz, 0.8); return true; }
     return false;
   }
-  if (s.id === ID.bone_meal) { const b = hit.id; if (REG[b].sapling) { if (Math.random() < 0.45) growSapling(w, hit.x, hit.y, hit.z, b); } else if (b === ID.wheat) setBlockNet(w, hit.x, hit.y, hit.z, b, 7); else if (b === ID.grass_block) { for (let i = 0; i < 12; i++) { const x = hit.x + (Math.random() * 7 | 0) - 3, z = hit.z + (Math.random() * 7 | 0) - 3; if (w.get(x, hit.y, z) === ID.grass_block && w.get(x, hit.y + 1, z) === 0) setBlockNet(w, x, hit.y + 1, z, Math.random() < 0.8 ? ID.tall_grass : [ID.poppy, ID.dandelion][Math.random() * 2 | 0]); } } else return false; consumeHeld(p); for (let i = 0; i < 10; i++) P_({ x: hit.x + Math.random(), y: hit.y + 1 + Math.random() * 0.5, z: hit.z + Math.random(), vy: 0.5, life: 1, size: 0.1, layer: TEX.spark, add: true, emis: 2, r: 0.4, g: 1, b: 0.4 }); return true; }
+  if (s.id === ID.bone_meal) { const b = hit.id; if (REG[b].sapling) { if (Math.random() < 0.45) growSapling(w, hit.x, hit.y, hit.z, b); } else if (REG[b].crop) setBlockNet(w, hit.x, hit.y, hit.z, b, Math.min(7, w.getMeta(hit.x, hit.y, hit.z) + 2 + (Math.random() * 3 | 0))); else if (b === ID.grass_block) { for (let i = 0; i < 12; i++) { const x = hit.x + (Math.random() * 7 | 0) - 3, z = hit.z + (Math.random() * 7 | 0) - 3; if (w.get(x, hit.y, z) === ID.grass_block && w.get(x, hit.y + 1, z) === 0) setBlockNet(w, x, hit.y + 1, z, Math.random() < 0.8 ? ID.tall_grass : [ID.poppy, ID.dandelion][Math.random() * 2 | 0]); } } else return false; consumeHeld(p); for (let i = 0; i < 10; i++) P_({ x: hit.x + Math.random(), y: hit.y + 1 + Math.random() * 0.5, z: hit.z + Math.random(), vy: 0.5, life: 1, size: 0.1, layer: TEX.spark, add: true, emis: 2, r: 0.4, g: 1, b: 0.4 }); return true; }
   if (d.tool && d.tool.type === 'hoe' && (hit.id === ID.grass_block || hit.id === ID.dirt || hit.id === ID.dirt_path) && hit.n[1] === 1 && w.get(hit.x, hit.y + 1, hit.z) === 0) { setBlockNet(w, hit.x, hit.y, hit.z, ID.farmland); damageItem(p.inv, p.sel, 1); playSound('place', hit.x, hit.y, hit.z, 0.6, ID.dirt); return true; }
   if (d.tool && d.tool.type === 'shovel' && hit.id === ID.grass_block && hit.n[1] === 1 && w.get(hit.x, hit.y + 1, hit.z) === 0) { setBlockNet(w, hit.x, hit.y, hit.z, ID.dirt_path); damageItem(p.inv, p.sel, 1); playSound('place', hit.x, hit.y, hit.z, 0.6, ID.dirt); return true; }
   if (d.tool && d.tool.type === 'axe' && REG[hit.id].log) { return false; }
@@ -5229,7 +5326,7 @@ function clientHandle(m, resolve, reject) {
     case 'kick': G.net = null; disconnected(m.m); break;
   }
 }
-function applyNetChunk(c) { const w = G.worlds[c.d]; if (!w) return; const ex = w.chunks.get(c.k); if (ex) { ex.blocks = rleDecode(c.b, 256 * w.H); ex.meta = rleDecode(c.m, 256 * w.H); ex.modified = true; ex.calcTop(); ex.dirty = true; ex.urgent = true; } else w.saved[c.k] = { b: c.b, m: c.m }; }
+function applyNetChunk(c) { const w = G.worlds[c.d]; if (!w) return; const ex = w.chunks.get(c.k); if (ex) { ex.blocks = rleDecode(c.b, 256 * w.H, true); ex.meta = rleDecode(c.m, 256 * w.H); ex.modified = true; ex.calcTop(); ex.dirty = true; ex.urgent = true; } else w.saved[c.k] = { b: c.b, m: c.m }; }
 function updateProxyPlayers(list) {
   const seen = new Set();
   for (const o of list) {
@@ -5282,7 +5379,7 @@ function tone(t, dur, f0, f1, vol, type = 'sine', dest) { const c = AU.ctx; cons
 function playSound(type, x, y, z, vol = 1, extra) {
   if (!AU.ctx || SETTINGS.vol <= 0) return; const c = AU.ctx; const t = c.currentTime;
   if (G.player && x !== 0 && G.mode === 'game') { const d = Math.hypot(G.player.x - x, G.player.y - y, G.player.z - z); vol *= Math.max(0, 1 - d / (type === 'explode' ? 80 : 24)); if (vol <= 0.01) return; }
-  const m = extra !== undefined && typeof extra === 'number' && extra < 256 ? MAT_SND(extra) : 'stone';
+  const m = extra !== undefined && typeof extra === 'number' && extra < ITEM_BASE ? MAT_SND(extra) : 'stone';
   const mf = { stone: [1800, 2], wood: [700, 3], grass: [2600, 0.8], sand: [3800, 0.6], gravel: [1500, 0.9], glass: [4200, 5], wool: [500, 0.6] }[m];
   switch (type) {
     case 'dig': noiseHit(t, 0.08, mf[0], mf[1], 0.25 * vol); break;
@@ -5347,7 +5444,7 @@ function serializeWorld() {
   const players = Object.assign({}, G.playerStates || {}); players.__local = playerState(G.player); players.__local.name = G.player.name;
   if (G.net && G.net.role === 'host') for (const c of G.net.conns.values()) if (c.ent && c.ent.state) players[c.ent.name] = c.ent.state;
   const ents = []; for (const e of G.entities.values()) { if (e.proxy || e.remotePlayer || e.removed || e.dead) continue; if (e instanceof Mob && (e.persist || !e.def.hostile)) ents.push({ k: 'mob', ty: e.type, d: e.dim, x: e.x, y: e.y, z: e.z, hp: e.hp, c: e.color, p: e.persist, n: e.name }); else if (e.type === 'item') ents.push({ k: 'item', d: e.dim, x: e.x, y: e.y, z: e.z, s: e.stack }); }
-  return { format: 'minecraft2-world', version: 2, name: G.worldName, seed: G.seed, seedStr: G.seedStr, gameMode: G.defaultMode || G.gameMode, curMode: G.gameMode, difficulty: G.difficulty, cheats: G.cheats, time: G.time, rain: G.rain, rainTimer: G.rainTimer, worldSpawn: G.worldSpawn, dragonKilled: G.dragonKilled, endInit: G.endInit, gateway: G.gateway, keepInventory: G.keepInventory, containers: G.containers, spawned: [...G.spawned], dims, players, entities: ents, created: G.created || Date.now(), lastPlayed: Date.now(), structures: G.structures !== false };
+  return { format: 'minecraft2-world', version: 3, name: G.worldName, seed: G.seed, seedStr: G.seedStr, gameMode: G.defaultMode || G.gameMode, curMode: G.gameMode, difficulty: G.difficulty, cheats: G.cheats, time: G.time, rain: G.rain, rainTimer: G.rainTimer, worldSpawn: G.worldSpawn, dragonKilled: G.dragonKilled, endInit: G.endInit, gateway: G.gateway, keepInventory: G.keepInventory, containers: G.containers, spawned: [...G.spawned], dims, players, entities: ents, created: G.created || Date.now(), lastPlayed: Date.now(), structures: G.structures !== false };
 }
 function worldIcon() { try { const c = document.createElement('canvas'); c.width = 64; c.height = 64; c.getContext('2d').drawImage($('gl'), ($('gl').width - $('gl').height) / 2, 0, $('gl').height, $('gl').height, 0, 0, 64, 64); return c.toDataURL('image/jpeg', 0.7); } catch (e) { return null; } }
 async function saveWorld(silent) {
@@ -5367,8 +5464,17 @@ function resetGameState() {
   G.entities = new Map(); G.particles = []; G.containers = {}; G.spawned = new Set(); G.tick = 0; G.dragonKilled = false; G.endInit = false; G.gateway = null; G.creditsShown = false; G.playerStates = {}; G.rain = 0; G.rainLevel = 0; G.rainTimer = 12000 + Math.random() * 24000;
   TICK_TIMERS.length = 0; NETBATCH.length = 0; R.plights = []; UI.open = null; G.paused = false; G.wardenWarn = 0;
 }
+function migrateWorld(data) { // v2 -> v3: los objetos pasaron de id 256+ a 1000+
+  if (!data.version || data.version >= 3) return data;
+  const fix = s => { if (s && s.id >= 256) s.id += ITEM_BASE - 256; return s; };
+  const fixArr = a => { if (a) a.forEach(fix); };
+  for (const k in data.players || {}) { const p = data.players[k]; if (!p) continue; fixArr(p.inv); fixArr(p.armor); fixArr(p.ender); fix(p.off); }
+  for (const k in data.containers || {}) fixArr(data.containers[k].items);
+  for (const e of data.entities || []) if (e.s) fix(e.s);
+  data.version = 3; return data;
+}
 function startWorld(data, isNew, netWelcome) {
-  resetGameState(); audioInit();
+  data = migrateWorld(data); resetGameState(); audioInit();
   G.worldName = data.name; G.seed = data.seed >>> 0; G.seedStr = data.seedStr; G.difficulty = data.difficulty ?? 2; G.cheats = data.cheats !== false; G.time = data.time ?? 1000; G.keepInventory = !!data.keepInventory;
   G.defaultMode = data.gameMode || 'survival'; G.gameMode = data.curMode || data.gameMode || 'survival'; G.created = data.created || Date.now(); G.structures = data.structures !== false;
   G.worlds = { overworld: new World('overworld', G.seed), nether: new World('nether', G.seed), end: new World('end', G.seed) };
@@ -5604,6 +5710,7 @@ function emitterFX(w, dt) {
     for (let i = 0; i < E.length; i += 4) {
       const x = E[i], y = E[i + 1], z = E[i + 2], id = E[i + 3];
       if (id === ID.fire) { fireFX(w, x, y, z, dt); fires.push([x + 0.5, y + 0.6, z + 0.5]); }
+      else if (id === ID.campfire) { if (Math.random() < 5 * dt) flame(x + 0.3 + Math.random() * 0.4, y + 0.35, z + 0.3 + Math.random() * 0.4, { size: 0.35, vy: 0.8 }); if (Math.random() < 2.5 * dt) smoke(x + 0.5, y + 0.9, z + 0.5, { r: 0.22, g: 0.21, b: 0.2, a: 0.5, size: 0.5, grow: 0.5, life: 7, vy: 2.2, drag: 0.1, wind: true }); fires.push([x + 0.5, y + 0.5, z + 0.5]); }
       else if (id === ID.lava) { if (Math.random() < dt * 0.15) { P_({ x: x + Math.random(), y: y + 0.95, z: z + Math.random(), vx: (Math.random() - 0.5) * 2, vy: 4 + Math.random() * 3, vz: (Math.random() - 0.5) * 2, life: 1.5, size: 0.07, add: true, emis: 8, r: 1, g: 0.55, b: 0.15, layer: TEX.ember, grav: 16, collide: true }); } if (Math.random() < dt * 0.05) smoke(x + 0.5, y + 1, z + 0.5, { r: 0.12, g: 0.11, b: 0.1, size: 0.4, life: 2, a: 0.35 }); if (Math.random() < 0.02) fires.push([x + 0.5, y + 1, z + 0.5, 1]); }
       else if (id === ID.torch || id === ID.soul_torch || id === ID.redstone_torch) { const m = w.getMeta(x, y, z); const o = m >= 1 && m <= 4 ? [[0, 0.32], [-0.32, 0], [0, -0.32], [0.32, 0]][m - 1] : [0, 0]; const ty = y + 0.72 + (m ? 0.2 : 0); if (Math.random() < dt * 4) { const soul = id === ID.soul_torch, red = id === ID.redstone_torch; P_({ x: x + 0.5 + o[0], y: ty, z: z + 0.5 + o[1], vy: 0.25, life: 0.4, size: 0.12, grow: -0.2, add: true, emis: 3, r: soul ? 0.4 : 1, g: soul ? 0.9 : red ? 0.15 : 0.6, b: soul ? 1 : 0.2, layer: TEX['flame_' + (Math.random() * 3 | 0)] }); } if (Math.random() < dt * 0.8) smoke(x + 0.5 + o[0], ty + 0.1, z + 0.5 + o[1], { size: 0.12, grow: 0.15, life: 1.5, a: 0.3, vy: 0.5, r: 0.2, g: 0.2, b: 0.2 }); }
       else if (id === ID.end_rod && Math.random() < dt) P_({ x: x + 0.5, y: y + 0.5 + Math.random() * 0.5, z: z + 0.5, vx: (Math.random() - 0.5) * 0.4, vy: (Math.random() - 0.5) * 0.4, vz: (Math.random() - 0.5) * 0.4, life: 2, size: 0.08, add: true, emis: 3, layer: TEX.spark, r: 1, g: 1, b: 1 });
@@ -5644,6 +5751,7 @@ function drawOverlays(trans) {
     const h = G.hit; const lines = [];
     if (h && !h.ent && !hudHidden && G.gameMode !== 'spectator') {
       const d = REG[h.id]; let b = d.box ? d.box.map(v => v / 16) : d.render === 'snow' ? [0, 0, 0, 1, Math.max(1, w.getMeta(h.x, h.y, h.z)) / 8, 1] : [0, 0, 0, 1, 1, 1]; if (d.fenceH) b = [b[0], 0, b[2], b[3], 1, b[5]];
+      if (d.shape) { const bx = shapeBoxes(d, w.getMeta(h.x, h.y, h.z), (dx, dz) => w.get(h.x + dx, h.y, h.z + dz)); b = [1, 1, 1, 0, 0, 0]; for (const q of bx) for (let i = 0; i < 3; i++) { b[i] = Math.min(b[i], q[i] / 16); b[i + 3] = Math.max(b[i + 3], q[i + 3] / 16); } }
       if (d.id === ID.torch || d.id === ID.soul_torch) { const m = w.getMeta(h.x, h.y, h.z); if (m >= 1 && m <= 4) { const o = [[0, 0.32], [-0.32, 0], [0, -0.32], [0.32, 0]][m - 1]; b = [b[0] + o[0], b[1] + 0.2, b[2] + o[1], b[3] + o[0], b[4] + 0.2, b[5] + o[1]]; } }
       const e = 0.002; lines.push(...boxLines(h.x + b[0] - e, h.y + b[1] - e, h.z + b[2] - e, h.x + b[3] + e, h.y + b[4] + e, h.z + b[5] + e));
       if (MINE.target && MINE.prog > 0 && G.gameMode !== 'creative') { // grietas
