@@ -1,7 +1,7 @@
 // ============================================================================
 //  Renderizador WebGL2 con "shaders integrados"
 // ============================================================================
-const R = { gl: null, q: 2, progs: {}, fbo: {}, w: 1, h: 1, view: M4.create(), proj: M4.create(), vp: M4.create(), invVP: M4.create(), shadowVP: M4.create(), cam: [0, 0, 0], camDir: [0, 0, -1], stats: { chunks: 0, tris: 0, draws: 0 }, plights: [], gpu: '', maxAniso: 0 };
+const R = { gl: null, q: 2, dyn: 1, progs: {}, fbo: {}, w: 1, h: 1, view: M4.create(), proj: M4.create(), vp: M4.create(), invVP: M4.create(), shadowVP: M4.create(), cam: [0, 0, 0], camDir: [0, 0, -1], stats: { chunks: 0, tris: 0, draws: 0 }, plights: [], gpu: '', maxAniso: 0 };
 const GLSL_COMMON = `
 precision highp float; precision highp int; precision highp sampler2DArray; precision highp sampler2DShadow;
 uniform vec3 u_sunDir; uniform vec3 u_sunReal; uniform vec3 u_sunCol; uniform vec3 u_amb; uniform vec3 u_camPos;
@@ -11,7 +11,7 @@ uniform vec4 u_lp[8]; uniform vec3 u_lc[8]; uniform int u_nl;
 float hash12(vec2 p){ vec3 p3=fract(vec3(p.xyx)*.1031); p3+=dot(p3,p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
 float hash13(vec3 p3){ p3=fract(p3*.1031); p3+=dot(p3,p3.zyx+31.32); return fract((p3.x+p3.y)*p3.z); }
 float vnoise(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f); return mix(mix(hash12(i),hash12(i+vec2(1,0)),f.x),mix(hash12(i+vec2(0,1)),hash12(i+vec2(1,1)),f.x),f.y); }
-float fbm(vec2 p){ float s=0.0,a=0.5; for(int i=0;i<5;i++){ s+=a*vnoise(p); p=p*2.03+vec2(1.7,9.2); a*=0.5; } return s; }
+float fbm(vec2 p){ float s=0.0,a=0.5; for(int i=0;i<(Q>=3?5:4);i++){ s+=a*vnoise(p); p=p*2.03+vec2(1.7,9.2); a*=0.5; } return s; }
 vec3 skyColor(vec3 d){
   if(u_dim==1) return u_fogCol;
   if(u_dim==2) return vec3(0.025,0.018,0.04);
@@ -115,7 +115,13 @@ void main(){
     col+=u_sunCol*direct*pow(max(dot(R,u_sunDir),0.0),20.0)*0.25;
   }
   if((fl&256u)!=0u) col=alb*2.4+col*0.3;
-  if((fl&128u)!=0u) col=alb*(2.6+sin(u_time*1.5+v_world.x*0.7+v_world.z*0.5)*0.4);
+  if((fl&128u)!=0u){
+    vec2 q=v_world.xz*0.9+vec2(v_world.y*0.3); float t=u_time*0.25;
+    float n1=fbm(q*1.3+vec2(t,-t*0.7)); float n2=fbm(q*3.1-vec2(t*1.3,t*0.4)+n1*2.0);
+    float crust=smoothstep(0.42,0.62,n2); float hot=pow(1.0-crust,2.0);
+    vec3 lc=mix(vec3(1.0,0.32,0.03),vec3(1.0,0.85,0.35),smoothstep(0.3,0.0,abs(n1-0.5)))*3.2*(0.85+0.15*sin(u_time*2.0+n1*6.0));
+    col=mix(lc,vec3(0.10,0.035,0.02)*(0.5+u_amb),crust*0.85)+vec3(0.6,0.12,0.0)*hot*0.6;
+  }
   if((fl&4096u)!=0u){ col=alb*4.0; alpha=t.a; }
   if((fl&512u)!=0u){ col=alb*2.2; alpha=0.75; }
   if((fl&8192u)!=0u){ vec3 R=reflect(V,N); float fr=0.04+0.96*pow(1.0-max(dot(-V,N),0.0),5.0); col=mix(col,skyColor(R)*sky,fr*0.6); col+=u_sunCol*pow(max(dot(R,u_sunDir),0.0),120.0)*direct*2.0; alpha=max(alpha,0.35+fr*0.5); }
@@ -156,12 +162,13 @@ void main(){
   refr=behind*tr+waterCol*(u_amb+u_sunCol*0.25*sh)*(1.0-tr)*mix(0.15,1.0,sky*sky);
   // caústicas
   float ca=pow(abs(sin(wh(v_world.xz*0.7)*6.0)),8.0); refr+=behind*ca*0.25*exp(-thick*0.2)*sh;
-  // SSR
+#if Q>=3
   vec3 vp=(u_view*vec4(v_pos,1.0)).xyz; vec3 vr=normalize(mat3(u_view)*R);
   float stepL=0.6; vec3 ray=vp; bool hit=false; vec2 huv=vec2(0);
-  int STEPS = Q>=3 ? 40 : 18;
+  int STEPS = 32;
   for(int i=0;i<40;i++){ if(i>=STEPS) break; ray+=vr*stepL; stepL*=1.18; vec4 c=u_proj*vec4(ray,1.0); vec2 uv2=c.xy/c.w*0.5+0.5; if(uv2.x<0.0||uv2.x>1.0||uv2.y<0.0||uv2.y>1.0||c.w<0.0) break; float sd=linD(texture(u_depthCopy,uv2).r); float rd=-ray.z; if(rd>sd+0.05 && rd-sd<stepL*2.0+0.5){ hit=true; huv=uv2; break; } }
   if(hit && u_under<0.5){ float edge=1.0-smoothstep(0.75,1.0,max(abs(huv.x-0.5),abs(huv.y-0.5))*2.0); refl=mix(refl,texture(u_sceneCopy,huv).rgb,edge); }
+#endif
 #else
   refr=waterCol*(u_amb+u_sunCol*0.3*sh)*mix(0.2,1.0,sky*sky)*3.0;
 #endif
@@ -311,10 +318,10 @@ void main(){
   vec3 c=texture(u_scene,uv).rgb;
   if(u_q>=1.0) c+=texture(u_bloom,uv).rgb*0.22;
   if(u_q>=2.0 && u_sunVis>0.001){
-    vec2 dl=(u_sunUV-uv)/36.0; vec2 p=uv; float acc=0.0; float w=1.0;
-    for(int i=0;i<36;i++){ p+=dl; if(p.x<0.0||p.x>1.0||p.y<0.0||p.y>1.0){ w*=0.96; continue; } acc+=step(0.99999,texture(u_depth,p).r)*w; w*=0.96; }
+    vec2 dl=(u_sunUV-uv)/24.0; vec2 p=uv; float acc=0.0; float w=1.0;
+    for(int i=0;i<24;i++){ p+=dl; if(p.x<0.0||p.x>1.0||p.y<0.0||p.y>1.0){ w*=0.94; continue; } acc+=step(0.99999,texture(u_depth,p).r)*w; w*=0.94; }
     float fall=1.0-smoothstep(0.0,0.9,length((uv-u_sunUV)*vec2(1.6,1.0)));
-    c+=u_rayCol*acc/36.0*u_sunVis*fall*1.6;
+    c+=u_rayCol*acc/24.0*u_sunVis*fall*1.6;
   }
   if(u_under>0.5) c=mix(c,c*u_underCol,0.6);
   c*=u_exposure; c=aces(c);
@@ -336,12 +343,18 @@ function compile(vs, fs, defs) {
   return { p, u };
 }
 function initGL() {
-  const cv = $('gl'); const gl = cv.getContext('webgl2', { antialias: false, alpha: false, depth: true, powerPreference: 'high-performance', preserveDrawingBuffer: false });
+  const cv = $('gl'); const gl = cv.getContext('webgl2', { antialias: false, alpha: false, depth: true, powerPreference: SETTINGS.gpuPref || 'high-performance', preserveDrawingBuffer: false });
   if (!gl) { alert('Tu navegador no soporta WebGL2. Minecraft 2 necesita WebGL2.'); throw new Error('no webgl2'); }
   R.gl = gl; R.cfb = gl.getExtension('EXT_color_buffer_float') || gl.getExtension('EXT_color_buffer_half_float');
   const an = gl.getExtension('EXT_texture_filter_anisotropic'); if (an) { R.anisoExt = an; R.maxAniso = gl.getParameter(an.MAX_TEXTURE_MAX_ANISOTROPY_EXT); }
   const dbg = gl.getExtension('WEBGL_debug_renderer_info'); R.gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER); R.vendor = dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR);
+  R.software = /SwiftShader|llvmpipe|Software|Basic Render/i.test(R.gpu);
   buildTextureArray();
+  if (SETTINGS.qualityAuto === undefined) { // primer arranque: elegir calidad según el hardware
+    const weak = /SwiftShader|llvmpipe|Software|Intel|HD Graphics|UHD|Iris|Mali|Adreno|PowerVR|Apple GPU|Radeon\(TM\) Graphics|Vega [0-9]+ Graphics/i.test(R.gpu) || (navigator.hardwareConcurrency || 4) <= 4 || (navigator.deviceMemory || 8) <= 4;
+    SETTINGS.quality = weak ? 1 : 2; if (weak) { SETTINGS.rd = Math.min(SETTINGS.rd, 5); SETTINGS.particles = 1; }
+    SETTINGS.qualityAuto = true; saveSettings();
+  }
   // cubo unidad para cajas
   const pos = [], uv = [], face = [], idx = [];
   for (let f = 0; f < 6; f++) { const F = FACE[f]; for (let k = 0; k < 4; k++) { const c = F.c[k]; pos.push(c[0], c[1], c[2]); const [u, v] = faceUV(f, c[0], c[1], c[2]); uv.push(u, v); face.push(f); } const b = f * 4; idx.push(b, b + 1, b + 2, b, b + 2, b + 3); }
@@ -367,9 +380,8 @@ function buildTextureArray() {
   const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D_ARRAY, t);
   gl.texImage3D(gl.TEXTURE_2D_ARRAY, 0, gl.RGBA8, 16, 16, n, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
   gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
-  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST_MIPMAP_LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAX_LEVEL, 4);
-  if (R.anisoExt && !/SwiftShader/i.test(R.gpu)) gl.texParameterf(gl.TEXTURE_2D_ARRAY, R.anisoExt.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(4, R.maxAniso));
+  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST_MIPMAP_NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAX_LEVEL, 3);
   R.texArr = t;
 }
 function setQuality(q) {
@@ -409,9 +421,9 @@ function mkTarget(w, h, hdr, depth) {
 }
 function freeTarget(t) { if (!t) return; const gl = R.gl; gl.deleteFramebuffer(t.fb); gl.deleteTexture(t.tex); if (t.depth) gl.deleteTexture(t.depth); }
 function resize() {
-  const cv = $('gl'); const scale = R.q === 0 ? Math.min(window.devicePixelRatio || 1, 1) * 0.75 : Math.min(window.devicePixelRatio || 1, R.q >= 3 ? 2 : 1.25);
+  const cv = $('gl'); const scale = (R.q === 0 ? Math.min(window.devicePixelRatio || 1, 1) * 0.8 : Math.min(window.devicePixelRatio || 1, R.q >= 3 ? 1.5 : 1)) * (SETTINGS.dynres === false ? 1 : R.dyn) * (SETTINGS.resScale || 1);
   const w = Math.max(1, Math.floor(cv.clientWidth * scale)), h = Math.max(1, Math.floor(cv.clientHeight * scale));
-  if (w === R.w && h === R.h) return; R.w = w; R.h = h; cv.width = w; cv.height = h;
+  if (w === R.w && h === R.h) return; R.w = w; R.h = h; cv.width = w; cv.height = h; cv.style.imageRendering = w < cv.clientWidth * (window.devicePixelRatio || 1) - 1 ? 'pixelated' : 'auto';
   for (const k of ['scene', 'copy', 'b1', 'b2']) { freeTarget(R.fbo[k]); R.fbo[k] = null; }
   if (R.q >= 1) {
     R.fbo.scene = mkTarget(w, h, true, true);
@@ -436,7 +448,8 @@ function freeMesh(ch) { if (!ch.mesh) return; const gl = R.gl; for (const k of [
 // ---------------------------------------------------------- uniforms de escena
 const ENV = { sunDir: [0, 1, 0], sunReal: [0, 1, 0], moonDir: [0, -1, 0], sunCol: [1, 1, 1], amb: [0.3, 0.3, 0.3], fogCol: [0.5, 0.6, 0.8], fog: [100, 120], day: 1 };
 const GRASS_U = new Float32Array(48 * 3), FOLI_U = new Float32Array(48 * 3);
-for (const b of BIOMES) { if (b.id >= 48) continue; const s = 1 / 0.59; GRASS_U.set(b.grass.map(v => v * s), b.id * 3); FOLI_U.set(b.foliage.map(v => v * s), b.id * 3); }
+const desat = c => { const g = (c[0] + c[1] + c[2]) / 3; return c.map(v => lerp(v, g, 0.28) / 0.59); };
+for (const b of BIOMES) { if (b.id >= 48) continue; GRASS_U.set(desat(b.grass), b.id * 3); FOLI_U.set(desat(b.foliage), b.id * 3); }
 function computeEnv(dim, camY, under, biome) {
   const t = ((G.time || 0) % 24000) / 24000; const a = t * Math.PI * 2;
   const sun = [Math.cos(a), Math.sin(a), 0.28]; const l = Math.hypot(...sun); sun[0] /= l; sun[1] /= l; sun[2] /= l;
@@ -447,7 +460,7 @@ function computeEnv(dim, camY, under, biome) {
     const useSun = sh > -0.08; ENV.sunDir = useSun ? sun : ENV.moonDir;
     const h = Math.max(0, useSun ? sh : -sh);
     const warm = Math.exp(-h * 5);
-    let sc = useSun ? [lerp(3.2, 2.6, warm), lerp(2.9, 1.3, warm), lerp(2.5, 0.5, warm)] : [0.16, 0.2, 0.32];
+    let sc = useSun ? [lerp(2.7, 2.4, warm), lerp(2.5, 1.2, warm), lerp(2.2, 0.45, warm)] : [0.16, 0.2, 0.32];
     const fade = smooth(clamp((h - 0.0) / 0.12, 0, 1)); sc = sc.map(v => v * fade * (1 - rain * 0.85));
     ENV.sunCol = sc;
     ENV.amb = [lerp(0.035, 0.42, day), lerp(0.045, 0.52, day), lerp(0.09, 0.72, day)].map(v => v * (1 - rain * 0.35));
@@ -509,8 +522,11 @@ function renderWorld(world, cam, yaw, pitch, opts = {}) {
   vis.sort((a, b) => a._d - b._d);
   R.stats.chunks = vis.length; R.stats.tris = 0; R.stats.draws = 0;
   // ---------------- sombras
-  R.shadowActive = false;
-  if (R.fbo.shadow && world.dim === 'overworld' && ENV.sunCol[0] + ENV.sunCol[1] > 0.02) {
+  R.shadowActive = false; if (!R.fbo.shadow) R.shadowCam = null;
+  R.frameN = (R.frameN || 0) + 1;
+  const shadowNow = R.q >= 3 || !R.shadowCam || R.frameN % 2 === 0 || R.shadowWorld !== world || Math.hypot(cam[0] - R.shadowCam[0], cam[2] - R.shadowCam[2]) > 6;
+  if (R.fbo.shadow && world.dim === 'overworld' && ENV.sunCol[0] + ENV.sunCol[1] > 0.02 && !shadowNow) { R.shadowActive = true; const d = M4.create(); M4.translate(d, cam[0] - R.shadowCam[0], cam[1] - R.shadowCam[1], cam[2] - R.shadowCam[2]); M4.mul(R.shadowVP, R.shadowVPbase, d); }
+  else if (R.fbo.shadow && world.dim === 'overworld' && ENV.sunCol[0] + ENV.sunCol[1] > 0.02) {
     const S = R.shadowSize; const rad = [0, 40, 64, 96][R.q]; const L = ENV.sunDir;
     const texel = rad * 2 / S;
     const up = Math.abs(L[1]) > 0.99 ? [1, 0, 0] : [0, 1, 0];
@@ -528,7 +544,7 @@ function renderWorld(world, cam, yaw, pitch, opts = {}) {
       if (!c.mesh || !c.mesh.o) continue; if (Math.abs(c.cx - pcx) > scr || Math.abs(c.cz - pcz) > scr) continue;
       gl.uniform3f(P.u.u_off, c.cx * 16 - cam[0], -cam[1], c.cz * 16 - cam[2]); gl.bindVertexArray(c.mesh.o.vao); gl.drawElements(gl.TRIANGLES, c.mesh.o.count, gl.UNSIGNED_INT, 0);
     }
-    gl.disable(gl.POLYGON_OFFSET_FILL); R.shadowActive = true;
+    gl.disable(gl.POLYGON_OFFSET_FILL); R.shadowActive = true; R.shadowCam = cam.slice(); R.shadowVPbase = new Float32Array(R.shadowVP); R.shadowWorld = world;
   }
   // ---------------- escena
   const target = R.q >= 1 ? R.fbo.scene : null;
@@ -622,7 +638,7 @@ function drawParticles(list) {
   const alphaL = [], addL = [];
   for (const p of list) { if (p.add) addL.push(p); else { p._d = (p.x - cam[0]) ** 2 + (p.y - cam[1]) ** 2 + (p.z - cam[2]) ** 2; alphaL.push(p); } }
   alphaL.sort((a, b) => b._d - a._d);
-  const fill = arr => { const D = R.partData; let n = 0; for (const p of arr) { if (n >= 8192) break; const o = n * 16; D[o] = p.x - cam[0]; D[o + 1] = p.y - cam[1]; D[o + 2] = p.z - cam[2]; D[o + 3] = p.size; D[o + 4] = p.r; D[o + 5] = p.g; D[o + 6] = p.b; D[o + 7] = p.a; const uv = p.uv || [0, 0, 1, 1]; D[o + 8] = uv[0]; D[o + 9] = uv[1]; D[o + 10] = uv[2]; D[o + 11] = uv[3]; D[o + 12] = p.rot || 0; D[o + 13] = p.layer; D[o + 14] = p.emis || 0; D[o + 15] = p.soft || 0; n++; } gl.bindBuffer(gl.ARRAY_BUFFER, R.partBuf); gl.bufferSubData(gl.ARRAY_BUFFER, 0, D, 0, n * 16); return n; };
+  const fill = arr => { const D = R.partData; let n = 0; for (const p of arr) { if (n >= 8192) break; const o = n * 16; const lf = p.light ? 0.3 + p.light[0] / 15 * 0.7 : 1; D[o] = p.x - cam[0]; D[o + 1] = p.y - cam[1]; D[o + 2] = p.z - cam[2]; D[o + 3] = p.size; D[o + 4] = p.r * lf; D[o + 5] = p.g * lf; D[o + 6] = p.b * lf; D[o + 7] = p.aCur ?? p.a; const uv = p.uv; if (uv) { D[o + 8] = uv[0]; D[o + 9] = uv[1]; D[o + 10] = uv[2]; D[o + 11] = uv[3]; } else { D[o + 8] = 0; D[o + 9] = 0; D[o + 10] = 1; D[o + 11] = 1; } D[o + 12] = p.rot || 0; D[o + 13] = p.layer; D[o + 14] = p.emis || 0; D[o + 15] = p.soft || (uv ? 0 : 0.01); n++; } gl.bindBuffer(gl.ARRAY_BUFFER, R.partBuf); gl.bufferSubData(gl.ARRAY_BUFFER, 0, D, 0, n * 16); return n; };
   let n = fill(alphaL); if (n) { gl.uniform1f(P.u.u_add, 0); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n); }
   n = fill(addL); if (n) { gl.uniform1f(P.u.u_add, 1); gl.blendFunc(gl.ONE, gl.ONE); gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n); }
   gl.depthMask(true); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);

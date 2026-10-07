@@ -70,8 +70,12 @@ class World {
   ensure(cx, cz) {
     const k = ckey(cx, cz); let c = this.chunks.get(k); if (c) return c;
     c = new Chunk(this, cx, cz);
-    const sv = this.saved[k];
     this.gen.generate(c);
+    return this.adopt(c);
+  }
+  adopt(c) {
+    const k = ckey(c.cx, c.cz); const ex = this.chunks.get(k); if (ex) return ex;
+    const sv = this.saved[k];
     if (sv) { c.blocks = rleDecode(sv.b, 256 * this.H); c.meta = rleDecode(sv.m, 256 * this.H); c.modified = true; c.loot = sv.loot || {}; c.spawners = sv.sp || c.spawners; delete this.saved[k]; c.calcTop(); }
     this.chunks.set(k, c);
     if (typeof onChunkGenerated === 'function') onChunkGenerated(this, c);

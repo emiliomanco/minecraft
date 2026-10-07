@@ -117,8 +117,9 @@ function liquidHeight(ri, liq) {
   if (d.inWater) return 0.89;
   const m = regM[ri]; if (m & 8) return 0.89; return (8 - (m & 7)) / 9;
 }
-function buildMesh(world, ch) {
-  buildRegion(world, ch); computeLight(world, ch);
+function buildMesh(world, ch) { buildRegion(world, ch); return meshRegion(world, ch); }
+function meshRegion(world, ch) {
+  computeLight(world, ch);
   const O = MB_O, T = MB_T; O.reset(); T.reset(); MB_W.reset();
   const H = world.H; const top = Math.min(H - 1, ch.top + 1);
   const fancy = MESH_QUALITY >= 1;

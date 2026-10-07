@@ -109,7 +109,7 @@ function startWorld(data, isNew, netWelcome) {
   G.worldName = data.name; G.seed = data.seed >>> 0; G.seedStr = data.seedStr; G.difficulty = data.difficulty ?? 2; G.cheats = data.cheats !== false; G.time = data.time ?? 1000; G.keepInventory = !!data.keepInventory;
   G.defaultMode = data.gameMode || 'survival'; G.gameMode = data.curMode || data.gameMode || 'survival'; G.created = data.created || Date.now(); G.structures = data.structures !== false;
   G.worlds = { overworld: new World('overworld', G.seed), nether: new World('nether', G.seed), end: new World('end', G.seed) };
-  if (!G.structures) for (const d in G.worlds) G.worlds[d].gen.genStructures = () => { };
+  if (!G.structures) for (const d in G.worlds) { G.worlds[d].gen.genStructures = () => { }; G.worlds[d].noStruct = true; }
   if (data.dims) for (const d in data.dims) for (const k in data.dims[d]) G.worlds[d].saved[k] = data.dims[d][k];
   G.containers = data.containers || {}; G.spawned = new Set(data.spawned || []); G.dragonKilled = !!data.dragonKilled; G.endInit = !!data.endInit; G.gateway = data.gateway || null; G.rain = data.rain || 0; G.rainTimer = data.rainTimer || G.rainTimer;
   G.playerStates = data.players || {};
@@ -132,6 +132,7 @@ function finishLoading() {
   G.mode = 'game'; hideScreens(); $('hud').style.display = 'block'; $('hotbar').innerHTML = ''; updateHUD(); applyGui();
   $('debugL').style.display = $('debugR').style.display = F3 ? '' : 'none';
   if (p.dim === 'end' && (!G.net || G.net.role === 'host')) initEnd();
+  if (R.software) chatMsg('⚠ El navegador está dibujando con la CPU (aceleración por hardware desactivada). Actívala en la configuración del navegador para usar la GPU y ganar mucho rendimiento.', '#f88');
   chatMsg('Bienvenido a Minecraft 2. Pulsa E para el inventario, T para chatear, F3 para depurar. Escribe /help para comandos.', '#aaa');
   lockPointer(); AU.music = 20 * 30;
 }
@@ -156,7 +157,7 @@ function showCredits() {
 }
 async function quitToTitle(save = true) {
   if (save) await saveWorld(true); stopNet(); closeScreen();
-  for (const d in G.worlds || {}) for (const c of G.worlds[d].chunks.values()) freeMesh(c);
+  for (const d in G.worlds || {}) { G.worlds[d].dead = true; WK.worlds.delete(G.worlds[d]._wid); for (const c of G.worlds[d].chunks.values()) freeMesh(c); }
   G.worlds = null; G.player = null; G.mode = 'menu'; G.entities = new Map(); G.particles = []; $('hud').style.display = 'none'; $('chatLog').innerHTML = '';
   goMenu();
 }
@@ -169,14 +170,26 @@ function neighborsReady(w, c) { for (let dx = -1; dx <= 1; dx++) for (let dz = -
 function meshChunk(w, c) { const m = buildMesh(w, c); uploadMesh(c, m); c.dirty = false; c.urgent = false; CHUNK_STATS.acc++; }
 function manageChunks(w, x, z, budget) {
   const t0 = performance.now(); const pcx = Math.floor(x) >> 4, pcz = Math.floor(z) >> 4; const rd = SETTINGS.rd;
-  // urgentes (ediciones del jugador)
-  let n = 0; for (const c of w.chunks.values()) { if (c.urgent && c.dirty && neighborsReady(w, c) && Math.abs(c.cx - pcx) <= rd && Math.abs(c.cz - pcz) <= rd) { meshChunk(w, c); if (++n > 8) break; } }
-  const S = spiral(rd + 1);
-  for (const [dx, dz] of S) { if (performance.now() - t0 > budget * 0.5) break; if (!w.chunk(pcx + dx, pcz + dz)) w.ensure(pcx + dx, pcz + dz); }
-  for (const [dx, dz, d2] of S) {
-    if (performance.now() - t0 > budget) break; if (d2 > (rd + 0.5) ** 2) continue;
-    const c = w.chunk(pcx + dx, pcz + dz); if (!c) continue;
-    if ((c.dirty || !c.mesh) && neighborsReady(w, c)) meshChunk(w, c);
+  if (WK.ok) {
+    const maxQ = WK.list.length * 3;
+    // ediciones del jugador: prioridad inmediata
+    for (const c of w.chunks.values()) if (c.urgent && c.dirty && !c.meshPending && neighborsReady(w, c) && Math.abs(c.cx - pcx) <= rd && Math.abs(c.cz - pcz) <= rd) requestMesh(w, c);
+    const S = spiral(rd + 1);
+    for (const [dx, dz] of S) { if (wkBusy() >= maxQ) break; if (!w.chunk(pcx + dx, pcz + dz)) requestGen(w, pcx + dx, pcz + dz); }
+    for (const [dx, dz, d2] of S) {
+      if (wkBusy() >= maxQ || performance.now() - t0 > budget) break; if (d2 > (rd + 0.5) ** 2) continue;
+      const c = w.chunk(pcx + dx, pcz + dz); if (!c || c.meshPending) continue;
+      if ((c.dirty || !c.mesh) && neighborsReady(w, c)) requestMesh(w, c);
+    }
+  } else {
+    let n = 0; for (const c of w.chunks.values()) { if (c.urgent && c.dirty && neighborsReady(w, c) && Math.abs(c.cx - pcx) <= rd && Math.abs(c.cz - pcz) <= rd) { meshChunk(w, c); if (++n > 8) break; } }
+    const S = spiral(rd + 1);
+    for (const [dx, dz] of S) { if (performance.now() - t0 > budget * 0.5) break; if (!w.chunk(pcx + dx, pcz + dz)) w.ensure(pcx + dx, pcz + dz); }
+    for (const [dx, dz, d2] of S) {
+      if (performance.now() - t0 > budget) break; if (d2 > (rd + 0.5) ** 2) continue;
+      const c = w.chunk(pcx + dx, pcz + dz); if (!c) continue;
+      if ((c.dirty || !c.mesh) && neighborsReady(w, c)) meshChunk(w, c);
+    }
   }
   // descarga
   if (G.player && G.worlds && G.tick % 40 === 0) {
@@ -187,25 +200,33 @@ function manageChunks(w, x, z, budget) {
         let near = false; for (const p of pls) if (Math.abs(c.cx - (Math.floor(p.x) >> 4)) <= (p === G.player ? keep : 4) && Math.abs(c.cz - (Math.floor(p.z) >> 4)) <= (p === G.player ? keep : 4)) near = true;
         if (!near) { freeMesh(c); if (c.modified) ww.saved[k] = { b: rleEncode(c.blocks), m: rleEncode(c.meta), loot: c.loot, sp: c.spawners }; ww.chunks.delete(k); }
         else if (ww !== w && c.mesh) freeMesh(c);
-        else if (c.mesh && (Math.abs(c.cx - pcx) > rd + 1 || Math.abs(c.cz - pcz) > rd + 1)) { freeMesh(c); c.dirty = true; }
+        else if (c.mesh && (Math.abs(c.cx - pcx) > rd + 1 || Math.abs(c.cz - pcz) > rd + 1)) { freeMesh(c); c.dirty = true; c.meshPending = false; }
       }
     }
   }
   // anfitrión: generar datos alrededor de jugadores remotos
-  if (G.net && G.net.role === 'host') for (const e of G.entities.values()) if (e.remotePlayer) { const ww = G.worlds[e.dim]; if (!ww) continue; const ecx = Math.floor(e.x) >> 4, ecz = Math.floor(e.z) >> 4; for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) if (!ww.chunk(ecx + dx, ecz + dz)) { if (performance.now() - t0 > budget * 1.5) return; ww.ensure(ecx + dx, ecz + dz); } }
+  if (G.net && G.net.role === 'host') for (const e of G.entities.values()) if (e.remotePlayer) { const ww = G.worlds[e.dim]; if (!ww) continue; const ecx = Math.floor(e.x) >> 4, ecz = Math.floor(e.z) >> 4; for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) if (!ww.chunk(ecx + dx, ecz + dz)) { if (WK.ok) requestGen(ww, ecx + dx, ecz + dz); else { if (performance.now() - t0 > budget * 1.5) return; ww.ensure(ecx + dx, ecz + dz); } } }
 }
 // ------------------------------------------------------------ BUCLE
 let lastT = performance.now(), acc = 0, fpsN = 0, fpsT = 0, FPS = 0, dbgT = 0;
 const MENU = { world: null, yaw: 0 };
 function frame(now) {
   requestAnimationFrame(frame);
+  if (SETTINGS.fpsCap > 0 && now - lastT < 1000 / SETTINGS.fpsCap - 1) return;
   let dt = (now - lastT) / 1000; lastT = now; if (dt > 0.1) dt = 0.1; if (dt <= 0) dt = 0.001;
-  fpsN++; fpsT += dt; if (fpsT >= 1) { FPS = Math.round(fpsN / fpsT); fpsN = 0; fpsT = 0; CHUNK_STATS.updates = CHUNK_STATS.acc; CHUNK_STATS.acc = 0; }
+  fpsN++; fpsT += dt; if (fpsT >= 1) { FPS = Math.round(fpsN / fpsT); fpsN = 0; fpsT = 0; CHUNK_STATS.updates = CHUNK_STATS.acc; CHUNK_STATS.acc = 0; dynResTick(); }
   try {
     if (G.mode === 'menu') return menuFrame(dt);
     if (G.mode === 'loading') return loadingFrame(dt);
     if (G.mode === 'game') return gameFrame(dt);
   } catch (e) { console.error(e); if (!frame.errShown) { frame.errShown = true; chatMsg('Error: ' + e.message, '#f66'); } }
+}
+// resolución dinámica: baja la resolución interna si los FPS caen, la sube si sobran
+let dynT = 0;
+function dynResTick() {
+  if (SETTINGS.dynres === false || document.hidden) return; if (++dynT < 2) return; dynT = 0;
+  const old = R.dyn; if (FPS < 40) R.dyn = Math.max(0.5, R.dyn - (FPS < 25 ? 0.15 : 0.08)); else if (FPS > 57) R.dyn = Math.min(1, R.dyn + 0.05);
+  if (Math.abs(old - R.dyn) > 0.001) resize();
 }
 function menuFrame(dt) {
   if (!MENU.world) {
@@ -285,7 +306,7 @@ function gameFrame(dt) {
   renderWorld(w, eye, yaw, pitch, {
     fov: G.fovCur, under, roll, bob, biome: w.biomeAt(Math.floor(p.x), Math.floor(p.z)),
     drawEntities: () => { drawAllEntities(p.dim, alpha, perspective > 0 && G.gameMode !== 'spectator'); },
-    particles: particleList(), drawOverlay: tr => drawOverlays(tr), drawHand: perspective === 0 && !hudHidden && G.gameMode !== 'spectator' && !p.spy ? drawHand : null,
+    particles: G.particles, drawOverlay: tr => drawOverlays(tr), drawHand: perspective === 0 && !hudHidden && G.gameMode !== 'spectator' && !p.spy ? drawHand : null,
     exposure: p.effects.night ? 1.6 : 1
   });
   // HUD dinámico
@@ -295,12 +316,12 @@ function gameFrame(dt) {
   const xpl = Math.floor(Math.sqrt((p.xp || 0) / 10)); $('xplvl').textContent = xpl > 0 ? xpl : ''; $('xpfill').style.width = (((p.xp || 0) / 10 - xpl * xpl) / (2 * xpl + 1) * 100) + '%';
   dbgT -= dt; if (F3 && dbgT <= 0) { dbgT = 0.25; const [l, r] = debugText(FPS); $('debugL').innerHTML = l.map(s => s ? `<div>${esc(s)}</div>` : '<br>').join(''); $('debugR').innerHTML = r.map(s => s ? `<div>${esc(s)}</div>` : '<br>').join(''); }
   // chat desvanecido
-  const now = performance.now(); for (const el of $('chatLog').children) el.style.opacity = now - el.dataset.t > 10000 ? 0 : 1;
+  const now = performance.now(); const slow = now - (G._uiT || 0) > 100; if (slow) { G._uiT = now; for (const el of $('chatLog').children) { const o = now - el.dataset.t > 10000 ? '0' : '1'; if (el.style.opacity !== o) el.style.opacity = o; } }
   // barra de jefe
   let boss = null; for (const e of G.entities.values()) if (e.dim === p.dim && MOB[e.type] && MOB[e.type].boss && !e.dead && Math.hypot(e.x - p.x, e.z - p.z) < 150) boss = e;
   if (boss) { $('bossbar').style.display = 'block'; $('bossName').textContent = MOB[boss.type].boss; $('bossFill').style.width = (boss.hp / (boss.maxHp || MOB[boss.type].hp) * 100) + '%'; } else $('bossbar').style.display = 'none';
   // nombres y lista de jugadores
-  updateNametags();
+  if (slow) updateNametags();
   $('plist').style.display = held('playerlist') ? 'block' : 'none'; if (held('playerlist')) { const names = [p.name, ...[...G.entities.values()].filter(e => e.type === 'player' && (e.proxy || e.remotePlayer)).map(e => e.name)]; $('plist').innerHTML = '<b>Jugadores (' + names.length + ')</b><br>' + names.map(esc).join('<br>'); }
   $('netInfo').textContent = G.net ? (G.net.role === 'host' ? 'Alojando · código ' + G.net.code + ' · ' + G.net.peers + ' conectados' : 'Conectado a ' + G.net.code) : '';
   // cursor del inventario
@@ -430,6 +451,11 @@ function buildOptions() {
   slider('Distancia de renderizado', 'rd', 2, 16, 1, v => v + ' chunks');
   toggle('Gráficos', 'quality', [0, 1, 2, 3], ['Rápidos (PC de bajos recursos)', 'Equilibrados (sombras+bloom)', 'Realistas (shaders completos)', 'Ultra (reflejos SSR+4K sombras)'], v => setQuality(v));
   toggle('Partículas', 'particles', [0, 1, 2], ['Mínimas', 'Reducidas', 'Todas']);
+  toggle('Procesador gráfico', 'gpuPref', ['high-performance', 'default', 'low-power'], ['GPU dedicada (rendimiento)', 'Automático', 'GPU integrada (ahorro)'], () => { if (confirm('Este cambio necesita recargar la página. ¿Recargar ahora?')) { if (G.mode === 'game') saveWorld(true).then(() => location.reload()); else location.reload(); } });
+  toggle('Límite de FPS', 'fpsCap', [0, 30, 60, 120], ['Sin límite (VSync)', '30', '60', '120']);
+  toggle('Hilos de CPU para chunks', 'threads', [0, 1, 2, 3, 4, 6], ['Automático', '1', '2', '3', '4', '6'], () => { if (confirm('Este cambio necesita recargar la página. ¿Recargar ahora?')) { if (G.mode === 'game') saveWorld(true).then(() => location.reload()); else location.reload(); } });
+  toggle('Resolución dinámica', 'dynres', [true, false], ['Sí (recomendado)', 'No'], v => { R.dyn = 1; resize(); });
+  slider('Escala de resolución', 'resScale', 0.5, 1, 0.05, v => Math.round(v * 100) + '%', () => resize());
   slider('Sensibilidad', 'sens', 0.05, 1.5, 0.01, v => Math.round(v * 100) + '%');
   slider('Volumen', 'vol', 0, 1, 0.01, v => v === 0 ? 'Silencio' : Math.round(v * 100) + '%', v => { if (AU.master) AU.master.gain.value = v; });
   slider('Brillo', 'brightness', 0, 1, 0.01, v => v === 0 ? 'Oscuro' : v === 1 ? 'Brillante' : Math.round(v * 100) + '%');
@@ -437,6 +463,7 @@ function buildOptions() {
   toggle('Balanceo de vista', 'bob', [true, false], ['Sí', 'No']);
   toggle('Invertir ratón', 'invertY', [false, true], ['No', 'Sí']);
   slider('Escala de interfaz', 'gui', 1, 3, 0.25, v => v + 'x', applyGui);
+  const gi = document.createElement('div'); gi.className = 'note'; gi.style.gridColumn = '1/-1'; gi.innerHTML = 'Dibujando con: <b>' + esc(R.gpu || '?') + '</b>' + (R.software ? '<br><span style="color:#f66">⚠ Tu navegador está dibujando con la CPU (sin aceleración por hardware). Activa «Usar aceleración por hardware» en la configuración del navegador para usar la GPU.</span>' : ''); box.appendChild(gi);
   const n = document.createElement('div'); n.className = 'note'; n.style.gridColumn = '1/-1'; n.textContent = 'Consejo: en computadoras de bajos recursos usa gráficos «Rápidos», 4-6 chunks y partículas reducidas. El juego usa culling de caras ocultas, de frustum y por distancia.'; box.appendChild(n);
 }
 function applyGui() { document.documentElement.style.setProperty('--ui', (SETTINGS.gui / 2).toFixed(2)); }
@@ -509,7 +536,7 @@ function boot() {
   try { initGL(); } catch (e) { document.body.innerHTML = '<div style="padding:40px;font-size:28px;color:#fff;font-family:monospace">Minecraft 2 necesita un navegador con WebGL2.<br><br>' + esc(e.message) + '</div>'; return; }
   const dirt = tileCanvas('dirt'); const dc = document.createElement('canvas'); dc.width = dc.height = 16; const dg = dc.getContext('2d'); dg.drawImage(dirt, 0, 0); dg.fillStyle = 'rgba(0,0,0,.6)'; dg.fillRect(0, 0, 16, 16);
   const url = dc.toDataURL(); document.querySelectorAll('.dirt').forEach(el => el.style.backgroundImage = `url(${url})`);
-  drawLogo(); setupMenus(); setupInput(); applyGui(); goMenu();
+  initWorkers(); drawLogo(); setupMenus(); setupInput(); applyGui(); goMenu();
   // anfitrión tras cargar
   setInterval(() => { if (G.mode === 'game' && G.pendingHost) { G.pendingHost = false; startHost().then(code => { showTitle('Código: ' + code, 'Comparte este código con tus amigos'); }); } }, 500);
   requestAnimationFrame(frame);

@@ -322,7 +322,7 @@ class Painter {
   set(x, y, c, a = 255) { if (x < 0 || y < 0 || x > 15 || y > 15) return; const i = (y * 16 + x) * 4; this.d[i] = c[0]; this.d[i + 1] = c[1]; this.d[i + 2] = c[2]; this.d[i + 3] = c.length > 3 ? c[3] : a; }
   get(x, y) { const i = ((y & 15) * 16 + (x & 15)) * 4; return [this.d[i], this.d[i + 1], this.d[i + 2], this.d[i + 3]]; }
   fill(c, v = 0, a = 255) { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const k = (this.r() - 0.5) * 2 * v; this.set(x, y, [c[0] + k, c[1] + k, c[2] + k], a); } return this; }
-  noise(c, v, sc = 1) { const s = this.r() * 100; for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const k = ((this.r() - 0.5) * 0.6 + Math.sin((x + s) * 1.7 * sc) * Math.cos((y * 1.3 + s) * sc) * 0.4) * 2 * v; this.set(x, y, [c[0] + k, c[1] + k, c[2] + k]); } return this; }
+  noise(c, v, sc = 1) { const s = this.r() * 100; for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const k = ((this.r() - 0.5) * 1.0 + Math.sin((x + s) * 1.7 * sc) * Math.cos((y * 1.3 + s) * sc) * 0.18) * 2.2 * v; this.set(x, y, [c[0] + k, c[1] + k, c[2] + k]); } return this; }
   speck(c, n, v = 10) { for (let i = 0; i < n; i++) { const k = (this.r() - 0.5) * v; this.set((this.r() * 16) | 0, (this.r() * 16) | 0, [c[0] + k, c[1] + k, c[2] + k]); } return this; }
   blobs(c, n, size = 3, v = 15) { for (let i = 0; i < n; i++) { let x = (this.r() * 16) | 0, y = (this.r() * 16) | 0; for (let j = 0; j < size; j++) { const k = (this.r() - 0.5) * v; this.set(x, y, [c[0] + k, c[1] + k, c[2] + k]); x += ((this.r() * 3) | 0) - 1; y += ((this.r() * 3) | 0) - 1; } } return this; }
   shade(f) { for (let i = 0; i < 1024; i += 4) { this.d[i] *= f; this.d[i + 1] *= f; this.d[i + 2] *= f; } return this; }

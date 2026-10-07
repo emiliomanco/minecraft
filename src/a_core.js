@@ -105,7 +105,7 @@ const DEFAULT_KEYS = {
 const KEY_NAMES = { forward: 'Avanzar', back: 'Retroceder', left: 'Izquierda', right: 'Derecha', jump: 'Saltar', sneak: 'Agacharse', sprint: 'Correr', inventory: 'Inventario', drop: 'Soltar objeto', chat: 'Abrir chat', command: 'Abrir comando', perspective: 'Cambiar perspectiva', hideHud: 'Ocultar HUD', debug: 'Menú de depuración (F3)', attack: 'Atacar / Destruir', use: 'Usar objeto / Colocar', pick: 'Elegir bloque', playerlist: 'Lista de jugadores' };
 const SETTINGS = Object.assign({
   fov: 70, rd: 6, sens: 0.5, vol: 0.7, quality: 2, gui: 2, bob: true, invertY: false, name: 'Jugador' + Math.floor(Math.random() * 900 + 100),
-  clouds: true, particles: 2, brightness: 0.5
+  clouds: true, particles: 2, brightness: 0.5, dynres: true, resScale: 1, gpuPref: 'high-performance', fpsCap: 0, threads: 0
 }, (() => { try { return JSON.parse(localStorage.getItem('mc2-settings') || '{}'); } catch (e) { return {}; } })());
 SETTINGS.keys = Object.assign({}, DEFAULT_KEYS, SETTINGS.keys || {});
 function saveSettings() { try { localStorage.setItem('mc2-settings', JSON.stringify(SETTINGS)); } catch (e) { } }

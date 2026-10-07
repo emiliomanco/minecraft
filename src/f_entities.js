@@ -277,7 +277,8 @@ class Player extends Entity {
   armorPts() { let p = 0; for (const a of this.armor) if (a) { const d = REG[a.id]; if (d.armor) p += d.armor.pts; } return p; }
   damage(amount, cause, attacker, kx = 0, ky = 0, kz = 0) {
     if (this.dead || G.gameMode === 'creative' || G.gameMode === 'spectator') { if (cause === 'void' && G.gameMode !== 'spectator') { } else return false; }
-    if (this.invul > 0 && cause !== 'void' && cause !== 'starve' && cause !== 'drown') return false;
+    if (this.invul > 0 && cause !== 'void' && cause !== 'starve' && cause !== 'drown') { if (amount <= (this.lastDmg || 0)) return false; amount -= this.lastDmg || 0; }
+    this.lastDmg = amount;
     if (cause !== 'void' && cause !== 'starve' && cause !== 'fall' && cause !== 'drown' && cause !== 'fire' && cause !== 'lava') {
       const pts = this.armorPts(); let tough = 0; for (const a of this.armor) if (a && REG[a.id].armor) tough += REG[a.id].armor.tough || 0;
       amount = amount * (1 - Math.min(20, Math.max(pts / 5, pts - amount / (2 + tough / 4))) / 25);
