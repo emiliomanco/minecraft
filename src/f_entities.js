@@ -4,10 +4,11 @@
 const G = { tick: 0, time: 1000, worlds: null, world: null, player: null, entities: new Map(), mode: 'menu', gameMode: 'survival', difficulty: 2, seed: 0, net: null, particles: [], rain: 0, rainLevel: 0, rainTimer: 12000, containers: {}, spawned: new Set(), dragonKilled: false, endInit: false, shake: 0, paused: false };
 let nextEid = 1;
 // ------------------------------------------------------------ colisiones
-function blockBoxes(id, meta, x, y, z, out) {
+function blockBoxes(id, meta, x, y, z, out, world) {
   if (id < 0) { out.push([x, y, z, x + 1, y + 1, z + 1]); return; }
   const d = REG[id]; if (!d || !d.solid) return;
   if (d.render === 'snow') { const h = (Math.max(1, meta) - 1) / 8; if (h > 0) out.push([x, y, z, x + 1, y + h, z + 1]); return; }
+  if (d.shape) { if (d.shape === 'gate' && (meta & 4)) return; const tall = d.shape === 'fence' || d.shape === 'wall' || d.shape === 'gate'; for (const b of shapeBoxes(d, meta, (dx, dz) => world ? world.get(x + dx, y, z + dz) : 0, true)) out.push([x + b[0] / 16, y + b[1] / 16, z + b[2] / 16, x + b[3] / 16, y + (tall ? 24 : b[4]) / 16, z + b[5] / 16]); return; }
   if (d.box) { const b = d.box; const top = d.fenceH ? d.fenceH : b[4] / 16; out.push([x + b[0] / 16, y + b[1] / 16, z + b[2] / 16, x + b[3] / 16, y + top, z + b[5] / 16]); return; }
   if (d.id === ID.cactus) { out.push([x + 1 / 16, y, z + 1 / 16, x + 15 / 16, y + 1, z + 15 / 16]); return; }
   out.push([x, y, z, x + 1, y + 1, z + 1]);
@@ -16,7 +17,7 @@ const _bx = [];
 function collect(world, x0, y0, z0, x1, y1, z1) {
   _bx.length = 0;
   for (let x = Math.floor(x0); x <= Math.floor(x1); x++) for (let z = Math.floor(z0); z <= Math.floor(z1); z++) for (let y = Math.floor(y0) - 1; y <= Math.floor(y1); y++) {
-    const id = world.get(x, y, z); if (id === 0) continue; blockBoxes(id, world.getMeta(x, y, z), x, y, z, _bx);
+    const id = world.get(x, y, z); if (id === 0) continue; blockBoxes(id, world.getMeta(x, y, z), x, y, z, _bx, world);
   }
   return _bx;
 }
@@ -126,7 +127,7 @@ function dropItem(dim, x, y, z, stack, vx, vy, vz, delay) {
   if (delay !== undefined) e.pickup = delay; G.entities.set(e.id, e); return e;
 }
 class Projectile extends Entity {
-  constructor(type, dim, x, y, z, vx, vy, vz, owner) { super(type, dim, x, y, z); this.vx = vx; this.vy = vy; this.vz = vz; this.owner = owner; this.w = 0.25; this.h = 0.25; this.stuck = false; this.step = 0; this.grav = { arrow: 20, pearl: 12, snowball: 12, eye: 0, fireball: 0, small_fireball: 0, wind_charge: 0, shulker_bullet: 0, trident: 20 }[type] ?? 12; }
+  constructor(type, dim, x, y, z, vx, vy, vz, owner) { super(type, dim, x, y, z); this.vx = vx; this.vy = vy; this.vz = vz; this.owner = owner; this.w = 0.25; this.h = 0.25; this.stuck = false; this.step = 0; this.grav = { arrow: 20, pearl: 12, snowball: 12, xpbottle: 12, eye: 0, fireball: 0, small_fireball: 0, wind_charge: 0, shulker_bullet: 0, trident: 20 }[type] ?? 12; }
 }
 function shoot(type, dim, x, y, z, vx, vy, vz, owner, extra) {
   if (G.net && G.net.role === 'client' && owner === G.player) { netSend({ t: 'proj', ty: type, d: dim, x, y, z, vx, vy, vz, ex: extra }); if (type !== 'eye') return null; }
@@ -258,6 +259,7 @@ function endermanTeleport(e) {
 }
 function mobDie(e) {
   if (e.dropped) return; e.dropped = true; const d = e.def;
+  if (e.killer === G.player && d) G.player.xp = (G.player.xp || 0) + (d.boss ? 50 : d.hostile ? 5 : 2);
   if (!d) return;
   for (const [name, a, b, cooked, ch] of d.drops) { if (ch !== undefined && Math.random() > ch) continue; const n = a + ((Math.random() * (b - a + 1)) | 0); if (n > 0) dropItem(e.dim, e.x, e.y + 0.5, e.z, { id: ID[(e.fire > 0 && cooked) ? cooked : name], c: n }); }
   if (e.type === 'sheep' && e.color && e.color[0] < 0.4) { /* oveja negra */ }
@@ -284,7 +286,8 @@ class Player extends Entity {
       amount = amount * (1 - Math.min(20, Math.max(pts / 5, pts - amount / (2 + tough / 4))) / 25);
       for (let i = 0; i < 4; i++) if (this.armor[i]) damageItem(this.armor, i, 1);
     }
-    if (cause === 'fall') { const b = this.armor[3]; }
+    let epf = 0; for (const a of this.armor) epf += enchLvl(a, 'protection'); if (cause === 'fall') epf += enchLvl(this.armor[3], 'feather_falling') * 3;
+    if (epf && cause !== 'void' && cause !== 'starve') amount *= 1 - Math.min(20, epf) * 0.04;
     if (attacker && attacker.def && G.difficulty === 1) amount *= 0.5; if (attacker && attacker.def && G.difficulty === 3) amount *= 1.5;
     if (G.difficulty === 0 && attacker && attacker.def) return false;
     if (this.effects.resistance) amount *= 0.6;
@@ -308,6 +311,7 @@ class Player extends Entity {
 function mobName(t) { return ({ zombie: 'Zombi', skeleton: 'Esqueleto', creeper: 'Creeper', spider: 'Araña', enderman: 'Enderman', blaze: 'Blaze', ghast: 'Ghast', ender_dragon: 'Ender Dragon', warden: 'Warden', pillager: 'Saqueador', vindicator: 'Vindicador', evoker: 'Invocador', guardian: 'Guardián', piglin: 'Piglin', zombified_piglin: 'Piglin zombificado', hoglin: 'Hoglin', wither_skeleton: 'Esqueleto wither', drowned: 'Ahogado', husk: 'Zombi momificado', magma_cube: 'Cubo de magma', shulker: 'Shulker', breeze: 'Breeze', cave_spider: 'Araña de cueva', silverfish: 'Lepisma', iron_golem: 'Gólem de hierro', player: 'Jugador' })[t] || t; }
 function damageItem(arr, i, n) {
   const s = arr[i]; if (!s || G.gameMode === 'creative') return; const d = REG[s.id]; if (!d.dur) return;
+  const ub = s.e && s.e.unbreaking; if (ub && Math.random() > 1 / (ub + 1)) return;
   s.d = (s.d || 0) + n; if (s.d >= d.dur) { arr[i] = null; playSound('break_item', G.player.x, G.player.y, G.player.z, 0.8); }
 }
 // ------------------------------------------------------------ física del jugador
@@ -383,11 +387,16 @@ function updatePlayerPhysics(p, dt, input) {
       if (ld && ld.bouncy && !p.sneaking && vyBefore < -3) { p.vy = -vyBefore * 0.8; p.onGround = false; p.fallDist = 0; }
       else if (p.fallDist > 3.2) { let dmg = Math.floor(p.fallDist - 3); if (land === ID.hay_block) dmg = Math.floor(dmg * 0.2); if (ld && (ld.sticky || ld.bouncy)) dmg = 0; if (dmg > 0) { p.damage(dmg, 'fall'); playSound('fall', p.x, p.y, p.z, 1); blockParticles(w, Math.floor(p.x), Math.floor(p.y - 1), Math.floor(p.z), land, 10, 2); } }
       p.fallDist = 0;
-      if (land === ID.snow && Math.random() < 0.06 && (Math.abs(p.vx) + Math.abs(p.vz)) > 1) { const sx = Math.floor(p.x), sy = Math.floor(p.y - 0.05), sz = Math.floor(p.z); const m = w.getMeta(sx, sy, sz); if (m > 2) { w.set(sx, sy, sz, ID.snow, m - 1); } }
+
     }
   }
   // distancia caminada para animación / sonidos
   const hd = Math.hypot(p.x - p.px, p.z - p.pz); p.walk += hd; p.walkAmt = lerp(p.walkAmt, Math.min(1, hd / dt / 4.3), Math.min(1, dt * 10));
+  if (p.onGround && hd > 0 && G.gameMode !== 'spectator') { // huellas en la nieve: cada paso hunde la capa y deja un surco
+    p.snowAcc = (p.snowAcc || 0) + hd; const sx = Math.floor(p.x), sy = Math.floor(p.y - 0.05), sz = Math.floor(p.z);
+    if (p.snowAcc > 0.7 && w.get(sx, sy, sz) === ID.snow) { p.snowAcc = 0; const m = Math.max(1, w.getMeta(sx, sy, sz)); if (m > 2 && !p.flying) setBlockNet(w, sx, sy, sz, ID.snow, Math.max(2, m - (p.sneaking ? 1 : 2)));
+      for (let i = 0; i < 5; i++) P_({ x: p.x + (Math.random() - 0.5) * 0.5, y: p.y + 0.05, z: p.z + (Math.random() - 0.5) * 0.5, vx: (Math.random() - 0.5) * 1.5 - p.vx * 0.1, vy: 0.8 + Math.random(), vz: (Math.random() - 0.5) * 1.5 - p.vz * 0.1, life: 0.9, size: 0.18 + Math.random() * 0.12, grow: 0.3, layer: TEX.soft, r: 0.95, g: 0.97, b: 1, a: 0.6, grav: 4, drag: 2, soft: 0.3 }); }
+  }
   if (p.onGround && hd > 0) { p.stepAcc = (p.stepAcc || 0) + hd; if (p.stepAcc > 1.8) { p.stepAcc = 0; playSound('step', p.x, p.y, p.z, 0.25, below); if (p.sprinting) p.exh += 0.1 * 1.8; } }
   if (p.y < -64) p.damage(4, 'void');
 }
@@ -400,13 +409,13 @@ function playerTick(p) {
   if (p.effects.levitation) p.vy = 2;
   const survival = G.gameMode === 'survival' || G.gameMode === 'adventure';
   // aire
-  if (p.eyeInWater && survival && !(p.armor[0] && p.armor[0].id === ID.turtle_helmet && p.air > 0 && G.tick % 2)) { p.air--; if (p.air <= -20) { p.air = 0; p.damage(2, 'drown'); } } else p.air = Math.min(300, p.air + 5);
+  if (p.eyeInWater && survival && !(p.armor[0] && p.armor[0].id === ID.turtle_helmet && p.air > 0 && G.tick % 2) && !(Math.random() < enchLvl(p.armor[0], 'respiration') / (enchLvl(p.armor[0], 'respiration') + 1))) { p.air--; if (p.air <= -20) { p.air = 0; p.damage(2, 'drown'); } } else p.air = Math.min(300, p.air + 5);
   // fuego/lava
   if (p.inLava && survival) { p.fire = 300; if (G.tick % 10 === 0) p.damage(4, 'lava'); }
   const fireB = entityInBlock(w, p, d => d.id === ID.fire); if (fireB && survival) { p.fire = Math.max(p.fire, 160); if (G.tick % 10 === 0) p.damage(1, 'fire'); }
   if (p.fire > 0) { p.fire--; if (p.inWater) p.fire = 0; if (survival && G.tick % 20 === 0 && !p.inLava) p.damage(1, 'fire'); if (Math.random() < 0.5) flame(p.x + (Math.random() - 0.5) * 0.6, p.y + Math.random() * 1.6, p.z + (Math.random() - 0.5) * 0.6, { size: 0.35 }); }
   const hurtB = entityInBlock(w, p, d => d.id === ID.cactus); const under = blockAt(w, p.x, p.y - 0.1, p.z);
-  if ((hurtB || (under === ID.magma_block && !p.sneaking)) && survival && G.tick % 10 === 0) p.damage(1, under === ID.magma_block ? 'fire' : 'cactus');
+  if ((hurtB || ((under === ID.magma_block || under === ID.campfire) && !p.sneaking) || entityInBlock(w, p, d => d.campfire)) && survival && G.tick % 10 === 0) p.damage(1, hurtB ? 'cactus' : 'fire');
   if (!survival) { p.food = 20; p.air = 300; return; }
   // hambre
   if (p.exh >= 4) { p.exh -= 4; if (p.sat > 0) p.sat = Math.max(0, p.sat - 1); else if (G.difficulty > 0) p.food = Math.max(0, p.food - 1); }
@@ -613,6 +622,7 @@ function projHit(e, w, o, x, y, z, b) {
   if (t === 'fireball') { explode(w, x, y, z, 1, true, e); return; }
   if (t === 'small_fireball') { if (o) { hurtEntity(o, 5, e.owner); o.fire = 100; } else { const fx = Math.floor(x - e.vx * 0.01), fy = Math.floor(y - e.vy * 0.02), fz = Math.floor(z - e.vz * 0.01); if (w.get(fx, fy, fz) === 0) w.set(fx, fy, fz, ID.fire); } for (let i = 0; i < 6; i++) flame(x, y, z, { size: 0.3, vy: 1 }); return; }
   if (t === 'pearl') { const ow = e.owner; for (let i = 0; i < 24; i++) P_({ x, y, z, vx: (Math.random() - 0.5) * 3, vy: Math.random() * 3, vz: (Math.random() - 0.5) * 3, life: 1, size: 0.1, layer: TEX.portal_p, add: true, emis: 3, r: 0.6, g: 0.3, b: 1 }); if (ow === G.player) { ow.x = x; ow.y = y + 0.2; ow.z = z; ow.vy = 0; ow.fallDist = 0; ow.damage(5, 'fall'); playSound('portal', x, y, z, 0.6); } else if (ow && ow.remotePlayer) netSendTo(ow.conn, { t: 'tp', x, y: y + 0.2, z }); return; }
+  if (t === 'xpbottle') { if (G.player) G.player.xp = (G.player.xp || 0) + 3 + (Math.random() * 8 | 0); for (let i = 0; i < 16; i++) P_({ x, y, z, vx: (Math.random() - 0.5) * 4, vy: Math.random() * 4, vz: (Math.random() - 0.5) * 4, life: 1, size: 0.12, layer: TEX.spark, add: true, emis: 3, r: 0.5, g: 1, b: 0.3, grav: 6 }); playSound('levelup', x, y, z, 0.3); return; }
   if (t === 'snowball') { if (o) hurtEntity(o, o.type === 'blaze' ? 3 : 0.01, e.owner, e.vx * 0.1, 2, e.vz * 0.1); for (let i = 0; i < 8; i++) P_({ x, y, z, vx: (Math.random() - 0.5) * 3, vy: Math.random() * 3, vz: (Math.random() - 0.5) * 3, life: 0.6, size: 0.1, layer: TEX.snow, grav: 10 }); return; }
   if (t === 'wind_charge') { for (const p of [G.player, ...G.entities.values()]) { if (!p || p.dim !== e.dim || p.removed || p instanceof Projectile) continue; const d = Math.hypot(p.x - x, p.y - y, p.z - z); if (d < 3) { const k = (3 - d) * 4; if (p === G.player) { p.vx += (p.x - x) / (d || 1) * k; p.vy += 8; p.vz += (p.z - z) / (d || 1) * k; p.damage(1, 'explosion', e.owner); } else { p.vx += (p.x - x) * k; p.vy += 6; p.vz += (p.z - z) * k; } } } for (let i = 0; i < 20; i++) P_({ x, y, z, vx: (Math.random() - 0.5) * 8, vy: (Math.random() - 0.5) * 8, vz: (Math.random() - 0.5) * 8, life: 0.5, size: 0.4, grow: 2, layer: TEX.soft, r: 0.85, g: 0.9, b: 1, a: 0.4, drag: 3 }); return; }
   if (t === 'shulker_bullet') { if (o) { hurtEntity(o, 4, e.owner); if (o === G.player) o.effects.levitation = 40; } return; }

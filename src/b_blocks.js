@@ -7,7 +7,7 @@ const TEXNAMES = [];     // layer -> name
 const TEX = {};          // name -> layer
 function texLayer(name) { if (TEX[name] === undefined) { TEX[name] = TEXNAMES.length; TEXNAMES.push(name); } return TEX[name]; }
 
-let _nextBlock = 0, _nextItem = 256;
+let _nextBlock = 0, _nextItem = 1000; const ITEM_BASE = 1000;
 // render: cube | cross | liquid | box | snow | none
 function defB(name, disp, o = {}) {
   const id = _nextBlock++;
@@ -22,7 +22,7 @@ function defB(name, disp, o = {}) {
   if (typeof t === 'string') t = { top: t, bottom: t, side: t };
   t = Object.assign({}, t); if (!t.bottom) t.bottom = t.top; if (!t.front) t.front = t.side; if (!t.back) t.back = t.side;
   d.faces = [texLayer(t.side), texLayer(t.side), texLayer(t.top), texLayer(t.bottom), texLayer(t.back), texLayer(t.front)];
-  d.texNames = t;
+  d.texNames = t; if (o.texTop) d.layerTop = texLayer(o.texTop);
   if (d.blast === null) d.blast = d.hard < 0 ? 3600000 : d.hard * 2.5;
   REG[id] = d; ID[name] = id; return id;
 }
@@ -113,7 +113,10 @@ defB('jack_o_lantern', 'Calabaza iluminada', { tex: { top: 'pumpkin_top', side: 
 defB('melon', 'Sandía', { tex: { top: 'melon_top', side: 'melon_side' }, hard: 1, tool: 'axe', drop: 'melon_slice', dropN: 5 });
 defB('hay_block', 'Fardo de heno', { tex: { top: 'hay_top', side: 'hay_side' }, hard: 0.5, flammable: true });
 defB('farmland', 'Tierra de cultivo', { render: 'box', box: [0, 0, 0, 16, 15, 16], tex: { top: 'farmland', side: 'dirt' }, hard: 0.6, tool: 'shovel', drop: 'dirt' });
-defB('wheat', 'Trigo', Object.assign({}, PL, { drop: 'wheat', dropN: 1 }));
+defB('wheat', 'Trigo', Object.assign({}, PL, { drop: 'wheat', dropN: 1, crop: 'wheat' }));
+defB('carrots', 'Zanahorias', Object.assign({}, PL, { drop: 'carrot', crop: 'carrots', tex: 'carrots_3' }));
+defB('potatoes', 'Patatas', Object.assign({}, PL, { drop: 'potato', crop: 'potatoes', tex: 'potatoes_3' }));
+defB('beetroots', 'Remolachas', Object.assign({}, PL, { drop: 'beetroot', crop: 'beetroots', tex: 'beetroots_3' }));
 defB('dirt_path', 'Camino de tierra', { render: 'box', box: [0, 0, 0, 16, 15, 16], tex: { top: 'path_top', side: 'path_side', bottom: 'dirt' }, hard: 0.65, tool: 'shovel', drop: 'dirt' });
 defB('obsidian', 'Obsidiana', { hard: 50, tool: 'pickaxe', lvl: 4, blast: 3600 });
 defB('crying_obsidian', 'Obsidiana llorosa', { hard: 50, tool: 'pickaxe', lvl: 4, light: 10, blast: 3600 });
@@ -132,9 +135,9 @@ defB('sugar_cane', 'Caña de azúcar', Object.assign({}, PL, { drop: 'sugar_cane
 defB('lily_pad', 'Nenúfar', { render: 'box', box: [0, 0, 0, 16, 1, 16], hard: 0, trans: 1, tint: 2, drop: 'lily_pad' });
 defB('vine', 'Enredadera', Object.assign({}, PL, { tint: 2, replace: true, drop: null, climb: true }));
 defB('ladder', 'Escalera de mano', Object.assign({}, PL, { climb: true, drop: 'ladder', hard: 0.4 }));
-defB('iron_bars', 'Barrotes de hierro', { trans: 1, hard: 5, tool: 'pickaxe', cullSelf: true });
-defB('oak_fence', 'Valla de roble', { render: 'box', box: [6, 0, 6, 10, 16, 10], tex: 'oak_planks', hard: 2, tool: 'axe', fenceH: 1.5 });
-defB('dark_oak_fence', 'Valla de roble oscuro', { render: 'box', box: [6, 0, 6, 10, 16, 10], tex: 'dark_oak_planks', hard: 2, tool: 'axe', fenceH: 1.5 });
+defB('iron_bars', 'Barrotes de hierro', { render: 'shape', shape: 'pane', trans: 1, hard: 5, tool: 'pickaxe', solid: true });
+defB('oak_fence', 'Valla de roble', { render: 'shape', shape: 'fence', solid: true, tex: 'oak_planks', hard: 2, tool: 'axe', fenceH: 1.5 });
+defB('dark_oak_fence', 'Valla de roble oscuro', { render: 'shape', shape: 'fence', solid: true, tex: 'dark_oak_planks', hard: 2, tool: 'axe', fenceH: 1.5 });
 defB('rail', 'Raíl', { render: 'box', box: [0, 0, 0, 16, 1, 16], trans: 1, solid: false, hard: 0.7 });
 // minerales en bloque
 for (const [m, dn] of [['iron', 'hierro'], ['gold', 'oro'], ['diamond', 'diamante'], ['emerald', 'esmeralda'], ['netherite', 'netherita'], ['coal', 'carbón'], ['lapis', 'lapislázuli'], ['redstone', 'redstone'], ['copper', 'cobre']])
@@ -163,7 +166,7 @@ defB('dark_prismarine', 'Prismarina oscura', { hard: 1.5, tool: 'pickaxe', lvl: 
 defB('sea_lantern', 'Linterna marina', { hard: 0.3, light: 15, emissive: true });
 defB('kelp', 'Algas', Object.assign({}, PL, { wave: 2, inWater: true }));
 defB('seagrass', 'Pasto marino', Object.assign({}, PL, { wave: 2, inWater: true, replace: true }));
-defB('cobblestone_wall', 'Muro de roca', { render: 'box', box: [4, 0, 4, 12, 16, 12], tex: 'cobblestone', hard: 2, tool: 'pickaxe', lvl: 1, fenceH: 1.5 });
+defB('cobblestone_wall', 'Muro de roca', { render: 'shape', shape: 'wall', solid: true, tex: 'cobblestone', hard: 2, tool: 'pickaxe', lvl: 1, fenceH: 1.5 });
 // nether
 defB('netherrack', 'Netherrack', { hard: 0.4, tool: 'pickaxe', lvl: 1, infiniteFire: true });
 defB('soul_sand', 'Arena de almas', { hard: 0.5, tool: 'shovel', slowWalk: true });
@@ -171,7 +174,7 @@ defB('soul_soil', 'Tierra de almas', { hard: 0.5, tool: 'shovel' });
 defB('glowstone', 'Piedra luminosa', { hard: 0.3, light: 15, drop: 'glowstone_dust', dropN: 3, emissive: true });
 defB('nether_bricks', 'Ladrillos del Nether', { hard: 2, tool: 'pickaxe', lvl: 1 });
 defB('red_nether_bricks', 'Ladrillos del Nether rojos', { hard: 2, tool: 'pickaxe', lvl: 1 });
-defB('nether_brick_fence', 'Valla de ladrillo del Nether', { render: 'box', box: [6, 0, 6, 10, 16, 10], tex: 'nether_bricks', hard: 2, tool: 'pickaxe', lvl: 1, fenceH: 1.5 });
+defB('nether_brick_fence', 'Valla de ladrillo del Nether', { render: 'shape', shape: 'fence', solid: true, tex: 'nether_bricks', hard: 2, tool: 'pickaxe', lvl: 1, fenceH: 1.5 });
 defB('nether_quartz_ore', 'Mena de cuarzo del Nether', { tex: 'nether_quartz_ore', hard: 3, tool: 'pickaxe', lvl: 1, drop: 'quartz' });
 defB('nether_gold_ore', 'Mena de oro del Nether', { hard: 3, tool: 'pickaxe', lvl: 1, drop: 'gold_nugget', dropN: 4 });
 defB('ancient_debris', 'Escombros ancestrales', { tex: { top: 'ancient_debris_top', side: 'ancient_debris_side' }, hard: 30, tool: 'pickaxe', lvl: 4, blast: 3600 });
@@ -241,8 +244,22 @@ defB('mud_bricks', 'Ladrillos de barro', { hard: 1.5, tool: 'pickaxe' });
 defB('honeycomb_block', 'Bloque de panal', { hard: 0.6 });
 defB('bee_nest', 'Colmena', { tex: { top: 'bee_nest_top', side: 'bee_nest_side', front: 'bee_nest_front' }, hard: 0.3, tool: 'axe', orient: true });
 defB('mushroom_stem', 'Tallo de champiñón', { hard: 0.2, tool: 'axe', drop: null });
+
+// ---- construcción: escaleras, puertas, trampillas, paneles
+for (const [n, dn, tex, tool] of [['oak', 'roble', 'oak_planks', 'axe'], ['spruce', 'abeto', 'spruce_planks', 'axe'], ['birch', 'abedul', 'birch_planks', 'axe'], ['dark_oak', 'roble oscuro', 'dark_oak_planks', 'axe'], ['jungle', 'jungla', 'jungle_planks', 'axe'], ['acacia', 'acacia', 'acacia_planks', 'axe'], ['cherry', 'cerezo', 'cherry_planks', 'axe'],
+  ['cobblestone', 'roca', 'cobblestone', 'pickaxe'], ['stone_brick', 'ladrillos de piedra', 'stone_bricks', 'pickaxe'], ['sandstone', 'arenisca', 'sandstone_top', 'pickaxe'], ['brick', 'ladrillos', 'bricks', 'pickaxe'], ['nether_brick', 'ladrillos del Nether', 'nether_bricks', 'pickaxe'],
+  ['blackstone', 'piedra negra', 'polished_blackstone_bricks', 'pickaxe'], ['deepslate_brick', 'ladrillos de pizarra', 'deepslate_bricks', 'pickaxe'], ['purpur', 'púrpur', 'purpur_block', 'pickaxe'], ['mud_brick', 'ladrillos de barro', 'mud_bricks', 'pickaxe']])
+  defB(n + '_stairs', 'Escaleras de ' + dn, { render: 'shape', shape: 'stairs', solid: true, tex, hard: 2, tool, lvl: tool === 'pickaxe' ? 1 : 0, flammable: tool === 'axe' });
+for (const [n, dn, tool] of [['oak', 'roble', 'axe'], ['spruce', 'abeto', 'axe'], ['birch', 'abedul', 'axe'], ['dark_oak', 'roble oscuro', 'axe'], ['iron', 'hierro', 'pickaxe']]) {
+  defB(n + '_door', 'Puerta de ' + dn, { render: 'shape', shape: 'door', solid: true, trans: 1, tex: n + '_door_bottom', texTop: n + '_door_top', hard: n === 'iron' ? 5 : 3, tool, lvl: n === 'iron' ? 1 : 0, drop: n + '_door' });
+  defB(n + '_trapdoor', 'Trampilla de ' + dn, { render: 'shape', shape: 'trapdoor', solid: true, trans: 1, tex: n + '_trapdoor', hard: n === 'iron' ? 5 : 3, tool, lvl: n === 'iron' ? 1 : 0 });
+}
+defB('glass_pane', 'Panel de cristal', { render: 'shape', shape: 'pane', trans: 1, tex: 'glass', solid: true, hard: 0.3, drop: null });
+defB('oak_fence_gate', 'Puerta de valla de roble', { render: 'shape', shape: 'gate', solid: true, tex: 'oak_planks', hard: 2, tool: 'axe' });
+defB('campfire', 'Fogata', { render: 'box', box: [0, 0, 0, 16, 7, 16], tex: { top: 'campfire_top', side: 'campfire_side', bottom: 'oak_log' }, light: 15, hard: 2, tool: 'axe', drop: 'charcoal', dropN: 2, hurt: 1, campfire: true });
+for (const d of REG) if (d && d.crop) d.stages = [0, 1, 2, 3].map(i => texLayer(d.crop + '_' + i));
 const BLOCK_COUNT = _nextBlock;
-if (BLOCK_COUNT > 255) console.error('Demasiados bloques', BLOCK_COUNT);
+if (BLOCK_COUNT >= ITEM_BASE) console.error('Demasiados bloques', BLOCK_COUNT);
 
 // -------------------------------------------------------------------- OBJETOS
 defI('stick', 'Palo', { fuel: 100 });
@@ -281,7 +298,7 @@ defI('prismarine_shard', 'Fragmento de prismarina'); defI('shulker_shell', 'Capa
 defI('ink_sac', 'Saco de tinta'); defI('glow_ink_sac', 'Saco de tinta luminosa'); defI('phantom_membrane', 'Membrana de phantom'); defI('nether_star', 'Estrella del Nether'); defI('dragon_breath', 'Aliento de dragón');
 defI('nether_wart', 'Verruga del Nether'); defI('amethyst_shard', 'Fragmento de amatista'); defI('honeycomb', 'Panal');
 defI('firework_rocket', 'Cohete de fuegos artificiales', { rocket: true }); defI('book', 'Libro'); defI('glass_bottle', 'Frasco de cristal', { stack: 16 });
-defI('carrot', 'Zanahoria', { food: [3, 3.6] }); defI('potato', 'Patata', { food: [1, 0.6] }); defI('baked_potato', 'Patata asada', { food: [5, 6] }); defI('golden_carrot', 'Zanahoria dorada', { food: [6, 14.4] });
+defI('carrot', 'Zanahoria', { food: [3, 3.6], places: 'carrots' }); defI('potato', 'Patata', { food: [1, 0.6], places: 'potatoes' }); defI('beetroot', 'Remolacha', { food: [1, 1.2] }); defI('beetroot_seeds', 'Semillas de remolacha', { places: 'beetroots' }); defI('beetroot_soup', 'Sopa de remolacha', { food: [6, 7.2], stack: 1 }); defI('baked_potato', 'Patata asada', { food: [5, 6] }); defI('golden_carrot', 'Zanahoria dorada', { food: [6, 14.4] });
 defI('salmon', 'Salmón crudo', { food: [2, 0.4] }); defI('cooked_salmon', 'Salmón cocinado', { food: [6, 9.6] }); defI('sweet_berries', 'Bayas dulces', { food: [2, 0.4] });
 defI('cookie', 'Galleta', { food: [2, 0.4] }); defI('pumpkin_pie', 'Tarta de calabaza', { food: [8, 4.8] }); defI('mushroom_stew', 'Estofado de champiñones', { food: [6, 7.2], stack: 1 });
 defI('milk_bucket', 'Cubo de leche', { stack: 1, milk: true }); defI('sugar', 'Azúcar');
@@ -290,7 +307,7 @@ defI('spyglass', 'Catalejo', { stack: 1, spyglass: true }); defI('map', 'Mapa', 
 defI('turtle_helmet', 'Caparazón de tortuga', { stack: 1, armor: { slot: 0, pts: 2, mat: 'turtle', tough: 0 }, dur: 275 });
 defI('trident', 'Tridente', { stack: 1, dur: 250, dmg: 9, trident: true }); defI('crossbow', 'Ballesta', { stack: 1, dur: 465, bow: true, crossbow: true });
 defI('mace', 'Maza', { stack: 1, dur: 500, dmg: 6, mace: true }); defI('heavy_core', 'Núcleo denso');
-defI('brush', 'Brocha', { stack: 1, dur: 64 }); defI('fishing_rod', 'Caña de pescar', { stack: 1, dur: 64 });
+defI('experience_bottle', 'Frasco de experiencia', { throwable: 'xpbottle' }); defI('brush', 'Brocha', { stack: 1, dur: 64 }); defI('fishing_rod', 'Caña de pescar', { stack: 1, dur: 64 });
 const TOOLMAT = { wooden: { lvl: 1, speed: 2, dur: 59, dmg: 0, n: 'madera', col: [137, 103, 59] }, stone: { lvl: 2, speed: 4, dur: 131, dmg: 1, n: 'piedra', col: [130, 130, 130] }, iron: { lvl: 3, speed: 6, dur: 250, dmg: 2, n: 'hierro', col: [220, 220, 220] }, golden: { lvl: 1, speed: 12, dur: 32, dmg: 0, n: 'oro', col: [250, 220, 70] }, diamond: { lvl: 4, speed: 8, dur: 1561, dmg: 3, n: 'diamante', col: [80, 230, 220] }, netherite: { lvl: 5, speed: 9, dur: 2031, dmg: 4, n: 'netherita', col: [80, 70, 75] } };
 const TOOLTYPE = { sword: ['Espada', 4], pickaxe: ['Pico', 2], axe: ['Hacha', 3], shovel: ['Pala', 1.5], hoe: ['Azada', 1] };
 for (const m in TOOLMAT) for (const t in TOOLTYPE) {
@@ -445,7 +462,7 @@ Object.assign(TEXGEN, {
   cracked_stone_bricks: p => { bricks(p, [118, 118, 118], [80, 80, 80], 8, 16, 10); let x = 3, y = 0; for (let i = 0; i < 16; i++) { p.set(x, y, [60, 60, 60]); y++; x += ((p.r() * 3) | 0) - 1; } },
   chiseled_stone_bricks: p => { p.noise([122, 122, 122], 6); p.border([80, 80, 80]); p.rect(3, 3, 12, 12, [100, 100, 100]); p.rect(5, 5, 10, 10, [130, 130, 130]); p.rect(7, 7, 8, 8, [90, 90, 90]); },
   smooth_stone: p => { p.noise([160, 160, 160], 4); p.border([120, 120, 120]); },
-  snow: p => { p.noise([245, 250, 255], 4); p.speck([225, 235, 245], 15, 4); },
+  snow: p => { p.noise([226, 232, 240], 4); p.speck([210, 218, 232], 18, 4); },
   ice: p => { p.noise([140, 180, 250], 10); for (let i = 0; i < 6; i++) p.set((p.r() * 16) | 0, (p.r() * 16) | 0, [220, 240, 255]); for (let i = 0; i < 256; i++) p.d[i * 4 + 3] = 180; },
   packed_ice: p => { p.noise([150, 185, 240], 8); p.speck([200, 225, 255], 20); },
   sandstone: p => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const band = y < 3 ? 1.05 : y > 12 ? 0.92 : 1; p.set(x, y, [216 * band + (p.r() - 0.5) * 10, 205 * band, 160 * band]); } },
@@ -693,6 +710,18 @@ Object.assign(TEXGEN, {
   bee_nest_side: p => { p.noise([200, 160, 80], 10); p.rect(0, 5, 15, 5, [160, 120, 50]); p.rect(0, 10, 15, 10, [160, 120, 50]); }, bee_nest_top: p => { p.noise([210, 170, 90], 8); p.border([160, 120, 50]); }, bee_nest_front: p => { p.copy('bee_nest_side'); p.rect(6, 7, 9, 9, [40, 30, 20]); },
   mushroom_stem: p => { p.noise([220, 215, 200], 6); },
 });
+
+const doorTex = (p, c, top, iron) => { if (iron) { p.noise([200, 200, 205], 5); p.border([120, 120, 125]); p.rect(3, 2, 12, 13, [175, 175, 180], 4); if (top) { p.rect(4, 3, 11, 9, [0, 0, 0, 0]); for (let x = 4; x < 12; x += 2) p.rect(x, 3, x, 9, [150, 150, 155]); } return; } planks(p, c); p.border(c.map(v => v * 0.6)); if (top) { p.rect(3, 3, 6, 8, [0, 0, 0, 0]); p.rect(9, 3, 12, 8, [0, 0, 0, 0]); } else { p.rect(12, 7, 13, 9, [60, 60, 60]); p.rect(3, 3, 12, 12, c.map(v => v * 0.85)); } };
+for (const [n, c] of [['oak', [162, 130, 78]], ['spruce', [115, 85, 50]], ['birch', [196, 179, 123]], ['dark_oak', [66, 43, 20]], ['iron', [200, 200, 205]]]) {
+  TEXGEN[n + '_door_top'] = p => doorTex(p, c, true, n === 'iron'); TEXGEN[n + '_door_bottom'] = p => doorTex(p, c, false, n === 'iron');
+  TEXGEN[n + '_trapdoor'] = p => { if (n === 'iron') { p.noise(c, 5); p.border([120, 120, 125]); for (let y = 3; y < 13; y += 4) p.rect(3, y, 12, y + 1, [0, 0, 0, 0]); } else { planks(p, c); p.border(c.map(v => v * 0.6)); p.rect(3, 3, 6, 6, [0, 0, 0, 0]); p.rect(9, 3, 12, 6, [0, 0, 0, 0]); p.rect(3, 9, 6, 12, [0, 0, 0, 0]); p.rect(9, 9, 12, 12, [0, 0, 0, 0]); } };
+}
+const cropTex = (p, stage, kind) => { p.clear(); const h = 4 + stage * 3.5; const col = kind === 'wheat' ? (stage >= 3 ? [200, 175, 70] : [80 + stage * 20, 150, 50]) : [70, 140, 50];
+  for (const x of [2, 5, 9, 12]) for (let y = 15; y > 15 - h; y--) { p.set(x + (y % 3 === 0 ? 1 : 0), y, col.map(v => v + (p.r() - 0.5) * 30)); if (kind !== 'wheat' && y < 15 - h / 2 && p.r() < 0.5) p.set(x + 1, y, [60, 130, 45]); }
+  if (stage === 3) { const t = { carrots: [240, 130, 30], potatoes: [200, 160, 90], beetroots: [180, 30, 50] }[kind]; if (t) for (const x of [2, 5, 9, 12]) p.rect(x, 14, x + 1, 15, t); if (kind === 'wheat') for (const x of [2, 5, 9, 12]) p.rect(x - 1, 15 - h, x + 1, 17 - h, [220, 195, 90]); } };
+for (const k of ['wheat', 'carrots', 'potatoes', 'beetroots']) for (let i = 0; i < 4; i++) TEXGEN[k + '_' + i] = p => cropTex(p, i, k);
+TEXGEN.campfire_top = p => { p.clear(); for (const y of [3, 8, 12]) p.rect(1, y, 14, y + 1, [100, 75, 45]); p.rect(5, 5, 10, 10, [255, 160, 40]); };
+TEXGEN.campfire_side = p => { p.clear(); p.rect(0, 11, 15, 15, [100, 75, 45]); for (let x = 3; x < 13; x++) { const h = 3 + p.r() * 7; for (let y = 11 - h; y < 11; y++) p.set(x, y | 0, [255, 120 + p.r() * 100, 30]); } };
 // --------------------------------------------------- iconos de objetos (16x16)
 function itemTexAuto(p, name) {
   const d = REG[ID[name]]; p.clear();
@@ -752,6 +781,8 @@ function itemTexAuto(p, name) {
     crossbow: () => { for (let i = 0; i < 10; i++) p.set(3 + i, 12 - i, [110, 80, 45]); for (let i = 0; i < 8; i++) { p.set(4 + i, 3 + (i >> 2), [80, 80, 85]); p.set(12 - (i >> 2), 4 + i, [80, 80, 85]); } outline(p); },
     mace: () => { for (let i = 0; i < 9; i++) p.set(3 + i, 12 - i, [120, 100, 80]); p.rect(9, 2, 13, 6, [90, 90, 100]); outline(p); }, heavy_core: () => blob([70, 70, 80], 5),
     brush: () => { for (let i = 0; i < 7; i++) p.set(3 + i, 12 - i, [150, 110, 60]); p.rect(9, 2, 13, 6, [220, 200, 160]); outline(p); }, fishing_rod: () => { for (let i = 0; i < 12; i++) p.set(2 + i, 13 - i, [120, 90, 50]); for (let y = 2; y < 14; y++) p.set(13, y, [230, 230, 230]); },
+    beetroot: () => { blob([170, 30, 50], 4.5); p.rect(7, 2, 8, 4, [60, 140, 40]); }, beetroot_seeds: () => { for (let i = 0; i < 6; i++) p.set(4 + ((p.r() * 8) | 0), 6 + ((p.r() * 6) | 0), [150, 110, 60]); }, beetroot_soup: () => { for (let y = 7; y < 13; y++) for (let x = 3; x < 13; x++) if (Math.hypot((x - 7.5) / 5, (y - 7) / 5.5) < 1) p.set(x, y, [140, 100, 60]); p.rect(4, 7, 11, 8, [170, 30, 50]); outline(p); },
+    experience_bottle: () => { for (let y = 5; y < 15; y++) for (let x = 4; x < 12; x++) if (Math.hypot(x - 7.5, y - 10) < 4.2) p.set(x, y, [120, 230, 90]); p.rect(7, 2, 8, 5, [200, 220, 240]); outline(p); },
     saddle: () => blob([120, 70, 40], 5), name_tag: () => { p.rect(3, 5, 12, 10, [220, 210, 180]); outline(p); }, netherite_upgrade: () => { p.rect(3, 2, 12, 13, [60, 50, 50]); p.rect(5, 4, 10, 11, [110, 90, 85]); outline(p); },
   };
   if (M[name]) M[name](); else blob([200, 0, 200], 5);

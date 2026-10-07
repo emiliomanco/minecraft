@@ -3,22 +3,22 @@
 // ============================================================================
 const F_CUT = 8, F_LEAF = 16, F_PLANT = 32, F_WATER = 64, F_LAVA = 128, F_EMIS = 256, F_PORTAL = 512, F_ENDP = 1024, F_SNOW = 2048, F_FIRE = 4096, F_GLASS = 8192, F_FOLI = 16384;
 // tablas rápidas
-const T_OPQ = new Uint8Array(256), T_ATT = new Uint8Array(256), T_EMIT = new Uint8Array(256), T_SKYPASS = new Uint8Array(256), T_FULL = new Uint8Array(256);
+const T_OPQ = new Uint8Array(65536), T_ATT = new Uint8Array(65536), T_EMIT = new Uint8Array(65536), T_SKYPASS = new Uint8Array(65536), T_FULL = new Uint8Array(65536); const B_PAD = 65535;
 function buildTables() {
-  for (let i = 0; i < 256; i++) {
+  for (let i = 0; i < ITEM_BASE; i++) {
     const d = REG[i]; if (!d) { T_OPQ[i] = 1; continue; }
     T_OPQ[i] = d.opaque && d.render === 'cube' ? 1 : 0; T_FULL[i] = T_OPQ[i];
     T_ATT[i] = d.liquid === 1 ? 1 : d.liquid === 2 ? 14 : d.att || 0; T_EMIT[i] = d.light || 0;
     T_SKYPASS[i] = (!T_OPQ[i] && !T_ATT[i]) ? 1 : 0;
   }
-  T_OPQ[255] = 1; T_FULL[255] = 1;
+  T_OPQ[B_PAD] = 1; T_FULL[B_PAD] = 1;
 }
 const LP = 14, LR = 16 + LP * 2 + 2, LRR = LR * LR;
 let regB = null, regM = null, regS = null, regL = null, regH = 0, lq = new Int32Array(1 << 21);
 function buildRegion(world, ch) {
   const H = world.H; const size = LRR * (H + 2);
-  if (!regB || regH !== H) { regB = new Uint8Array(size); regM = new Uint8Array(size); regS = new Uint8Array(size); regL = new Uint8Array(size); regH = H; }
-  regB.fill(255); regM.fill(0);
+  if (!regB || regH !== H) { regB = new Uint16Array(size); regM = new Uint8Array(size); regS = new Uint8Array(size); regL = new Uint8Array(size); regH = H; }
+  regB.fill(B_PAD); regM.fill(0);
   const bx = ch.cx * 16 - LP - 1, bz = ch.cz * 16 - LP - 1;
   for (let lz = 1; lz < LR - 1; lz++) {
     const wz = bz + lz; const ccz = wz >> 4;
@@ -101,6 +101,43 @@ const FACE = [
   { n: [0, 0, -1], a: 2, t1: 0, t2: 1, c: [[1, 0, 0], [0, 0, 0], [0, 1, 0], [1, 1, 0]] }
 ];
 function faceUV(f, x, y, z) { switch (f) { case 0: return [1 - z, 1 - y]; case 1: return [z, 1 - y]; case 2: return [x, z]; case 3: return [x, 1 - z]; case 4: return [x, 1 - y]; default: return [1 - x, 1 - y]; } }
+
+// ---------------------------------------------------------- formas compuestas (escaleras, puertas, vallas...)
+const PANEL = [[0, 0, 0, 16, 16, 3], [13, 0, 0, 16, 16, 16], [0, 0, 13, 16, 16, 16], [0, 0, 0, 3, 16, 16]]; // lados: -z, +x, +z, -x
+const DIR4 = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+function connects(d, nb) {
+  if (nb <= 0 || nb === B_PAD) return false; const n = REG[nb]; if (!n) return false;
+  if (T_FULL[nb]) return true;
+  if (d.shape === 'fence') return n.shape === 'fence' || n.shape === 'gate';
+  if (d.shape === 'wall') return n.shape === 'wall';
+  if (d.shape === 'pane') return n.shape === 'pane';
+  return false;
+}
+// devuelve cajas en 1/16. nb(dx,dz) -> id del vecino en el mismo nivel
+function shapeBoxes(d, meta, nb, forCollision) {
+  const f = meta & 3; const out = [];
+  switch (d.shape) {
+    case 'stairs': {
+      const up = meta & 4; out.push(up ? [0, 8, 0, 16, 16, 16] : [0, 0, 0, 16, 8, 16]);
+      const t = [[0, 0, 0, 16, 8, 8], [8, 0, 0, 16, 8, 16], [0, 0, 8, 16, 8, 16], [0, 0, 0, 8, 8, 16]][f].slice(); if (!up) { t[1] += 8; t[4] += 8; } out.push(t); break;
+    }
+    case 'door': { const open = meta & 4; const side = (f + 2) % 4; out.push(PANEL[open ? (side + 1) % 4 : side]); break; }
+    case 'trapdoor': { if (meta & 4) out.push(PANEL[(f + 2) % 4]); else out.push(meta & 8 ? [0, 13, 0, 16, 16, 16] : [0, 0, 0, 16, 3, 16]); break; }
+    case 'gate': { const ax = f & 1; if (meta & 4) { out.push(ax ? [0, 0, 6, 2, 16, 10] : [6, 0, 0, 10, 16, 2]); out.push(ax ? [14, 0, 6, 16, 16, 10] : [6, 0, 14, 10, 16, 16]); } else out.push(ax ? [7, 0, 0, 9, 16, 16] : [0, 0, 7, 16, 16, 9]); break; }
+    case 'fence': case 'wall': case 'pane': {
+      const pw = d.shape === 'wall' ? 4 : d.shape === 'fence' ? 2 : 1, aw = d.shape === 'wall' ? 3 : 1;
+      out.push([8 - pw, 0, 8 - pw, 8 + pw, 16, 8 + pw]);
+      for (let i = 0; i < 4; i++) {
+        if (!connects(d, nb(DIR4[i][0], DIR4[i][1]))) continue;
+        const [dx, dz] = DIR4[i]; const lo = (a, s) => a < 0 ? 0 : a > 0 ? 8 + s : 8 - s, hi = (a, s) => a < 0 ? 8 - s : a > 0 ? 16 : 8 + s;
+        if (d.shape === 'fence' && !forCollision) { for (const [y0, y1] of [[6, 9], [12, 15]]) out.push([lo(dx, aw), y0, lo(dz, aw), hi(dx, aw), y1, hi(dz, aw)]); }
+        else out.push([lo(dx, aw), 0, lo(dz, aw), hi(dx, aw), d.shape === 'wall' ? 14 : 16, hi(dz, aw)]);
+      }
+      break;
+    }
+  }
+  return out;
+}
 const ORIENT_FRONT = [5, 0, 4, 1];
 const OPP = [1, 0, 3, 2, 5, 4];
 function faceLayer(d, f, meta) {
@@ -141,7 +178,7 @@ function meshRegion(world, ch) {
         const layer = faceLayer(d, f, meta); emitFace(B, f, x, y, z, ri, nri, layer, flags, tintFor(d, f, ch, x, z), d.log && meta ? 1 : 0, 0, 1, null);
       }
     } else if (d.render === 'cross' || d.render === 'fire') {
-      const li = ri; const sky = regS[li], blk = regL[li]; const layer = d.faces[0];
+      const li = ri; const sky = regS[li], blk = regL[li]; const layer = d.stages ? d.stages[Math.min(3, meta >> 1)] : d.faces[0];
       let flags = F_CUT | 6 | F_FOLI; if (d.emissive) flags |= F_EMIS; if (d.render === 'fire') flags |= F_FIRE;
       const tint = d.tint ? (d.tint === 1 ? 1 + ch.biomes[x | z << 4] : 64 + ch.biomes[x | z << 4]) : 0;
       const h = d.render === 'fire' ? 1.2 : 1; const wv = d.wave === 2 ? F_PLANT : 0;
@@ -159,6 +196,9 @@ function meshRegion(world, ch) {
       if (d.inWater) emitLiquid(MB_W, x, y, z, ri, 1, ch, meta);
     } else if (d.render === 'box') {
       emitBox(d, x, y, z, ri, meta, ch);
+    } else if (d.render === 'shape') {
+      const boxes = shapeBoxes(d, meta, (dx, dz) => regB[ri + dx + dz * LR]); const lay = d.shape === 'door' && (meta & 8) ? d.layerTop : undefined;
+      for (const b of boxes) emitBox(d, x, y, z, ri, meta, ch, b, lay);
     } else if (d.render === 'liquid') {
       emitLiquid(d.liquid === 1 ? MB_W : O, x, y, z, ri, d.liquid, ch, meta);
     } else if (d.render === 'snow') {
@@ -195,8 +235,8 @@ function emitFace(B, f, x, y, z, ri, nri, layer, flags, tint, rot, h0, h1, box) 
   }
   B.quad(aos[0] + aos[2] < aos[1] + aos[3]);
 }
-function emitBox(d, x, y, z, ri, meta, ch) {
-  let [x0, y0, z0, x1, y1, z1] = d.box.map(v => v / 16);
+function emitBox(d, x, y, z, ri, meta, ch, boxOv, layerOv) {
+  let [x0, y0, z0, x1, y1, z1] = (boxOv || d.box).map(v => v / 16);
   if ((d.id === ID.torch) && meta >= 1 && meta <= 4) { const o = [[0, 0.32], [-0.32, 0], [0, -0.32], [0.32, 0]][meta - 1]; x0 += o[0]; x1 += o[0]; z0 += o[1]; z1 += o[1]; y0 += 0.2; y1 += 0.2; }
   if (d.id === ID.pointed_dripstone && meta === 1) { /* colgante: misma caja */ }
   const sky = Math.max(regS[ri], regS[ri + LRR]), blk = Math.max(regL[ri], regL[ri + LRR]);
@@ -208,7 +248,7 @@ function emitBox(d, x, y, z, ri, meta, ch) {
     const F = FACE[f]; const atEdge = (f === 0 && x1 >= 1) || (f === 1 && x0 <= 0) || (f === 2 && y1 >= 1) || (f === 3 && y0 <= 0) || (f === 4 && z1 >= 1) || (f === 5 && z0 <= 0);
     if (atEdge) { const nb = regB[ri + F.n[0] + F.n[1] * LRR + F.n[2] * LR]; if (T_FULL[nb]) continue; }
     if (d.endPortal && f !== 2) continue;
-    const layer = faceLayer(d, f, meta); B.grow(); const p = P[f]; const ao = (f === 3) ? 2 : 3;
+    const layer = layerOv !== undefined ? layerOv : faceLayer(d, f, meta); B.grow(); const p = P[f]; const ao = (f === 3) ? 2 : 3;
     const shadeSide = f === 2 ? 1 : 0.92;
     for (let k = 0; k < 4; k++) {
       const px = p[k * 3], py = p[k * 3 + 1], pz = p[k * 3 + 2];
@@ -250,40 +290,46 @@ function emitLiquid(B, x, y, z, ri, liq, ch, meta) {
   const dn = ri - LRR; if (!isSame(dn) && !T_FULL[regB[dn]]) { B.grow(); B.v(x, y + 0.001, z, 0, 0, layer, flags | 3, sky, blk, 3, tint); B.v(x + 1, y + 0.001, z, 1, 0, layer, flags | 3, sky, blk, 3, tint); B.v(x + 1, y + 0.001, z + 1, 1, 1, layer, flags | 3, sky, blk, 3, tint); B.v(x, y + 0.001, z + 1, 0, 1, layer, flags | 3, sky, blk, 3, tint); B.quad(false); }
 }
 // nieve suave: superficie subdividida e interpolada entre vecinos
-function snowH(ri) { const b = regB[ri]; if (b === ID.snow) return Math.max(1, regM[ri]) / 8; if (T_FULL[b]) return 1.0; return -1; }
+// nieve suave: campo de alturas continuo entre bloques, bordes redondeados y normales suaves
+function snowCellH(ri) { // altura de la superficie en una celda vecina (-1 = sin apoyo)
+  const b = regB[ri]; if (b === ID.snow) return Math.max(1, regM[ri]) / 8;
+  if (T_FULL[b]) return 1.0; const below = regB[ri - LRR];
+  if (T_FULL[below] || below === ID.snow) return 0.0; return -0.35;
+}
 function emitSnow(B, x, y, z, ri, meta, ch, bxw, bzw) {
   const own = Math.max(1, meta) / 8;
-  const sh = (dx, dz) => { const h = snowH(ri + dx + dz * LR); if (h < 0) { const below = regB[ri + dx + dz * LR - LRR]; return T_FULL[below] ? 0.02 : 0; } return h; };
-  const g = [];
-  for (let j = 0; j < 3; j++) for (let i = 0; i < 3; i++) {
-    let s = 0, n = 0; const cx = i - 1, cz = j - 1;
-    if (cx === 0 && cz === 0) { g.push(own); continue; }
-    const xs = cx === 0 ? [0] : [0, cx], zs = cz === 0 ? [0] : [0, cz];
-    for (const a of xs) for (const b of zs) { const h = (a === 0 && b === 0) ? own : sh(a, b); s += h; n++; }
-    g.push(Math.min(1, s / n));
-  }
-  const sub = MESH_QUALITY >= 2 ? 4 : MESH_QUALITY >= 1 ? 2 : 1;
-  const hAt = (u, v) => { // u,v en [0,1]
-    const fx = u * 2, fz = v * 2; const ix = Math.min(1, fx | 0), iz = Math.min(1, fz | 0); const tx = fx - ix, tz = fz - iz;
-    const a = g[iz * 3 + ix], b = g[iz * 3 + ix + 1], c = g[(iz + 1) * 3 + ix], d = g[(iz + 1) * 3 + ix + 1];
-    let h = lerp(lerp(a, b, tx), lerp(c, d, tx), tz);
-    const wx = bxw + x + u, wz = bzw + z + v; h += (Math.sin(wx * 2.1 + wz * 0.7) * Math.cos(wz * 1.7 - wx * 0.4)) * 0.035 * Math.min(1, h * 4);
-    return Math.max(0.01, h);
+  const H = new Float32Array(25); // alturas de las 5x5 celdas alrededor (incluye 2 de margen)
+  for (let j = -2; j <= 2; j++) for (let i = -2; i <= 2; i++) H[(j + 2) * 5 + i + 2] = (i === 0 && j === 0) ? own : snowCellH(ri + i + j * LR);
+  const field = (u, v) => { // u,v en coordenadas de bloque (0..1 = esta celda)
+    let s = 0, wsum = 0;
+    for (let j = -2; j <= 2; j++) for (let i = -2; i <= 2; i++) {
+      const dx = u - (i + 0.5), dz = v - (j + 0.5); const d2 = dx * dx + dz * dz; if (d2 > 2.2) continue;
+      const wgt = Math.exp(-d2 * 2.6); let h = H[(j + 2) * 5 + i + 2]; if (h >= 1 && (i || j)) h = Math.max(own, 0.7);
+      s += h * wgt; wsum += wgt;
+    }
+    let h = s / wsum;
+    const wx = bxw + x + u, wz = bzw + z + v;
+    h += (Math.sin(wx * 0.9 + wz * 0.35) * Math.cos(wz * 0.8 - wx * 0.25)) * 0.06 + Math.sin(wx * 2.7 + Math.cos(wz * 2.1)) * 0.015;
+    return Math.max(0.015, Math.min(own + 0.25, h));
   };
+  const sub = MESH_QUALITY >= 2 ? 4 : MESH_QUALITY >= 1 ? 3 : 1;
   const up = ri + LRR; const sky = Math.max(regS[ri], regS[up]), blk = Math.max(regL[ri], regL[up]); const layer = TEX.snow; const fl = F_SNOW;
-  for (let j = 0; j < sub; j++) for (let i = 0; i < sub; i++) {
-    const u0 = i / sub, u1 = (i + 1) / sub, v0 = j / sub, v1 = (j + 1) / sub; B.grow();
-    B.v(x + u0, y + hAt(u0, v1), z + v1, u0, v1, layer, fl | 2, sky, blk, 3, 0); B.v(x + u1, y + hAt(u1, v1), z + v1, u1, v1, layer, fl | 2, sky, blk, 3, 0);
-    B.v(x + u1, y + hAt(u1, v0), z + v0, u1, v0, layer, fl | 2, sky, blk, 3, 0); B.v(x + u0, y + hAt(u0, v0), z + v0, u0, v0, layer, fl | 2, sky, blk, 3, 0);
-    B.quad(false);
+  const N = sub + 1; const hs = new Float32Array(N * N), ns = new Uint8Array(N * N);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const u = i / sub, v = j / sub; const h = field(u, v); hs[j * N + i] = h;
+    const e = 0.18; const gx = (field(u + e, v) - field(u - e, v)) / (2 * e), gz = (field(u, v + e) - field(u, v - e)) / (2 * e);
+    const l = Math.hypot(gx, 1, gz); const nx = -gx / l, nz = -gz / l;
+    ns[j * N + i] = (clamp(Math.round((nx * 0.5 + 0.5) * 15), 0, 15) << 4) | clamp(Math.round((nz * 0.5 + 0.5) * 15), 0, 15);
   }
-  // laterales donde no hay vecino
+  const V = (i, j) => { const k = j * N + i; B.v(x + i / sub, y + hs[k], z + j / sub, i / sub, j / sub, layer, fl | 2, sky, blk, 3, ns[k]); };
+  for (let j = 0; j < sub; j++) for (let i = 0; i < sub; i++) { B.grow(); V(i, j + 1); V(i + 1, j + 1); V(i + 1, j); V(i, j); B.quad(false); }
+  // laterales donde el terreno cae (cubren el hueco bajo el borde redondeado)
   const sides = [[0, 1, [1, 1], [1, 0]], [1, -1, [0, 0], [0, 1]], [4, LR, [0, 1], [1, 1]], [5, -LR, [1, 0], [0, 0]]];
   for (const [f, off, ca, cb] of sides) {
     const j = ri + off; if (T_FULL[regB[j]] || regB[j] === ID.snow) continue;
-    const ha = hAt(ca[0], ca[1]), hb = hAt(cb[0], cb[1]); B.grow();
-    B.v(x + ca[0], y, z + ca[1], 0, 1, layer, fl | f, sky, blk, 2, 0); B.v(x + cb[0], y, z + cb[1], 1, 1, layer, fl | f, sky, blk, 2, 0);
-    B.v(x + cb[0], y + hb, z + cb[1], 1, 1 - hb, layer, fl | f, sky, blk, 3, 0); B.v(x + ca[0], y + ha, z + ca[1], 0, 1 - ha, layer, fl | f, sky, blk, 3, 0);
+    const ha = field(ca[0], ca[1]), hb = field(cb[0], cb[1]); B.grow();
+    B.v(x + ca[0], y, z + ca[1], 0, 1, layer, F_SNOW | f, sky, blk, 2, 0x88); B.v(x + cb[0], y, z + cb[1], 1, 1, layer, F_SNOW | f, sky, blk, 2, 0x88);
+    B.v(x + cb[0], y + hb, z + cb[1], 1, 1 - hb, layer, F_SNOW | f, sky, blk, 3, 0x88); B.v(x + ca[0], y + ha, z + ca[1], 0, 1 - ha, layer, F_SNOW | f, sky, blk, 3, 0x88);
     B.quad(false);
   }
 }

@@ -51,7 +51,7 @@ BI.small_end_islands = defBiome('small_end_islands');
 class Chunk {
   constructor(world, cx, cz) {
     this.world = world; this.cx = cx; this.cz = cz; this.H = world.H;
-    this.blocks = new Uint8Array(256 * this.H); this.meta = new Uint8Array(256 * this.H);
+    this.blocks = new Uint16Array(256 * this.H); this.meta = new Uint8Array(256 * this.H);
     this.light = null; this.biomes = new Uint8Array(256); this.loot = {}; this.spawners = {};
     this.dirty = true; this.modified = false; this.mesh = null; this.top = 0; this.spawns = null;
   }
@@ -76,7 +76,7 @@ class World {
   adopt(c) {
     const k = ckey(c.cx, c.cz); const ex = this.chunks.get(k); if (ex) return ex;
     const sv = this.saved[k];
-    if (sv) { c.blocks = rleDecode(sv.b, 256 * this.H); c.meta = rleDecode(sv.m, 256 * this.H); c.modified = true; c.loot = sv.loot || {}; c.spawners = sv.sp || c.spawners; delete this.saved[k]; c.calcTop(); }
+    if (sv) { c.blocks = rleDecode(sv.b, 256 * this.H, true); c.meta = rleDecode(sv.m, 256 * this.H); c.modified = true; c.loot = sv.loot || {}; c.spawners = sv.sp || c.spawners; delete this.saved[k]; c.calcTop(); }
     this.chunks.set(k, c);
     if (typeof onChunkGenerated === 'function') onChunkGenerated(this, c);
     return c;
@@ -650,7 +650,7 @@ function villageHouse(S, x, z, M, r, door, n, style, half) {
 function villageFarm(S, x, z, r) {
   const y = S.colH(x, z); for (let dx = -3; dx <= 3; dx++) for (let dz = -2; dz <= 2; dz++) {
     const edge = Math.abs(dx) === 3 || Math.abs(dz) === 2; if (edge) { S.set(x + dx, y, z + dz, ID.oak_log); S.set(x + dx, y + 1, z + dz, 0); }
-    else if (dz === 0) S.set(x + dx, y, z + dz, ID.water); else { S.set(x + dx, y, z + dz, ID.farmland); S.set(x + dx, y + 1, z + dz, ID.wheat, 4 + ((r() * 4) | 0)); }
+    else if (dz === 0) S.set(x + dx, y, z + dz, ID.water); else { S.set(x + dx, y, z + dz, ID.farmland); S.set(x + dx, y + 1, z + dz, [ID.wheat, ID.wheat, ID.carrots, ID.potatoes, ID.beetroots][(Math.abs(x + z) >> 2) % 5], 4 + ((r() * 4) | 0)); }
   }
 }
 // 2. FORTALEZA (STRONGHOLD) ---------------------------------------

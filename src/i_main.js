@@ -19,7 +19,7 @@ function tone(t, dur, f0, f1, vol, type = 'sine', dest) { const c = AU.ctx; cons
 function playSound(type, x, y, z, vol = 1, extra) {
   if (!AU.ctx || SETTINGS.vol <= 0) return; const c = AU.ctx; const t = c.currentTime;
   if (G.player && x !== 0 && G.mode === 'game') { const d = Math.hypot(G.player.x - x, G.player.y - y, G.player.z - z); vol *= Math.max(0, 1 - d / (type === 'explode' ? 80 : 24)); if (vol <= 0.01) return; }
-  const m = extra !== undefined && typeof extra === 'number' && extra < 256 ? MAT_SND(extra) : 'stone';
+  const m = extra !== undefined && typeof extra === 'number' && extra < ITEM_BASE ? MAT_SND(extra) : 'stone';
   const mf = { stone: [1800, 2], wood: [700, 3], grass: [2600, 0.8], sand: [3800, 0.6], gravel: [1500, 0.9], glass: [4200, 5], wool: [500, 0.6] }[m];
   switch (type) {
     case 'dig': noiseHit(t, 0.08, mf[0], mf[1], 0.25 * vol); break;
@@ -84,7 +84,7 @@ function serializeWorld() {
   const players = Object.assign({}, G.playerStates || {}); players.__local = playerState(G.player); players.__local.name = G.player.name;
   if (G.net && G.net.role === 'host') for (const c of G.net.conns.values()) if (c.ent && c.ent.state) players[c.ent.name] = c.ent.state;
   const ents = []; for (const e of G.entities.values()) { if (e.proxy || e.remotePlayer || e.removed || e.dead) continue; if (e instanceof Mob && (e.persist || !e.def.hostile)) ents.push({ k: 'mob', ty: e.type, d: e.dim, x: e.x, y: e.y, z: e.z, hp: e.hp, c: e.color, p: e.persist, n: e.name }); else if (e.type === 'item') ents.push({ k: 'item', d: e.dim, x: e.x, y: e.y, z: e.z, s: e.stack }); }
-  return { format: 'minecraft2-world', version: 2, name: G.worldName, seed: G.seed, seedStr: G.seedStr, gameMode: G.defaultMode || G.gameMode, curMode: G.gameMode, difficulty: G.difficulty, cheats: G.cheats, time: G.time, rain: G.rain, rainTimer: G.rainTimer, worldSpawn: G.worldSpawn, dragonKilled: G.dragonKilled, endInit: G.endInit, gateway: G.gateway, keepInventory: G.keepInventory, containers: G.containers, spawned: [...G.spawned], dims, players, entities: ents, created: G.created || Date.now(), lastPlayed: Date.now(), structures: G.structures !== false };
+  return { format: 'minecraft2-world', version: 3, name: G.worldName, seed: G.seed, seedStr: G.seedStr, gameMode: G.defaultMode || G.gameMode, curMode: G.gameMode, difficulty: G.difficulty, cheats: G.cheats, time: G.time, rain: G.rain, rainTimer: G.rainTimer, worldSpawn: G.worldSpawn, dragonKilled: G.dragonKilled, endInit: G.endInit, gateway: G.gateway, keepInventory: G.keepInventory, containers: G.containers, spawned: [...G.spawned], dims, players, entities: ents, created: G.created || Date.now(), lastPlayed: Date.now(), structures: G.structures !== false };
 }
 function worldIcon() { try { const c = document.createElement('canvas'); c.width = 64; c.height = 64; c.getContext('2d').drawImage($('gl'), ($('gl').width - $('gl').height) / 2, 0, $('gl').height, $('gl').height, 0, 0, 64, 64); return c.toDataURL('image/jpeg', 0.7); } catch (e) { return null; } }
 async function saveWorld(silent) {
@@ -104,8 +104,17 @@ function resetGameState() {
   G.entities = new Map(); G.particles = []; G.containers = {}; G.spawned = new Set(); G.tick = 0; G.dragonKilled = false; G.endInit = false; G.gateway = null; G.creditsShown = false; G.playerStates = {}; G.rain = 0; G.rainLevel = 0; G.rainTimer = 12000 + Math.random() * 24000;
   TICK_TIMERS.length = 0; NETBATCH.length = 0; R.plights = []; UI.open = null; G.paused = false; G.wardenWarn = 0;
 }
+function migrateWorld(data) { // v2 -> v3: los objetos pasaron de id 256+ a 1000+
+  if (!data.version || data.version >= 3) return data;
+  const fix = s => { if (s && s.id >= 256) s.id += ITEM_BASE - 256; return s; };
+  const fixArr = a => { if (a) a.forEach(fix); };
+  for (const k in data.players || {}) { const p = data.players[k]; if (!p) continue; fixArr(p.inv); fixArr(p.armor); fixArr(p.ender); fix(p.off); }
+  for (const k in data.containers || {}) fixArr(data.containers[k].items);
+  for (const e of data.entities || []) if (e.s) fix(e.s);
+  data.version = 3; return data;
+}
 function startWorld(data, isNew, netWelcome) {
-  resetGameState(); audioInit();
+  data = migrateWorld(data); resetGameState(); audioInit();
   G.worldName = data.name; G.seed = data.seed >>> 0; G.seedStr = data.seedStr; G.difficulty = data.difficulty ?? 2; G.cheats = data.cheats !== false; G.time = data.time ?? 1000; G.keepInventory = !!data.keepInventory;
   G.defaultMode = data.gameMode || 'survival'; G.gameMode = data.curMode || data.gameMode || 'survival'; G.created = data.created || Date.now(); G.structures = data.structures !== false;
   G.worlds = { overworld: new World('overworld', G.seed), nether: new World('nether', G.seed), end: new World('end', G.seed) };
@@ -130,7 +139,7 @@ function finishLoading() {
   if (p.y < 0) { const y = w.surfaceY(Math.floor(p.x), Math.floor(p.z)) + 1; p.y = y; if (G.worldSpawn.y < 0) G.worldSpawn.y = y; }
   p.px = p.x; p.py = p.y; p.pz = p.z;
   G.mode = 'game'; hideScreens(); $('hud').style.display = 'block'; $('hotbar').innerHTML = ''; updateHUD(); applyGui();
-  $('debugL').style.display = $('debugR').style.display = F3 ? '' : 'none';
+  $('debugL').style.display = $('debugR').style.display = F3 ? 'block' : 'none';
   if (p.dim === 'end' && (!G.net || G.net.role === 'host')) initEnd();
   if (R.software) chatMsg('⚠ El navegador está dibujando con la CPU (aceleración por hardware desactivada). Actívala en la configuración del navegador para usar la GPU y ganar mucho rendimiento.', '#f88');
   chatMsg('Bienvenido a Minecraft 2. Pulsa E para el inventario, T para chatear, F3 para depurar. Escribe /help para comandos.', '#aaa');
@@ -229,6 +238,7 @@ function dynResTick() {
   if (Math.abs(old - R.dyn) > 0.001) resize();
 }
 function menuFrame(dt) {
+  R.camSky = 1;
   if (!MENU.world) {
     const seeds = ['cerezos', 'montañas', 'aldea', 'taiga', 'atardecer']; const s = hashStr(seeds[Math.random() * seeds.length | 0] + (Date.now() % 7));
     MENU.world = new World('overworld', s); G.menuWorld = MENU.world;
@@ -299,6 +309,7 @@ function gameFrame(dt) {
   if (perspective > 0) { const d = lookDir(p); const s = perspective === 1 ? -1 : 1; const h = raycast(w, eye[0], eye[1], eye[2], d[0] * s, d[1] * s, d[2] * s, 4, false); const dist = h ? Math.max(0.3, h.t - 0.3) : 4; eye = [eye[0] + d[0] * s * dist, eye[1] + d[1] * s * dist, eye[2] + d[2] * s * dist]; if (perspective === 2) { yaw += Math.PI; pitch = -pitch; } }
   let roll = 0; if (G.shake > 0) { G.shake = Math.max(0, G.shake - dt * 2.5); roll = (Math.random() - 0.5) * G.shake * 0.08; pitch += (Math.random() - 0.5) * G.shake * 0.05; yaw += (Math.random() - 0.5) * G.shake * 0.05; }
   if (p.hurtTime > 0) roll += Math.sin(p.hurtTime / 10 * Math.PI) * 0.06;
+  { const cl = w.dim === 'overworld' ? Math.min(1, w.light(Math.floor(eye[0]), Math.floor(eye[1]), Math.floor(eye[2]))[0] / 12) : 1; R.camSky = lerp(R.camSky ?? 1, cl, Math.min(1, dt * 3)); }
   const camB = blockAt(w, eye[0], eye[1], eye[2]); const under = camB > 0 && (REG[camB].liquid === 1 || REG[camB].inWater);
   const tfov = SETTINGS.fov * (p.sprinting ? 1.12 : 1) * (p.spy ? 0.14 : 1) * (p.bowT > 0 ? 1 - Math.min(1, p.bowT) * 0.15 : 1) * (p.gliding ? 1.1 : 1);
   G.fovCur = lerp(G.fovCur || tfov, tfov, Math.min(1, dt * 10));
@@ -341,6 +352,7 @@ function emitterFX(w, dt) {
     for (let i = 0; i < E.length; i += 4) {
       const x = E[i], y = E[i + 1], z = E[i + 2], id = E[i + 3];
       if (id === ID.fire) { fireFX(w, x, y, z, dt); fires.push([x + 0.5, y + 0.6, z + 0.5]); }
+      else if (id === ID.campfire) { if (Math.random() < 5 * dt) flame(x + 0.3 + Math.random() * 0.4, y + 0.35, z + 0.3 + Math.random() * 0.4, { size: 0.35, vy: 0.8 }); if (Math.random() < 2.5 * dt) smoke(x + 0.5, y + 0.9, z + 0.5, { r: 0.22, g: 0.21, b: 0.2, a: 0.5, size: 0.5, grow: 0.5, life: 7, vy: 2.2, drag: 0.1, wind: true }); fires.push([x + 0.5, y + 0.5, z + 0.5]); }
       else if (id === ID.lava) { if (Math.random() < dt * 0.15) { P_({ x: x + Math.random(), y: y + 0.95, z: z + Math.random(), vx: (Math.random() - 0.5) * 2, vy: 4 + Math.random() * 3, vz: (Math.random() - 0.5) * 2, life: 1.5, size: 0.07, add: true, emis: 8, r: 1, g: 0.55, b: 0.15, layer: TEX.ember, grav: 16, collide: true }); } if (Math.random() < dt * 0.05) smoke(x + 0.5, y + 1, z + 0.5, { r: 0.12, g: 0.11, b: 0.1, size: 0.4, life: 2, a: 0.35 }); if (Math.random() < 0.02) fires.push([x + 0.5, y + 1, z + 0.5, 1]); }
       else if (id === ID.torch || id === ID.soul_torch || id === ID.redstone_torch) { const m = w.getMeta(x, y, z); const o = m >= 1 && m <= 4 ? [[0, 0.32], [-0.32, 0], [0, -0.32], [0.32, 0]][m - 1] : [0, 0]; const ty = y + 0.72 + (m ? 0.2 : 0); if (Math.random() < dt * 4) { const soul = id === ID.soul_torch, red = id === ID.redstone_torch; P_({ x: x + 0.5 + o[0], y: ty, z: z + 0.5 + o[1], vy: 0.25, life: 0.4, size: 0.12, grow: -0.2, add: true, emis: 3, r: soul ? 0.4 : 1, g: soul ? 0.9 : red ? 0.15 : 0.6, b: soul ? 1 : 0.2, layer: TEX['flame_' + (Math.random() * 3 | 0)] }); } if (Math.random() < dt * 0.8) smoke(x + 0.5 + o[0], ty + 0.1, z + 0.5 + o[1], { size: 0.12, grow: 0.15, life: 1.5, a: 0.3, vy: 0.5, r: 0.2, g: 0.2, b: 0.2 }); }
       else if (id === ID.end_rod && Math.random() < dt) P_({ x: x + 0.5, y: y + 0.5 + Math.random() * 0.5, z: z + 0.5, vx: (Math.random() - 0.5) * 0.4, vy: (Math.random() - 0.5) * 0.4, vz: (Math.random() - 0.5) * 0.4, life: 2, size: 0.08, add: true, emis: 3, layer: TEX.spark, r: 1, g: 1, b: 1 });
@@ -381,6 +393,7 @@ function drawOverlays(trans) {
     const h = G.hit; const lines = [];
     if (h && !h.ent && !hudHidden && G.gameMode !== 'spectator') {
       const d = REG[h.id]; let b = d.box ? d.box.map(v => v / 16) : d.render === 'snow' ? [0, 0, 0, 1, Math.max(1, w.getMeta(h.x, h.y, h.z)) / 8, 1] : [0, 0, 0, 1, 1, 1]; if (d.fenceH) b = [b[0], 0, b[2], b[3], 1, b[5]];
+      if (d.shape) { const bx = shapeBoxes(d, w.getMeta(h.x, h.y, h.z), (dx, dz) => w.get(h.x + dx, h.y, h.z + dz)); b = [1, 1, 1, 0, 0, 0]; for (const q of bx) for (let i = 0; i < 3; i++) { b[i] = Math.min(b[i], q[i] / 16); b[i + 3] = Math.max(b[i + 3], q[i + 3] / 16); } }
       if (d.id === ID.torch || d.id === ID.soul_torch) { const m = w.getMeta(h.x, h.y, h.z); if (m >= 1 && m <= 4) { const o = [[0, 0.32], [-0.32, 0], [0, -0.32], [0.32, 0]][m - 1]; b = [b[0] + o[0], b[1] + 0.2, b[2] + o[1], b[3] + o[0], b[4] + 0.2, b[5] + o[1]]; } }
       const e = 0.002; lines.push(...boxLines(h.x + b[0] - e, h.y + b[1] - e, h.z + b[2] - e, h.x + b[3] + e, h.y + b[4] + e, h.z + b[5] + e));
       if (MINE.target && MINE.prog > 0 && G.gameMode !== 'creative') { // grietas
@@ -448,12 +461,13 @@ function buildOptions() {
   const slider = (label, key, min, max, step, fmt, onch) => { const d = document.createElement('div'); d.className = 'slider'; const knob = document.createElement('div'); knob.className = 'knob'; const sp = document.createElement('span'); const inp = document.createElement('input'); inp.type = 'range'; inp.min = min; inp.max = max; inp.step = step; inp.value = SETTINGS[key]; const upd = () => { const v = +inp.value; sp.textContent = label + ': ' + fmt(v); knob.style.left = `calc(${(v - min) / (max - min) * 100}% - ${(v - min) / (max - min) * 16}px)`; }; inp.oninput = () => { SETTINGS[key] = +inp.value; upd(); saveSettings(); onch && onch(+inp.value); }; upd(); d.append(knob, sp, inp); box.appendChild(d); };
   const toggle = (label, key, vals, names, onch) => { const b = document.createElement('button'); b.className = 'btn'; const upd = () => b.textContent = label + ': ' + names[vals.indexOf(SETTINGS[key])]; b.onclick = () => { SETTINGS[key] = vals[(vals.indexOf(SETTINGS[key]) + 1) % vals.length]; upd(); saveSettings(); onch && onch(SETTINGS[key]); }; upd(); box.appendChild(b); };
   slider('Campo de visión', 'fov', 30, 110, 1, v => v === 70 ? 'Normal' : v >= 110 ? 'Quake Pro' : v);
-  slider('Distancia de renderizado', 'rd', 2, 16, 1, v => v + ' chunks');
+  slider('Distancia de chunks', 'rd', 2, 24, 1, v => v + ' chunks' + (v > 12 ? ' (exigente)' : ''));
   toggle('Gráficos', 'quality', [0, 1, 2, 3], ['Rápidos (PC de bajos recursos)', 'Equilibrados (sombras+bloom)', 'Realistas (shaders completos)', 'Ultra (reflejos SSR+4K sombras)'], v => setQuality(v));
   toggle('Partículas', 'particles', [0, 1, 2], ['Mínimas', 'Reducidas', 'Todas']);
   toggle('Procesador gráfico', 'gpuPref', ['high-performance', 'default', 'low-power'], ['GPU dedicada (rendimiento)', 'Automático', 'GPU integrada (ahorro)'], () => { if (confirm('Este cambio necesita recargar la página. ¿Recargar ahora?')) { if (G.mode === 'game') saveWorld(true).then(() => location.reload()); else location.reload(); } });
   toggle('Límite de FPS', 'fpsCap', [0, 30, 60, 120], ['Sin límite (VSync)', '30', '60', '120']);
   toggle('Hilos de CPU para chunks', 'threads', [0, 1, 2, 3, 4, 6], ['Automático', '1', '2', '3', '4', '6'], () => { if (confirm('Este cambio necesita recargar la página. ¿Recargar ahora?')) { if (G.mode === 'game') saveWorld(true).then(() => location.reload()); else location.reload(); } });
+  toggle('Exposición automática', 'autoExp', [true, false], ['Sí (evita deslumbrar)', 'No']);
   toggle('Resolución dinámica', 'dynres', [true, false], ['Sí (recomendado)', 'No'], v => { R.dyn = 1; resize(); });
   slider('Escala de resolución', 'resScale', 0.5, 1, 0.05, v => Math.round(v * 100) + '%', () => resize());
   slider('Sensibilidad', 'sens', 0.05, 1.5, 0.01, v => Math.round(v * 100) + '%');
@@ -510,7 +524,7 @@ function setupMenus() {
 let optReturn = 'sMain';
 // ------------------------------------------------------------ EVENTOS
 function setupInput() {
-  window.addEventListener('keydown', e => { if (waitingKey) { e.preventDefault(); bindKey(e.code); return; } if (G.mode === 'game') onKeyDown(e); else if (e.code === 'Escape' && G.mode === 'menu' && !$('sMain').classList.contains('on')) goMenu(); });
+  window.addEventListener('keydown', e => { if (G.mode === 'game' && (e.ctrlKey || e.metaKey) && !(document.activeElement && document.activeElement.tagName === 'INPUT' && /^Key[ACVXZ]$/.test(e.code))) e.preventDefault(); if (waitingKey) { e.preventDefault(); bindKey(e.code); return; } if (G.mode === 'game') onKeyDown(e); else if (e.code === 'Escape' && G.mode === 'menu' && !$('sMain').classList.contains('on')) goMenu(); });
   window.addEventListener('keyup', e => onKeyUp(e));
   const cv = $('gl');
   cv.addEventListener('mousedown', e => { audioInit(); if (G.mode !== 'game') return; if (document.pointerLockElement !== cv) { lockPointer(); return; } INPUT.mouse['Mouse' + e.button] = true; e.preventDefault(); });
@@ -521,13 +535,17 @@ function setupInput() {
     if (UI.open) { const c = $('cursorItem'); c.style.left = (e.clientX - 18) + 'px'; c.style.top = (e.clientY - 18) + 'px'; const t = $('tooltip'); t.style.left = (e.clientX + 14) + 'px'; t.style.top = (e.clientY - 30) + 'px'; }
     if (G.mode !== 'game' || document.pointerLockElement !== cv || UI.open || G.paused) return;
     const p = G.player; const s = SETTINGS.sens * 0.0042 * (p.spy ? 0.2 : 1);
-    p.yaw -= e.movementX * s; p.pitch -= e.movementY * s * (SETTINGS.invertY ? -1 : 1); p.pitch = clamp(p.pitch, -1.5705, 1.5705);
+    let mx = e.movementX, my = e.movementY; const now = performance.now();
+    // Chrome a veces envía un salto enorme al bloquear el puntero o al cruzar el borde de la ventana: se descarta
+    if (now - (INPUT.lockT || 0) < 120 || Math.abs(mx) > 700 || Math.abs(my) > 700) return;
+    const mag = Math.hypot(mx, my), avg = INPUT.mAvg || 0; if (mag > 250 && mag > avg * 6 + 200) { INPUT.mAvg = avg * 0.9 + 20; return; } INPUT.mAvg = avg * 0.8 + mag * 0.2;
+    p.yaw -= mx * s; p.pitch -= my * s * (SETTINGS.invertY ? -1 : 1); p.pitch = clamp(p.pitch, -1.5705, 1.5705);
   });
   window.addEventListener('wheel', e => { if (G.mode !== 'game' || UI.open || G.paused) return; const p = G.player; p.sel = (p.sel + (e.deltaY > 0 ? 1 : 8)) % 9; updateHUD(); showItemName(); }, { passive: true });
-  document.addEventListener('pointerlockchange', () => { if (G.mode === 'game' && document.pointerLockElement !== $('gl') && !UI.open && !G.paused && !$('chatIn').classList.contains('on') && !G.player.dead && !$('sCredits').classList.contains('on')) pauseGame(true); INPUT.mouse = {}; });
+  document.addEventListener('pointerlockchange', () => { INPUT.lockT = performance.now(); INPUT.mAvg = 0; if (G.mode === 'game' && document.pointerLockElement !== $('gl') && !UI.open && !G.paused && !$('chatIn').classList.contains('on') && !G.player.dead && !$('sCredits').classList.contains('on')) pauseGame(true); INPUT.mouse = {}; });
   window.addEventListener('blur', () => { INPUT.keys = {}; INPUT.mouse = {}; });
   window.addEventListener('resize', () => { drawLogo(); });
-  window.addEventListener('beforeunload', () => { if (G.mode === 'game' && (!G.net || G.net.role === 'host')) { try { saveWorld(true); } catch (e) { } } });
+  window.addEventListener('beforeunload', e => { if (G.mode === 'game') { if (!G.net || G.net.role === 'host') { try { saveWorld(true); } catch (err) { } } e.preventDefault(); e.returnValue = '¿Salir de Minecraft 2?'; return e.returnValue; } });
   $('sInv').addEventListener('mousedown', e => { if (e.target === $('sInv') && UI.cursor) { const p = G.player; const n = e.button === 2 ? 1 : UI.cursor.c; dropItem(p.dim, p.x, p.eye - 0.3, p.z, { ...UI.cursor, c: n }, -Math.sin(p.yaw) * 4, 2, -Math.cos(p.yaw) * 4, 40); UI.cursor.c -= n; if (UI.cursor.c <= 0) UI.cursor = null; refreshInvUI(); } });
 }
 // ------------------------------------------------------------ ARRANQUE
