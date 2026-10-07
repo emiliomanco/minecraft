@@ -54,7 +54,7 @@ function updateHUD() {
 }
 function slotRender(el, s) {
   if (!s) { el.innerHTML = ''; return; }
-  const d = REG[s.id]; let h = `<img src="${iconURL(s.id)}">`;
+  const d = REG[s.id]; let h = `<img src="${iconURL(s.id)}"${s.e ? ' class="glint"' : ''}>`;
   if (s.c > 1) h += `<span class="cnt">${s.c}</span>`;
   if (d.dur && s.d > 0) { const f = 1 - s.d / d.dur; h += `<div class="dur"><div style="width:${f * 100}%;background:hsl(${f * 120},100%,50%)"></div></div>`; }
   el.innerHTML = h;
@@ -103,6 +103,17 @@ function openScreen(kind, data) {
     } else if (kind === 'chest' || kind === 'ender') {
       const items = data.c.items; const t = document.createElement('div'); t.className = 'ptitle'; t.textContent = data.title || 'Cofre'; top.appendChild(t);
       grid(top, items.map((_, i) => arrSlot(items, i, { onChange: netContainer })), 9);
+    } else if (kind === 'anvil') {
+      const t = document.createElement('div'); t.className = 'ptitle'; t.textContent = 'Yunque: reparar y combinar'; top.appendChild(t);
+      UI.anv = UI.anv || [null, null]; const A = UI.anv; const fb = document.createElement('div'); fb.className = 'furn'; top.appendChild(fb);
+      grid(fb, [arrSlot(A, 0), arrSlot(A, 1)], 2); const ar = document.createElement('div'); ar.className = 'farrow static'; fb.appendChild(ar);
+      grid(fb, [makeSlot(() => { const r = anvilResult(A[0], A[1]); return r && (G.gameMode === 'creative' || xpLevel(p.xp) >= 1) ? r : null; }, () => { }, { output: true, craftOut: 'anvil', cls: 'big' })], 1);
+      const hint = document.createElement('div'); hint.className = 'hint'; hint.id = 'anvHint'; hint.textContent = 'Dos objetos iguales o un objeto + su material. Cuesta 1 nivel de experiencia.'; top.appendChild(hint);
+    } else if (kind === 'enchant') {
+      const t = document.createElement('div'); t.className = 'ptitle'; t.textContent = 'Encantar (librerías cerca: ' + (data.shelves || 0) + ')'; top.appendChild(t);
+      UI.enc = UI.enc || [null, null]; const E = UI.enc; const fb = document.createElement('div'); fb.className = 'furn'; top.appendChild(fb);
+      grid(fb, [arrSlot(E, 0, { onChange: () => refreshInvUI() }), arrSlot(E, 1, { onChange: () => refreshInvUI() })], 2);
+      const opts = document.createElement('div'); opts.className = 'encopts'; opts.id = 'encOpts'; fb.appendChild(opts);
     } else if (kind === 'smith') {
       const t = document.createElement('div'); t.className = 'ptitle'; t.textContent = 'Mejorar equipo'; top.appendChild(t);
       UI.smith = UI.smith || [null, null, null]; const sm = UI.smith; const fb = document.createElement('div'); fb.className = 'furn'; top.appendChild(fb);
@@ -126,10 +137,17 @@ function buildCraft(parent, grid) {
   grid(row, [makeSlot(() => craftResult(), () => { }, { output: true, craftOut: 'craft', cls: 'big' })], 1);
 }
 function craftResult() { const c = UI.craft; if (!c) return null; const r = matchRecipe(c.grid, c.w); if (!r) return null; const id = ID[r.res]; if (id === undefined) return null; return { id, c: r.n, d: 0 }; }
+function consumeAnvil() { const A = UI.anv; const r = anvilResult(A[0], A[1]); A[0] = null; if (r && r.use) { A[1].c -= r.use; if (A[1].c <= 0) A[1] = null; } else A[1] = null; if (G.gameMode !== 'creative') spendLevels(G.player, 1); playSound('break_item', 0, 0, 0, 0.3); }
+function renderEnchant() {
+  const box = $('encOpts'); if (!box) return; const E = UI.enc; const p = G.player; const s = E[0];
+  const rolls = s && !s.e ? enchantRolls(s, UI.data.shelves || 0) : []; const lap = E[1] && E[1].id === ID.lapis_lazuli ? E[1].c : 0;
+  box.innerHTML = rolls.length ? rolls.map((o, i) => { const ok = G.gameMode === 'creative' || (xpLevel(p.xp) >= o.cost && lap >= i + 1); return `<div class="eopt ${ok ? '' : 'no'}" data-i="${i}"><b>${o.cost}</b> ${ENCH[o.k][0]} ${ROMAN[o.lvl]} <small>(${i + 1} lapislázuli)</small></div>`; }).join('') : '<div class="hint">' + (s && s.e ? 'Ya está encantado' : 'Coloca una herramienta, arma o armadura y lapislázuli') + '</div>';
+  box.querySelectorAll('.eopt').forEach(el => el.onmousedown = ev => { ev.preventDefault(); const i = +el.dataset.i; const o = rolls[i]; if (G.gameMode !== 'creative' && (xpLevel(p.xp) < o.cost || lap < i + 1)) return; s.e = { [o.k]: o.lvl }; if (Math.random() < 0.5) { const L = enchOptions(s).filter(k => k !== o.k); if (L.length) { const k2 = L[Math.random() * L.length | 0]; s.e[k2] = Math.max(1, Math.round(o.lvl * 0.6)); } } if (G.gameMode !== 'creative') { E[1].c -= i + 1; if (E[1].c <= 0) E[1] = null; spendLevels(p, i + 1); } p.enchSeed = Math.random() * 1e9 | 0; playSound('levelup', 0, 0, 0, 0.5); refreshInvUI(); });
+}
 function consumeCraft() { const c = UI.craft; for (let i = 0; i < c.grid.length; i++) { const s = c.grid[i]; if (!s) continue; if (s.id === ID.water_bucket || s.id === ID.lava_bucket || s.id === ID.milk_bucket) { c.grid[i] = { id: ID.bucket, c: 1 }; continue; } s.c--; if (s.c <= 0) c.grid[i] = null; } }
 function smithResult() { const s = UI.smith; if (!s || !s[0] || !s[1] || s[1].id !== ID.netherite_ingot) return null; const n = REG[s[0].id].name; if (!n.startsWith('diamond_')) return null; const t = ID['netherite_' + n.slice(8)]; if (t === undefined) return null; return { id: t, c: 1, d: s[0].d || 0 }; }
 function consumeSmith() { const s = UI.smith; s[0] = null; s[1].c--; if (s[1].c <= 0) s[1] = null; if (s[2]) { s[2].c--; if (s[2].c <= 0) s[2] = null; } }
-function sameItem(a, b) { return a && b && a.id === b.id && (a.d || 0) === (b.d || 0); }
+function sameItem(a, b) { return a && b && a.id === b.id && (a.d || 0) === (b.d || 0) && !a.e && !b.e; }
 function slotClick(s, ev) {
   ev.preventDefault(); const p = G.player; const right = ev.button === 2; const shift = ev.shiftKey;
   if (s.palette) { // creativo
@@ -139,7 +157,7 @@ function slotClick(s, ev) {
   if (s.trash) { if (shift) { p.inv.fill(null); } UI.cursor = null; refreshInvUI(); return; }
   if (s.output) {
     const res = s.get(); if (!res) return;
-    const take = () => { if (s.craftOut === 'craft') consumeCraft(); else if (s.craftOut === 'smith') consumeSmith(); else s.set(null); };
+    const take = () => { if (s.craftOut === 'craft') consumeCraft(); else if (s.craftOut === 'smith') consumeSmith(); else if (s.craftOut === 'anvil') consumeAnvil(); else s.set(null); };
     if (shift) { let guard = 0; while (guard++ < 64) { const r = s.get(); if (!r) break; const left = giveItem(p, r); if (left > 0) { if (left < r.c) { } break; } take(); if (!s.craftOut) break; } }
     else if (!UI.cursor) { UI.cursor = { ...res }; take(); }
     else if (sameItem(UI.cursor, res) && UI.cursor.c + res.c <= REG[res.id].stack) { UI.cursor.c += res.c; take(); }
@@ -178,15 +196,18 @@ function refreshInvUI() {
   if (!UI.open) return;
   for (const s of UI.slots) { if (!s.el) continue; slotRender(s.el, s.palette ? { id: s.palette, c: 1 } : s.get ? s.get() : null); }
   const cur = $('cursorItem'); if (UI.cursor) { slotRender(cur, UI.cursor); cur.style.display = 'block'; } else cur.style.display = 'none';
+  if (UI.open === 'enchant') renderEnchant();
   if (UI.open === 'furnace') { const c = UI.data.c; const fa = $('fArrow'), ff = $('fFlame'); if (fa) fa.style.width = ((c.cook || 0) / 200 * 100) + '%'; if (ff) ff.style.opacity = c.burn > 0 ? 0.3 + 0.7 * c.burn / (c.burnMax || 1) : 0.08; }
   updateHUD();
 }
-function showTooltip(s) { const st = s.palette ? { id: s.palette, c: 1 } : s.get ? s.get() : null; const tt = $('tooltip'); if (!st) { tt.style.display = 'none'; return; } const d = REG[st.id]; let h = `<b>${d.disp}</b>`; if (d.dur) h += `<br><span style="color:#aaa">Durabilidad: ${d.dur - (st.d || 0)} / ${d.dur}</span>`; if (d.armor && d.armor.pts) h += `<br><span style="color:#58f">+${d.armor.pts} armadura</span>`; if (d.dmg) h += `<br><span style="color:#5f5">${d.dmg} de daño</span>`; if (d.food) h += `<br><span style="color:#fa5">+${d.food[0]} comida</span>`; h += `<br><span style="color:#555;font-size:14px">minecraft:${d.name}</span>`; tt.innerHTML = h; tt.style.display = 'block'; }
+function showTooltip(s) { const st = s.palette ? { id: s.palette, c: 1 } : s.get ? s.get() : null; const tt = $('tooltip'); if (!st) { tt.style.display = 'none'; return; } const d = REG[st.id]; let h = `<b>${d.disp}</b>`; if (st.e) for (const k in st.e) h += `<br><span style="color:#a8a8ff">${ENCH[k] ? ENCH[k][0] : k} ${ROMAN[st.e[k]] || st.e[k]}</span>`;
+  if (d.dur) h += `<br><span style="color:#aaa">Durabilidad: ${d.dur - (st.d || 0)} / ${d.dur}</span>`; if (d.armor && d.armor.pts) h += `<br><span style="color:#58f">+${d.armor.pts} armadura</span>`; if (d.dmg) h += `<br><span style="color:#5f5">${d.dmg} de daño</span>`; if (d.food) h += `<br><span style="color:#fa5">+${d.food[0]} comida</span>`; h += `<br><span style="color:#555;font-size:14px">minecraft:${d.name}</span>`; tt.innerHTML = h; tt.style.display = 'block'; }
 function hideTooltip() { $('tooltip').style.display = 'none'; }
 function closeScreen() {
   const p = G.player; if (!UI.open) return;
   if (UI.craft && UI.open === 'craft') for (let i = 0; i < UI.craft.grid.length; i++) if (UI.craft.grid[i]) { const l = giveItem(p, UI.craft.grid[i]); if (l) dropItem(p.dim, p.x, p.eye, p.z, { ...UI.craft.grid[i], c: l }); UI.craft.grid[i] = null; }
   if (UI.open === 'inv' && UI.craft) { for (let i = 0; i < 4; i++) if (UI.craft.grid[i]) { const l = giveItem(p, UI.craft.grid[i]); if (l) dropItem(p.dim, p.x, p.eye, p.z, { ...UI.craft.grid[i], c: l }); UI.craft.grid[i] = null; } }
+  for (const [k, arr] of [['anvil', UI.anv], ['enchant', UI.enc]]) if (UI.open === k && arr) for (let i = 0; i < arr.length; i++) if (arr[i]) { const l = giveItem(p, arr[i]); if (l) dropItem(p.dim, p.x, p.eye, p.z, { ...arr[i], c: l }); arr[i] = null; }
   if (UI.open === 'smith' && UI.smith) { for (let i = 0; i < 3; i++) if (UI.smith[i]) { giveItem(p, UI.smith[i]); UI.smith[i] = null; } }
   if (UI.cursor) { const l = giveItem(p, UI.cursor); if (l) dropItem(p.dim, p.x, p.eye, p.z, { ...UI.cursor, c: l }, -Math.sin(p.yaw) * 4, 2, -Math.cos(p.yaw) * 4, 40); UI.cursor = null; }
   if ((UI.open === 'chest' || UI.open === 'furnace') && UI.data.key) { netContainer(); if (UI.data.block === ID.chest) playSound('chest_close', p.x, p.y, p.z, 0.5); }
@@ -223,23 +244,79 @@ function buildCreative(panel, grid, sec) {
   };
   CREATIVE_TABS.forEach(([n], i) => { const b = document.createElement('button'); b.className = 'ctab'; b.textContent = n; b.onclick = () => show(i); tabs.appendChild(b); });
   search.oninput = () => show(CREATIVE_TABS.length - 1);
-  search.addEventListener('keydown', e => e.stopPropagation());
+  search.addEventListener('keydown', e => { if (e.key !== 'Escape') e.stopPropagation(); });
   show(UI.ctab || 0);
 }
 function drawPlayerPreview(cv) { const g = cv.getContext('2d'); g.imageSmoothingEnabled = false; g.fillStyle = '#000'; g.fillRect(0, 0, 100, 140); const t = n => tileCanvas(n); g.drawImage(t('steve_face'), 34, 10, 32, 32); g.drawImage(t('steve_shirt'), 34, 42, 32, 46); g.drawImage(t('steve_skin'), 18, 42, 16, 46); g.drawImage(t('steve_skin'), 66, 42, 16, 46); g.drawImage(t('steve_pants'), 34, 88, 16, 46); g.drawImage(t('steve_pants'), 50, 88, 16, 46); const a = G.player.armor; const col = i => a[i] && REG[a[i].id].armor && ARMORMAT[REG[a[i].id].armor.mat] ? 'rgba(' + ARMORMAT[REG[a[i].id].armor.mat].col.join(',') + ',0.75)' : null; if (col(0)) { g.fillStyle = col(0); g.fillRect(32, 8, 36, 14); } if (col(1)) { g.fillStyle = col(1); g.fillRect(16, 42, 68, 30); } if (col(2)) { g.fillStyle = col(2); g.fillRect(34, 86, 32, 30); } if (col(3)) { g.fillStyle = col(3); g.fillRect(34, 120, 32, 14); } }
+
+// ------------------------------------------------------------ ENCANTAMIENTOS, YUNQUE Y COMERCIO
+const ENCH = { sharpness: ['Filo', 5], efficiency: ['Eficiencia', 5], unbreaking: ['Irrompibilidad', 3], protection: ['Protección', 4], feather_falling: ['Caída de pluma', 4], power: ['Poder', 5], fortune: ['Fortuna', 3], looting: ['Botín', 3], respiration: ['Respiración', 3], fire_aspect: ['Aspecto ígneo', 2] };
+const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V'];
+function enchLvl(s, k) { return s && s.e && s.e[k] ? s.e[k] : 0; }
+function enchOptions(s) {
+  const d = REG[s.id]; const t = d.tool ? d.tool.type : null; const L = [];
+  if (t === 'sword') L.push('sharpness', 'looting', 'fire_aspect', 'unbreaking'); else if (t === 'axe') L.push('efficiency', 'sharpness', 'unbreaking'); else if (t) L.push('efficiency', 'fortune', 'unbreaking');
+  else if (d.armor) { L.push('protection', 'unbreaking'); if (d.armor.slot === 3) L.push('feather_falling'); if (d.armor.slot === 0) L.push('respiration'); } else if (d.bow) L.push('power', 'unbreaking'); else if (d.dur) L.push('unbreaking');
+  return L;
+}
+function xpLevel(xp) { return Math.floor(Math.sqrt((xp || 0) / 10)); }
+function spendLevels(p, n) { const nl = Math.max(0, xpLevel(p.xp) - n); p.xp = nl * nl * 10; }
+function enchantRolls(s, shelves) {
+  const L = enchOptions(s); if (!L.length) return [];
+  const r = mulberry32(((s.id * 31 + (s.d || 0) * 7 + shelves * 131) ^ (G.player.enchSeed || (G.player.enchSeed = Math.random() * 1e9 | 0))) >>> 0);
+  return [1, 2, 3].map(i => { const k = L[(r() * L.length) | 0]; const max = ENCH[k][1]; const lvl = clamp(Math.round(i * max / 3 * (0.6 + Math.min(15, shelves) / 30) + r() * 0.8), 1, max); return { k, lvl, cost: i + (shelves >= 10 ? i : 0) }; });
+}
+function countShelves(w, x, y, z) { let n = 0; for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) for (let dy = 0; dy <= 1; dy++) if ((Math.abs(dx) === 2 || Math.abs(dz) === 2) && w.get(x + dx, y + dy, z + dz) === ID.bookshelf) n++; return n; }
+function repairMat(id) { const n = REG[id].name; for (const [m, it] of [['wooden', 'oak_planks'], ['stone', 'cobblestone'], ['iron', 'iron_ingot'], ['golden', 'gold_ingot'], ['diamond', 'diamond'], ['netherite', 'netherite_ingot'], ['leather', 'leather']]) if (n.startsWith(m + '_')) return ID[it]; return -1; }
+function anvilResult(a, b) {
+  if (!a || !b) return null; const d = REG[a.id]; if (!d.dur && !b.e) return null;
+  if (b.id === a.id) { const keep = d.dur - (a.d || 0) + d.dur - (b.d || 0) + Math.floor(d.dur * 0.12); const e = Object.assign({}, a.e || {}); for (const k in b.e || {}) e[k] = Math.min(ENCH[k][1], e[k] === b.e[k] ? e[k] + 1 : Math.max(e[k] || 0, b.e[k])); return { id: a.id, c: 1, d: Math.max(0, d.dur - keep), e }; }
+  if (b.id === repairMat(a.id) && a.d > 0) return { id: a.id, c: 1, d: Math.max(0, a.d - Math.ceil(d.dur / 4) * b.c), e: a.e, use: Math.min(b.c, Math.ceil(a.d / Math.ceil(d.dur / 4))) };
+  return null;
+}
+const PROF = {
+  'Granjero': [[['wheat', 20], 'emerald', 1], [['emerald', 1], 'bread', 6], [['potato', 26], 'emerald', 1], [['carrot', 22], 'emerald', 1], [['emerald', 3], 'golden_carrot', 3], [['emerald', 1], 'apple', 4], [['emerald', 1], 'pumpkin_pie', 2]],
+  'Bibliotecario': [[['paper', 24], 'emerald', 1], [['emerald', 9], 'bookshelf', 1], [['emerald', 1], 'lantern', 1], [['book', 4], 'emerald', 1], [['emerald', 5], 'clock', 1], [['emerald', 4], 'compass', 1]],
+  'Armero': [[['coal', 15], 'emerald', 1], [['emerald', 5], 'iron_helmet', 1], [['emerald', 9], 'iron_chestplate', 1], [['emerald', 7], 'iron_leggings', 1], [['emerald', 4], 'iron_boots', 1], [['emerald', 21], 'diamond_chestplate', 1], [['emerald', 5], 'shield', 1]],
+  'Herrero de herramientas': [[['coal', 15], 'emerald', 1], [['iron_ingot', 4], 'emerald', 1], [['emerald', 1], 'stone_pickaxe', 1], [['emerald', 3], 'iron_shovel', 1], [['emerald', 13], 'diamond_pickaxe', 1], [['emerald', 12], 'diamond_axe', 1]],
+  'Herrero de armas': [[['coal', 15], 'emerald', 1], [['emerald', 3], 'iron_axe', 1], [['emerald', 2], 'iron_sword', 1], [['emerald', 13], 'diamond_sword', 1], [['flint', 24], 'emerald', 1]],
+  'Carnicero': [[['chicken', 14], 'emerald', 1], [['porkchop', 7], 'emerald', 1], [['beef', 10], 'emerald', 1], [['emerald', 1], 'cooked_porkchop', 6], [['emerald', 1], 'cooked_chicken', 8]],
+  'Clérigo': [[['rotten_flesh', 32], 'emerald', 1], [['emerald', 1], 'redstone', 2], [['emerald', 1], 'lapis_lazuli', 2], [['emerald', 5], 'ender_pearl', 1], [['emerald', 4], 'glowstone', 1], [['emerald', 3], 'experience_bottle', 1]],
+  'Pescador': [[['string', 15], 'emerald', 1], [['emerald', 1], 'cooked_cod', 6], [['coal', 10], 'emerald', 1], [['emerald', 2], 'fishing_rod', 1]],
+  'Flechero': [[['stick', 32], 'emerald', 1], [['emerald', 1], 'arrow', 16], [['flint', 26], 'emerald', 1], [['emerald', 2], 'bow', 1], [['emerald', 3], 'crossbow', 1]],
+};
+function villagerTrades(e) {
+  if (e.trades) return e.trades; const names = Object.keys(PROF); const r = mulberry32((typeof e.id === 'number' ? e.id : hashStr(String(e.id))) * 2654435761 >>> 0);
+  e.prof = names[(r() * names.length) | 0]; const L = PROF[e.prof].slice(); const out = [];
+  while (out.length < Math.min(5, L.length)) { const t = L.splice((r() * L.length) | 0, 1)[0]; out.push([typeof t[0][0] === 'string' ? [t[0]] : t[0], t[1], t[2]]); }
+  return (e.trades = out);
+}
+function openTrade(e) {
+  const trades = villagerTrades(e); const p = G.player; UI.open = 'trade'; UI.data = { e }; UI.slots = [];
+  document.exitPointerLock && document.exitPointerLock();
+  const panel = $('invPanel'); panel.className = 'panel tradep';
+  const render = () => {
+    let h = `<div class="ptitle">${e.prof} — comerciar</div><div class="trades">`;
+    trades.forEach((t, i) => { const [cost, res, n] = t; const ok = cost.every(([it, c]) => countItem(p, ID[it]) >= c) && ID[res] !== undefined; h += `<div class="trade ${ok ? '' : 'no'}" data-i="${i}">` + cost.map(([it, c]) => `<span class="ti"><img src="${iconURL(ID[it])}">${c}</span>`).join('+') + ` ➜ <span class="ti"><img src="${iconURL(ID[res] ?? ID.emerald)}">${n}</span> <span class="tn">${ID[res] !== undefined ? REG[ID[res]].disp : res}</span></div>`; });
+    h += '</div><div class="ptitle" style="margin-top:6px">Esmeraldas: ' + countItem(p, ID.emerald) + '</div>'; panel.innerHTML = h;
+    panel.querySelectorAll('.trade').forEach(el => el.onmousedown = ev => { ev.preventDefault(); const [cost, res, n] = trades[+el.dataset.i]; if (ID[res] === undefined || !cost.every(([it, c]) => countItem(p, ID[it]) >= c)) { playSound('hurt_mob', 0, 0, 0, 0.3); return; } for (const [it, c] of cost) takeItem(p, ID[it], c); const left = giveItem(p, { id: ID[res], c: n }); if (left) dropItem(p.dim, p.x, p.eye, p.z, { id: ID[res], c: left }); p.xp = (p.xp || 0) + 3; playSound('levelup', 0, 0, 0, 0.4); render(); });
+  };
+  render(); $('sInv').classList.add('on'); playSound('mob_villager', 0, 0, 0, 0.6);
+}
 // ------------------------------------------------------------ CONTROL
 const INPUT = { keys: {}, mouse: {}, dx: 0, dy: 0 };
 let F3 = false, F3B = false, F3G = false, hudHidden = false, perspective = 0, lastSpace = 0, lastW = 0;
 function actionFor(code) { for (const a in SETTINGS.keys) if (SETTINGS.keys[a] === code) return a; return null; }
 function held(action) { const c = SETTINGS.keys[action]; return c && (INPUT.keys[c] || INPUT.mouse[c]); }
-function lockPointer() { if (G.mode === 'game' && !UI.open && !G.paused && !$('chatIn').classList.contains('on') && !G.player.dead) { const cv = $('gl'); try { const r = cv.requestPointerLock && cv.requestPointerLock({ unadjustedMovement: false }); if (r && r.catch) r.catch(() => { }); } catch (e) { } } }
+function lockPointer() { if (G.mode === 'game' && !UI.open && !G.paused && !$('chatIn').classList.contains('on') && !G.player.dead) { const cv = $('gl'); try { const r = cv.requestPointerLock && cv.requestPointerLock({ unadjustedMovement: true }); if (r && r.catch) r.catch(() => { const r2 = cv.requestPointerLock(); if (r2 && r2.catch) r2.catch(() => { }); }); } catch (e) { } } }
 function onKeyDown(e) {
   if (G.mode !== 'game') return;
   if ($('chatIn').classList.contains('on')) { if (e.code === 'Escape') { closeChat(); e.preventDefault(); } return; }
   const a = actionFor(e.code);
-  if (e.code === 'F3' || a === 'debug') { e.preventDefault(); INPUT.keys.F3 = true; INPUT.f3used = false; return; }
+  if (e.code === 'F3' || a === 'debug') { e.preventDefault(); if (!e.repeat && !INPUT.keys.F3) { F3 = !F3; setF3Display(); } INPUT.keys.F3 = true; INPUT.f3used = false; return; }
+  if (INPUT.keys.F3 && !INPUT.f3used && /^Key[BGNQ]$/.test(e.code)) { F3 = !F3; setF3Display(); }
   if (INPUT.keys.F3) { if (e.code === 'KeyB') { F3B = !F3B; INPUT.f3used = true; chatMsg('Cajas de colisión: ' + (F3B ? 'visibles' : 'ocultas')); } if (e.code === 'KeyG') { F3G = !F3G; INPUT.f3used = true; chatMsg('Bordes de chunk: ' + (F3G ? 'visibles' : 'ocultos')); } if (e.code === 'KeyN') { INPUT.f3used = true; setGameMode(G.gameMode === 'spectator' ? 'creative' : 'spectator'); } if (e.code === 'KeyQ') { INPUT.f3used = true; chatMsg('F3+B: cajas  F3+G: chunks  F3+N: espectador'); } e.preventDefault(); return; }
-  if (e.code === 'Escape') { e.preventDefault(); if (UI.open) closeScreen(); else if (!G.player.dead) pauseGame(true); return; }
+  if (e.code === 'Escape') { e.preventDefault(); if (UI.open) closeScreen(); else if (G.paused) { if ($('sOptions').classList.contains('on') || $('sControls').classList.contains('on')) { waitingKey = null; showScreen('sPause'); } else pauseGame(false); } else if ($('sCredits').classList.contains('on')) { hideScreens(); lockPointer(); } else if (!G.player.dead) pauseGame(true); return; }
   if (UI.open) {
     if (a === 'inventory' && !(document.activeElement && document.activeElement.tagName === 'INPUT')) { closeScreen(); e.preventDefault(); }
     if (/^Digit[1-9]$/.test(e.code) && UI.hover && !UI.hover.palette && UI.hover.get) { const i = +e.code[5] - 1; const s = UI.hover; const a1 = s.get(), b1 = G.player.inv[i]; s.set(b1); G.player.inv[i] = a1; refreshInvUI(); }
@@ -261,10 +338,11 @@ function onKeyDown(e) {
     case 'forward': { const now = performance.now(); if (now - lastW < 250) INPUT.sprintToggle = true; lastW = now; break; }
   }
   if (e.code === 'F2') { e.preventDefault(); screenshot(); }
-  if (e.code === 'F11') { e.preventDefault(); if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen(); }
+  if (e.code === 'F11') { e.preventDefault(); if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen().then(() => { try { navigator.keyboard && navigator.keyboard.lock(); } catch (err) { } }).catch(() => { }); }
 }
+function setF3Display() { const v = F3 && G.mode === 'game' ? 'block' : 'none'; $('debugL').style.display = $('debugR').style.display = v; dbgT = 0; }
 function onKeyUp(e) {
-  if (e.code === 'F3' || actionFor(e.code) === 'debug') { if (!INPUT.f3used && G.mode === 'game') { F3 = !F3; $('debugL').style.display = $('debugR').style.display = F3 ? '' : 'none'; } INPUT.keys.F3 = false; }
+  if (e.code === 'F3' || actionFor(e.code) === 'debug') INPUT.keys.F3 = false;
   INPUT.keys[e.code] = false; if (actionFor(e.code) === 'forward') INPUT.sprintToggle = false;
 }
 function screenshot() { const el = document.createElement('a'); try { requestAnimationFrame(() => { el.href = $('gl').toDataURL('image/png'); el.download = 'minecraft2_' + Date.now() + '.png'; el.click(); chatMsg('Captura guardada'); }); } catch (e) { } }
@@ -282,7 +360,7 @@ function currentTarget() {
   return hit;
 }
 function attackEntity(e) {
-  const p = G.player; const s = p.held(); const d = s ? REG[s.id] : null; let dmg = d && d.dmg ? d.dmg : 1;
+  const p = G.player; const s = p.held(); const d = s ? REG[s.id] : null; let dmg = d && d.dmg ? d.dmg : 1; const sh = enchLvl(s, 'sharpness'); if (sh) dmg += 0.5 * sh + 0.5; const fa = enchLvl(s, 'fire_aspect'); if (fa && e.type !== 'player') e.fire = Math.max(e.fire || 0, 80 * fa);
   if (G.gameMode === 'spectator') return;
   const crit = !p.onGround && p.vy < 0 && !p.inWater; if (crit) { dmg *= 1.5; for (let i = 0; i < 12; i++) P_({ x: e.x, y: e.y + e.h * 0.7, z: e.z, vx: (Math.random() - 0.5) * 5, vy: Math.random() * 4, vz: (Math.random() - 0.5) * 5, life: 0.5, size: 0.1, layer: TEX.spark, add: true, emis: 2, r: 0.9, g: 0.9, b: 0.6, grav: 10 }); }
   if (s && s.id === ID.mace && p.fallDist > 1.5) { dmg += Math.floor(p.fallDist) * 2; p.fallDist = 0; p.vy = 4; explosionFX(p.dim, e.x, e.y, e.z, 0.5); }
@@ -329,7 +407,7 @@ function useItem(hit) {
     const e = hit.ent;
     if (s && s.id === ID.shears && e.type === 'sheep' && !e.sheared) { e.sheared = true; dropItem(e.dim, e.x, e.y + 1, e.z, { id: ID.white_wool, c: 1 + (Math.random() * 3 | 0) }); damageItem(p.inv, p.sel, 1); return true; }
     if (s && s.id === ID.bucket && (e.type === 'cow' || e.type === 'goat')) { consumeHeld(p); giveItem(p, { id: ID.milk_bucket, c: 1 }); return true; }
-    if (e.type === 'villager') { chatMsg('Aldeano: ¡Hmm! (El comercio llegará pronto)', '#ccc'); return true; }
+    if (e.type === 'villager') { openTrade(e); return true; }
     if (s && s.id === ID.name_tag) { e.persist = true; e.name = 'Mascota'; consumeHeld(p); return true; }
   }
   // interacción con bloques
@@ -340,7 +418,8 @@ function useItem(hit) {
     if (bd.ui === 'chest') { openContainer(key, 'chest', hit, b); return true; }
     if (bd.ui === 'ender') { openScreen('ender', { c: { items: p.ender }, title: 'Cofre de ender' }); playSound('chest_open', hit.x, hit.y, hit.z, 0.5); return true; }
     if (bd.ui === 'smith') { openScreen('smith'); return true; }
-    if (bd.ui === 'anvil' || bd.ui === 'enchant') { chatMsg((bd.ui === 'anvil' ? 'El yunque' : 'La mesa de encantamientos') + ' estará disponible en una próxima versión.', '#ccc'); return true; }
+    if (bd.ui === 'anvil') { openScreen('anvil'); return true; }
+    if (bd.ui === 'enchant') { openScreen('enchant', { shelves: countShelves(w, hit.x, hit.y, hit.z) }); return true; }
     if (bd.ui === 'bed') { useBed(hit); return true; }
     if (bd.ui === 'vault') { if (s && s.id === ID.ominous_key && w.getMeta(hit.x, hit.y, hit.z) === 0) { consumeHeld(p); setBlockNet(w, hit.x, hit.y, hit.z, ID.vault, 1); for (const it of rollLoot('vault', Math.random() * 1e9 | 0)) if (it) dropItem(p.dim, hit.x + 0.5, hit.y + 1.2, hit.z + 0.5, it, 0, 3, 0); playSound('levelup', hit.x, hit.y, hit.z, 1); } else chatMsg(w.getMeta(hit.x, hit.y, hit.z) ? 'Esta bóveda ya fue abierta.' : 'Necesitas una llave de desafío.', '#ccc'); return true; }
     if (b === ID.note_block) { playSound('note', hit.x, hit.y, hit.z, 1, (Math.random() * 24) | 0); P_({ x: hit.x + 0.5, y: hit.y + 1.2, z: hit.z + 0.5, vy: 1, life: 0.8, size: 0.2, layer: TEX.spark, add: true, emis: 3, r: Math.random(), g: 1, b: Math.random() }); return true; }
@@ -459,7 +538,7 @@ function updateInteraction(dt) {
     else if (p.bowT > 0) { p.bowT += dt; }
     else if (MINE.useCool <= 0) { const r = useItem(tgt); if (r) { MINE.useCool = r === 'hold' ? 0 : 0.22; if (r === true) p.swing = p.swing || 0.01; } else MINE.useCool = 0.1; }
   } else {
-    if (p.bowT > 0) { const pw = Math.min(1, p.bowT / 1); p.bowT = 0; if (pw > 0.1) { const dir = lookDir(p); if (s && REG[s.id].trident) { shoot('trident', p.dim, p.x, p.eye - 0.1, p.z, dir[0] * 30 * pw, dir[1] * 30 * pw, dir[2] * 30 * pw, p, { itemD: (s.d || 0) + 1 }); if (G.gameMode !== 'creative') p.inv[p.sel] = null; } else { const a = shoot('arrow', p.dim, p.x, p.eye - 0.1, p.z, dir[0] * 55 * pw, dir[1] * 55 * pw, dir[2] * 55 * pw, p, { power: pw, pickable: G.gameMode !== 'creative' }); if (G.gameMode !== 'creative') takeItem(p, ID.arrow, 1); damageItem(p.inv, p.sel, 1); } playSound('bow', p.x, p.y, p.z, 0.8); updateHUD(); } }
+    if (p.bowT > 0) { const pw = Math.min(1, p.bowT / 1); p.bowT = 0; if (pw > 0.1) { const dir = lookDir(p); if (s && REG[s.id].trident) { shoot('trident', p.dim, p.x, p.eye - 0.1, p.z, dir[0] * 30 * pw, dir[1] * 30 * pw, dir[2] * 30 * pw, p, { itemD: (s.d || 0) + 1 }); if (G.gameMode !== 'creative') p.inv[p.sel] = null; } else { const a = shoot('arrow', p.dim, p.x, p.eye - 0.1, p.z, dir[0] * 55 * pw, dir[1] * 55 * pw, dir[2] * 55 * pw, p, { power: pw * (1 + 0.25 * enchLvl(s, 'power')), pickable: G.gameMode !== 'creative' }); if (G.gameMode !== 'creative') takeItem(p, ID.arrow, 1); damageItem(p.inv, p.sel, 1); } playSound('bow', p.x, p.y, p.z, 0.8); updateHUD(); } }
     p.eatT = 0; p.spy = false; MINE.useCool = Math.min(MINE.useCool, 0);
   }
   // elegir bloque

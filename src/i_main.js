@@ -139,7 +139,7 @@ function finishLoading() {
   if (p.y < 0) { const y = w.surfaceY(Math.floor(p.x), Math.floor(p.z)) + 1; p.y = y; if (G.worldSpawn.y < 0) G.worldSpawn.y = y; }
   p.px = p.x; p.py = p.y; p.pz = p.z;
   G.mode = 'game'; hideScreens(); $('hud').style.display = 'block'; $('hotbar').innerHTML = ''; updateHUD(); applyGui();
-  $('debugL').style.display = $('debugR').style.display = F3 ? '' : 'none';
+  $('debugL').style.display = $('debugR').style.display = F3 ? 'block' : 'none';
   if (p.dim === 'end' && (!G.net || G.net.role === 'host')) initEnd();
   if (R.software) chatMsg('⚠ El navegador está dibujando con la CPU (aceleración por hardware desactivada). Actívala en la configuración del navegador para usar la GPU y ganar mucho rendimiento.', '#f88');
   chatMsg('Bienvenido a Minecraft 2. Pulsa E para el inventario, T para chatear, F3 para depurar. Escribe /help para comandos.', '#aaa');
@@ -238,6 +238,7 @@ function dynResTick() {
   if (Math.abs(old - R.dyn) > 0.001) resize();
 }
 function menuFrame(dt) {
+  R.camSky = 1;
   if (!MENU.world) {
     const seeds = ['cerezos', 'montañas', 'aldea', 'taiga', 'atardecer']; const s = hashStr(seeds[Math.random() * seeds.length | 0] + (Date.now() % 7));
     MENU.world = new World('overworld', s); G.menuWorld = MENU.world;
@@ -308,6 +309,7 @@ function gameFrame(dt) {
   if (perspective > 0) { const d = lookDir(p); const s = perspective === 1 ? -1 : 1; const h = raycast(w, eye[0], eye[1], eye[2], d[0] * s, d[1] * s, d[2] * s, 4, false); const dist = h ? Math.max(0.3, h.t - 0.3) : 4; eye = [eye[0] + d[0] * s * dist, eye[1] + d[1] * s * dist, eye[2] + d[2] * s * dist]; if (perspective === 2) { yaw += Math.PI; pitch = -pitch; } }
   let roll = 0; if (G.shake > 0) { G.shake = Math.max(0, G.shake - dt * 2.5); roll = (Math.random() - 0.5) * G.shake * 0.08; pitch += (Math.random() - 0.5) * G.shake * 0.05; yaw += (Math.random() - 0.5) * G.shake * 0.05; }
   if (p.hurtTime > 0) roll += Math.sin(p.hurtTime / 10 * Math.PI) * 0.06;
+  { const cl = w.dim === 'overworld' ? Math.min(1, w.light(Math.floor(eye[0]), Math.floor(eye[1]), Math.floor(eye[2]))[0] / 12) : 1; R.camSky = lerp(R.camSky ?? 1, cl, Math.min(1, dt * 3)); }
   const camB = blockAt(w, eye[0], eye[1], eye[2]); const under = camB > 0 && (REG[camB].liquid === 1 || REG[camB].inWater);
   const tfov = SETTINGS.fov * (p.sprinting ? 1.12 : 1) * (p.spy ? 0.14 : 1) * (p.bowT > 0 ? 1 - Math.min(1, p.bowT) * 0.15 : 1) * (p.gliding ? 1.1 : 1);
   G.fovCur = lerp(G.fovCur || tfov, tfov, Math.min(1, dt * 10));
@@ -459,12 +461,13 @@ function buildOptions() {
   const slider = (label, key, min, max, step, fmt, onch) => { const d = document.createElement('div'); d.className = 'slider'; const knob = document.createElement('div'); knob.className = 'knob'; const sp = document.createElement('span'); const inp = document.createElement('input'); inp.type = 'range'; inp.min = min; inp.max = max; inp.step = step; inp.value = SETTINGS[key]; const upd = () => { const v = +inp.value; sp.textContent = label + ': ' + fmt(v); knob.style.left = `calc(${(v - min) / (max - min) * 100}% - ${(v - min) / (max - min) * 16}px)`; }; inp.oninput = () => { SETTINGS[key] = +inp.value; upd(); saveSettings(); onch && onch(+inp.value); }; upd(); d.append(knob, sp, inp); box.appendChild(d); };
   const toggle = (label, key, vals, names, onch) => { const b = document.createElement('button'); b.className = 'btn'; const upd = () => b.textContent = label + ': ' + names[vals.indexOf(SETTINGS[key])]; b.onclick = () => { SETTINGS[key] = vals[(vals.indexOf(SETTINGS[key]) + 1) % vals.length]; upd(); saveSettings(); onch && onch(SETTINGS[key]); }; upd(); box.appendChild(b); };
   slider('Campo de visión', 'fov', 30, 110, 1, v => v === 70 ? 'Normal' : v >= 110 ? 'Quake Pro' : v);
-  slider('Distancia de renderizado', 'rd', 2, 16, 1, v => v + ' chunks');
+  slider('Distancia de chunks', 'rd', 2, 24, 1, v => v + ' chunks' + (v > 12 ? ' (exigente)' : ''));
   toggle('Gráficos', 'quality', [0, 1, 2, 3], ['Rápidos (PC de bajos recursos)', 'Equilibrados (sombras+bloom)', 'Realistas (shaders completos)', 'Ultra (reflejos SSR+4K sombras)'], v => setQuality(v));
   toggle('Partículas', 'particles', [0, 1, 2], ['Mínimas', 'Reducidas', 'Todas']);
   toggle('Procesador gráfico', 'gpuPref', ['high-performance', 'default', 'low-power'], ['GPU dedicada (rendimiento)', 'Automático', 'GPU integrada (ahorro)'], () => { if (confirm('Este cambio necesita recargar la página. ¿Recargar ahora?')) { if (G.mode === 'game') saveWorld(true).then(() => location.reload()); else location.reload(); } });
   toggle('Límite de FPS', 'fpsCap', [0, 30, 60, 120], ['Sin límite (VSync)', '30', '60', '120']);
   toggle('Hilos de CPU para chunks', 'threads', [0, 1, 2, 3, 4, 6], ['Automático', '1', '2', '3', '4', '6'], () => { if (confirm('Este cambio necesita recargar la página. ¿Recargar ahora?')) { if (G.mode === 'game') saveWorld(true).then(() => location.reload()); else location.reload(); } });
+  toggle('Exposición automática', 'autoExp', [true, false], ['Sí (evita deslumbrar)', 'No']);
   toggle('Resolución dinámica', 'dynres', [true, false], ['Sí (recomendado)', 'No'], v => { R.dyn = 1; resize(); });
   slider('Escala de resolución', 'resScale', 0.5, 1, 0.05, v => Math.round(v * 100) + '%', () => resize());
   slider('Sensibilidad', 'sens', 0.05, 1.5, 0.01, v => Math.round(v * 100) + '%');
@@ -521,7 +524,7 @@ function setupMenus() {
 let optReturn = 'sMain';
 // ------------------------------------------------------------ EVENTOS
 function setupInput() {
-  window.addEventListener('keydown', e => { if (waitingKey) { e.preventDefault(); bindKey(e.code); return; } if (G.mode === 'game') onKeyDown(e); else if (e.code === 'Escape' && G.mode === 'menu' && !$('sMain').classList.contains('on')) goMenu(); });
+  window.addEventListener('keydown', e => { if (G.mode === 'game' && (e.ctrlKey || e.metaKey) && !(document.activeElement && document.activeElement.tagName === 'INPUT' && /^Key[ACVXZ]$/.test(e.code))) e.preventDefault(); if (waitingKey) { e.preventDefault(); bindKey(e.code); return; } if (G.mode === 'game') onKeyDown(e); else if (e.code === 'Escape' && G.mode === 'menu' && !$('sMain').classList.contains('on')) goMenu(); });
   window.addEventListener('keyup', e => onKeyUp(e));
   const cv = $('gl');
   cv.addEventListener('mousedown', e => { audioInit(); if (G.mode !== 'game') return; if (document.pointerLockElement !== cv) { lockPointer(); return; } INPUT.mouse['Mouse' + e.button] = true; e.preventDefault(); });
@@ -532,13 +535,17 @@ function setupInput() {
     if (UI.open) { const c = $('cursorItem'); c.style.left = (e.clientX - 18) + 'px'; c.style.top = (e.clientY - 18) + 'px'; const t = $('tooltip'); t.style.left = (e.clientX + 14) + 'px'; t.style.top = (e.clientY - 30) + 'px'; }
     if (G.mode !== 'game' || document.pointerLockElement !== cv || UI.open || G.paused) return;
     const p = G.player; const s = SETTINGS.sens * 0.0042 * (p.spy ? 0.2 : 1);
-    p.yaw -= e.movementX * s; p.pitch -= e.movementY * s * (SETTINGS.invertY ? -1 : 1); p.pitch = clamp(p.pitch, -1.5705, 1.5705);
+    let mx = e.movementX, my = e.movementY; const now = performance.now();
+    // Chrome a veces envía un salto enorme al bloquear el puntero o al cruzar el borde de la ventana: se descarta
+    if (now - (INPUT.lockT || 0) < 120 || Math.abs(mx) > 700 || Math.abs(my) > 700) return;
+    const mag = Math.hypot(mx, my), avg = INPUT.mAvg || 0; if (mag > 250 && mag > avg * 6 + 200) { INPUT.mAvg = avg * 0.9 + 20; return; } INPUT.mAvg = avg * 0.8 + mag * 0.2;
+    p.yaw -= mx * s; p.pitch -= my * s * (SETTINGS.invertY ? -1 : 1); p.pitch = clamp(p.pitch, -1.5705, 1.5705);
   });
   window.addEventListener('wheel', e => { if (G.mode !== 'game' || UI.open || G.paused) return; const p = G.player; p.sel = (p.sel + (e.deltaY > 0 ? 1 : 8)) % 9; updateHUD(); showItemName(); }, { passive: true });
-  document.addEventListener('pointerlockchange', () => { if (G.mode === 'game' && document.pointerLockElement !== $('gl') && !UI.open && !G.paused && !$('chatIn').classList.contains('on') && !G.player.dead && !$('sCredits').classList.contains('on')) pauseGame(true); INPUT.mouse = {}; });
+  document.addEventListener('pointerlockchange', () => { INPUT.lockT = performance.now(); INPUT.mAvg = 0; if (G.mode === 'game' && document.pointerLockElement !== $('gl') && !UI.open && !G.paused && !$('chatIn').classList.contains('on') && !G.player.dead && !$('sCredits').classList.contains('on')) pauseGame(true); INPUT.mouse = {}; });
   window.addEventListener('blur', () => { INPUT.keys = {}; INPUT.mouse = {}; });
   window.addEventListener('resize', () => { drawLogo(); });
-  window.addEventListener('beforeunload', () => { if (G.mode === 'game' && (!G.net || G.net.role === 'host')) { try { saveWorld(true); } catch (e) { } } });
+  window.addEventListener('beforeunload', e => { if (G.mode === 'game') { if (!G.net || G.net.role === 'host') { try { saveWorld(true); } catch (err) { } } e.preventDefault(); e.returnValue = '¿Salir de Minecraft 2?'; return e.returnValue; } });
   $('sInv').addEventListener('mousedown', e => { if (e.target === $('sInv') && UI.cursor) { const p = G.player; const n = e.button === 2 ? 1 : UI.cursor.c; dropItem(p.dim, p.x, p.eye - 0.3, p.z, { ...UI.cursor, c: n }, -Math.sin(p.yaw) * 4, 2, -Math.cos(p.yaw) * 4, 40); UI.cursor.c -= n; if (UI.cursor.c <= 0) UI.cursor = null; refreshInvUI(); } });
 }
 // ------------------------------------------------------------ ARRANQUE

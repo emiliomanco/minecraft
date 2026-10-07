@@ -307,7 +307,7 @@ defI('spyglass', 'Catalejo', { stack: 1, spyglass: true }); defI('map', 'Mapa', 
 defI('turtle_helmet', 'Caparazón de tortuga', { stack: 1, armor: { slot: 0, pts: 2, mat: 'turtle', tough: 0 }, dur: 275 });
 defI('trident', 'Tridente', { stack: 1, dur: 250, dmg: 9, trident: true }); defI('crossbow', 'Ballesta', { stack: 1, dur: 465, bow: true, crossbow: true });
 defI('mace', 'Maza', { stack: 1, dur: 500, dmg: 6, mace: true }); defI('heavy_core', 'Núcleo denso');
-defI('brush', 'Brocha', { stack: 1, dur: 64 }); defI('fishing_rod', 'Caña de pescar', { stack: 1, dur: 64 });
+defI('experience_bottle', 'Frasco de experiencia', { throwable: 'xpbottle' }); defI('brush', 'Brocha', { stack: 1, dur: 64 }); defI('fishing_rod', 'Caña de pescar', { stack: 1, dur: 64 });
 const TOOLMAT = { wooden: { lvl: 1, speed: 2, dur: 59, dmg: 0, n: 'madera', col: [137, 103, 59] }, stone: { lvl: 2, speed: 4, dur: 131, dmg: 1, n: 'piedra', col: [130, 130, 130] }, iron: { lvl: 3, speed: 6, dur: 250, dmg: 2, n: 'hierro', col: [220, 220, 220] }, golden: { lvl: 1, speed: 12, dur: 32, dmg: 0, n: 'oro', col: [250, 220, 70] }, diamond: { lvl: 4, speed: 8, dur: 1561, dmg: 3, n: 'diamante', col: [80, 230, 220] }, netherite: { lvl: 5, speed: 9, dur: 2031, dmg: 4, n: 'netherita', col: [80, 70, 75] } };
 const TOOLTYPE = { sword: ['Espada', 4], pickaxe: ['Pico', 2], axe: ['Hacha', 3], shovel: ['Pala', 1.5], hoe: ['Azada', 1] };
 for (const m in TOOLMAT) for (const t in TOOLTYPE) {
@@ -462,7 +462,7 @@ Object.assign(TEXGEN, {
   cracked_stone_bricks: p => { bricks(p, [118, 118, 118], [80, 80, 80], 8, 16, 10); let x = 3, y = 0; for (let i = 0; i < 16; i++) { p.set(x, y, [60, 60, 60]); y++; x += ((p.r() * 3) | 0) - 1; } },
   chiseled_stone_bricks: p => { p.noise([122, 122, 122], 6); p.border([80, 80, 80]); p.rect(3, 3, 12, 12, [100, 100, 100]); p.rect(5, 5, 10, 10, [130, 130, 130]); p.rect(7, 7, 8, 8, [90, 90, 90]); },
   smooth_stone: p => { p.noise([160, 160, 160], 4); p.border([120, 120, 120]); },
-  snow: p => { p.noise([245, 250, 255], 4); p.speck([225, 235, 245], 15, 4); },
+  snow: p => { p.noise([226, 232, 240], 4); p.speck([210, 218, 232], 18, 4); },
   ice: p => { p.noise([140, 180, 250], 10); for (let i = 0; i < 6; i++) p.set((p.r() * 16) | 0, (p.r() * 16) | 0, [220, 240, 255]); for (let i = 0; i < 256; i++) p.d[i * 4 + 3] = 180; },
   packed_ice: p => { p.noise([150, 185, 240], 8); p.speck([200, 225, 255], 20); },
   sandstone: p => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const band = y < 3 ? 1.05 : y > 12 ? 0.92 : 1; p.set(x, y, [216 * band + (p.r() - 0.5) * 10, 205 * band, 160 * band]); } },
@@ -782,6 +782,7 @@ function itemTexAuto(p, name) {
     mace: () => { for (let i = 0; i < 9; i++) p.set(3 + i, 12 - i, [120, 100, 80]); p.rect(9, 2, 13, 6, [90, 90, 100]); outline(p); }, heavy_core: () => blob([70, 70, 80], 5),
     brush: () => { for (let i = 0; i < 7; i++) p.set(3 + i, 12 - i, [150, 110, 60]); p.rect(9, 2, 13, 6, [220, 200, 160]); outline(p); }, fishing_rod: () => { for (let i = 0; i < 12; i++) p.set(2 + i, 13 - i, [120, 90, 50]); for (let y = 2; y < 14; y++) p.set(13, y, [230, 230, 230]); },
     beetroot: () => { blob([170, 30, 50], 4.5); p.rect(7, 2, 8, 4, [60, 140, 40]); }, beetroot_seeds: () => { for (let i = 0; i < 6; i++) p.set(4 + ((p.r() * 8) | 0), 6 + ((p.r() * 6) | 0), [150, 110, 60]); }, beetroot_soup: () => { for (let y = 7; y < 13; y++) for (let x = 3; x < 13; x++) if (Math.hypot((x - 7.5) / 5, (y - 7) / 5.5) < 1) p.set(x, y, [140, 100, 60]); p.rect(4, 7, 11, 8, [170, 30, 50]); outline(p); },
+    experience_bottle: () => { for (let y = 5; y < 15; y++) for (let x = 4; x < 12; x++) if (Math.hypot(x - 7.5, y - 10) < 4.2) p.set(x, y, [120, 230, 90]); p.rect(7, 2, 8, 5, [200, 220, 240]); outline(p); },
     saddle: () => blob([120, 70, 40], 5), name_tag: () => { p.rect(3, 5, 12, 10, [220, 210, 180]); outline(p); }, netherite_upgrade: () => { p.rect(3, 2, 12, 13, [60, 50, 50]); p.rect(5, 4, 10, 11, [110, 90, 85]); outline(p); },
   };
   if (M[name]) M[name](); else blob([200, 0, 200], 5);

@@ -170,6 +170,7 @@ function breakTime(bd, stack, p) {
   const tool = toolFor(stack); let speed = 1;
   if (tool && (tool.type === bd.tool || (tool.type === 'sword' && bd.id === ID.cobweb) || (tool.type === 'shears' && (bd.leaves || bd.id === ID.cobweb || bd.name.endsWith('wool'))))) speed = tool.type === 'sword' ? 15 : tool.type === 'shears' ? (bd.id === ID.cobweb ? 15 : 5) : tool.speed;
   if (tool && tool.type === 'sword' && bd.leaves) speed = 1.5;
+  const ef = enchLvl(stack, 'efficiency'); if (ef && speed > 1) speed += ef * ef + 1;
   if (p.effects.haste) speed *= 1.4;
   if (p.eyeInWater) speed /= 5; if (!p.onGround && !p.flying && !p.inWater) speed /= 5;
   const dmg = speed / bd.hard / (canHarvest(bd, tool) ? 30 : 100);
@@ -192,6 +193,8 @@ function dropBlockItems(w, x, y, z, id, stack, explosion) {
   if (d.drop === null) return;
   if (d.dropChance && Math.random() > d.dropChance) return;
   let n = d.dropN ? (d.dropN > 1 ? 1 + ((Math.random() * d.dropN) | 0) : 1) : 1;
+  const fo = enchLvl(stack, 'fortune'); if (fo && d.drop !== d.name) n *= 1 + ((Math.random() * (fo + 1)) | 0);
+  const XPB = { coal_ore: 1, diamond_ore: 5, emerald_ore: 5, lapis_ore: 3, redstone_ore: 2, nether_quartz_ore: 2, nether_gold_ore: 1 }; const xb = XPB[d.name.replace('deepslate_', '')]; if (xb && !explosion && G.player) G.player.xp = (G.player.xp || 0) + xb;
   if (id === ID.redstone_ore || id === ID.deepslate_redstone_ore) n = 4 + (Math.random() * 2 | 0);
   const did = ID[d.drop]; if (did === undefined) return;
   dropItem(w.dim, x + 0.5, y + 0.5, z + 0.5, { id: did, c: n }, (Math.random() - 0.5) * 2, 2, (Math.random() - 0.5) * 2);
