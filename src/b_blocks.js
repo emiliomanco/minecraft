@@ -318,6 +318,8 @@ const ARMORPART = [['helmet', 'Casco', 11], ['chestplate', 'Pechera', 16], ['leg
 for (const m in ARMORMAT) ARMORPART.forEach(([p, dn, du], slot) => {
   const A = ARMORMAT[m]; defI(m + '_' + p, dn + ' de ' + A.n, { stack: 1, armor: { slot, pts: A.pts[slot], mat: m, tough: A.tough || 0 }, dur: du * A.dur });
 });
+// (añadir objetos nuevos siempre al final para no cambiar los IDs guardados)
+defI('fire_extinguisher', 'Extintor', { stack: 1, dur: 400, extinguisher: true });
 // fuel de bloques
 for (const d of REG) if (d && d.isBlock && (d.planks || d.log)) d.fuel = 300;
 REG[ID.coal_block].fuel = 16000; REG[ID.crafting_table].fuel = 300; REG[ID.bookshelf].fuel = 300; REG[ID.chest].fuel = 300;
@@ -782,6 +784,7 @@ function itemTexAuto(p, name) {
     mace: () => { for (let i = 0; i < 9; i++) p.set(3 + i, 12 - i, [120, 100, 80]); p.rect(9, 2, 13, 6, [90, 90, 100]); outline(p); }, heavy_core: () => blob([70, 70, 80], 5),
     brush: () => { for (let i = 0; i < 7; i++) p.set(3 + i, 12 - i, [150, 110, 60]); p.rect(9, 2, 13, 6, [220, 200, 160]); outline(p); }, fishing_rod: () => { for (let i = 0; i < 12; i++) p.set(2 + i, 13 - i, [120, 90, 50]); for (let y = 2; y < 14; y++) p.set(13, y, [230, 230, 230]); },
     beetroot: () => { blob([170, 30, 50], 4.5); p.rect(7, 2, 8, 4, [60, 140, 40]); }, beetroot_seeds: () => { for (let i = 0; i < 6; i++) p.set(4 + ((p.r() * 8) | 0), 6 + ((p.r() * 6) | 0), [150, 110, 60]); }, beetroot_soup: () => { for (let y = 7; y < 13; y++) for (let x = 3; x < 13; x++) if (Math.hypot((x - 7.5) / 5, (y - 7) / 5.5) < 1) p.set(x, y, [140, 100, 60]); p.rect(4, 7, 11, 8, [170, 30, 50]); outline(p); },
+    fire_extinguisher: () => { p.rect(5, 4, 10, 14, [200, 30, 30]); p.rect(6, 5, 7, 13, [240, 80, 70]); p.rect(9, 5, 9, 13, [140, 15, 15]); p.rect(5, 8, 10, 9, [230, 230, 230]); p.rect(6, 2, 9, 3, [40, 40, 40]); p.rect(9, 1, 12, 1, [60, 60, 60]); p.rect(3, 2, 5, 2, [40, 40, 40]); p.rect(2, 3, 2, 9, [30, 30, 30]); outline(p); },
     experience_bottle: () => { for (let y = 5; y < 15; y++) for (let x = 4; x < 12; x++) if (Math.hypot(x - 7.5, y - 10) < 4.2) p.set(x, y, [120, 230, 90]); p.rect(7, 2, 8, 5, [200, 220, 240]); outline(p); },
     saddle: () => blob([120, 70, 40], 5), name_tag: () => { p.rect(3, 5, 12, 10, [220, 210, 180]); outline(p); }, netherite_upgrade: () => { p.rect(3, 2, 12, 13, [60, 50, 50]); p.rect(5, 4, 10, 11, [110, 90, 85]); outline(p); },
   };

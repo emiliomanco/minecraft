@@ -307,6 +307,46 @@ void main(){
 #endif
   o=u_add>0.5?vec4(c*a,a):vec4(c,a);
 }`;
+// ---- llamas volumétricas (estilo render de Blender): billboard cilíndrico + ruido fbm animado con rampa de cuerpo negro
+const VS_FLAME = `#version 300 es
+layout(location=0) in vec2 a_corner; layout(location=1) in vec4 i_pos; layout(location=2) in vec4 i_col;
+uniform mat4 u_vp; uniform vec3 u_camFwd;
+out vec2 v_uv; out vec3 v_pos; out float v_seed; out float v_int;
+void main(){ vec3 b=i_pos.xyz; vec2 d=b.xz; float l=length(d); d=l>1e-3?d/l:vec2(1.0,0.0); vec3 right=vec3(-d.y,0.0,d.x);
+  float w=i_pos.w, h=i_col.x;
+  float lean=clamp(-u_camFwd.y,0.0,1.0); vec3 tilt=normalize(mix(vec3(0.0,1.0,0.0),normalize(vec3(-u_camFwd.x,0.0,-u_camFwd.z)+vec3(1e-4)),lean*0.75));
+  vec3 p=b+right*(a_corner.x-0.5)*w+tilt*a_corner.y*h;
+  v_uv=a_corner; v_pos=p; v_seed=i_col.y; v_int=i_col.z; gl_Position=u_vp*vec4(p,1.0); }`;
+const FS_FLAME = `#version 300 es
+${'##COMMON##'}
+uniform sampler2D u_depthCopy; uniform vec2 u_res; uniform float u_near; uniform float u_far; uniform float u_soft;
+in vec2 v_uv; in vec3 v_pos; in float v_seed; in float v_int; out vec4 o;
+float linD(float d){ float z=d*2.0-1.0; return 2.0*u_near*u_far/(u_far+u_near-z*(u_far-u_near)); }
+void main(){
+  float x=v_uv.x-0.5, y=v_uv.y, t=u_time+v_seed*31.0;
+  vec2 q=vec2(x*2.6+v_seed*13.0, y*1.7-t*2.1);
+  float n1=fbm(q), n2=fbm(q*2.3+vec2(n1*2.2,-t*1.6)), n3=vnoise(vec2(x*9.0,y*6.0-t*5.0));
+  float xd=x+(n1-0.5)*0.5*y+sin(t*3.1+y*6.0)*0.035*y;
+  float wdt=0.40*pow(max(1.0-y,0.0),0.8)*(0.7+0.6*n2)+0.02;
+  float body=clamp(1.0-abs(xd)/wdt,0.0,1.0);
+  float top=1.0-smoothstep(0.25,1.0,y+(n2-0.5)*0.7+(n3-0.5)*0.15);
+  float d=body*top*smoothstep(0.0,0.06,y+0.02);
+  d=pow(d,0.75)*v_int*(1.15+0.25*sin(t*7.0+v_seed*20.0)*0.4);
+  if(d<0.015) discard;
+  vec3 c=vec3(0.45,0.03,0.0)*smoothstep(0.0,0.2,d);
+  c=mix(c,vec3(1.0,0.28,0.02),smoothstep(0.12,0.45,d));
+  c=mix(c,vec3(1.0,0.62,0.16),smoothstep(0.4,0.75,d));
+  c=mix(c,vec3(1.0,0.88,0.6),smoothstep(0.85,1.25,d));
+  float a=smoothstep(0.0,0.35,d);
+#if Q>=2
+  if(u_soft>0.5){ float sd=linD(texture(u_depthCopy,gl_FragCoord.xy/u_res).r); float pd=linD(gl_FragCoord.z); a*=clamp((sd-pd)/0.3,0.0,1.0); }
+#endif
+#if Q==0
+  c=aces(c*2.0); c=pow(c,vec3(1.0/2.2)); o=vec4(c*a,a);
+#else
+  o=vec4(c*(1.25+0.9*d)*a,a);
+#endif
+}`;
 const VS_LINE = `#version 300 es
 layout(location=0) in vec3 a_pos; uniform mat4 u_vp; void main(){ gl_Position=u_vp*vec4(a_pos,1.0); }`;
 const FS_LINE = `#version 300 es
@@ -408,7 +448,7 @@ function setQuality(q) {
   if (R.q === 2 && !R.cfb) R.q = 1;
   MESH_QUALITY = R.q >= 2 ? 2 : R.q;
   R.progs.chunk = compile(VS_CHUNK, FS_CHUNK); R.progs.water = compile(VS_CHUNK, FS_WATER); R.progs.shadow = compile(VS_SHADOW, FS_SHADOW); R.progs.shadowBox = compile(VS_SHADOWBOX, FS_SHADOWBOX);
-  R.progs.sky = compile(VS_FULL, FS_SKY); R.progs.box = compile(VS_BOX, FS_BOX); R.progs.part = compile(VS_PART, FS_PART); R.progs.line = compile(VS_LINE, FS_LINE);
+  R.progs.sky = compile(VS_FULL, FS_SKY); R.progs.box = compile(VS_BOX, FS_BOX); R.progs.part = compile(VS_PART, FS_PART); R.progs.flame = compile(VS_FLAME, FS_FLAME); R.progs.line = compile(VS_LINE, FS_LINE);
   R.progs.bright = compile(VS_FULL, FS_BRIGHT); R.progs.blur = compile(VS_FULL, FS_BLUR); R.progs.final = compile(VS_FULL, FS_FINAL); R.progs.lum = compile(VS_FULL, FS_LUM); R.progs.adapt = compile(VS_FULL, FS_ADAPT);
   R.shadowSize = [0, 1024, 2048, 4096][R.q]; if (R.shadowSize > gl.getParameter(gl.MAX_TEXTURE_SIZE)) R.shadowSize = 2048;
   if (R.fbo.shadow) { gl.deleteTexture(R.fbo.shadow.tex); gl.deleteFramebuffer(R.fbo.shadow.fb); R.fbo.shadow = null; }
@@ -604,6 +644,7 @@ function renderWorld(world, cam, yaw, pitch, opts = {}) {
   gl.depthMask(true);
   if (opts.drawTranslucentExtra) opts.drawTranslucentExtra();
   // partículas
+  if (opts.flames && opts.flames.length) drawFlames(opts.flames);
   if (opts.particles && opts.particles.length) drawParticles(opts.particles);
   gl.disable(gl.BLEND); gl.enable(gl.CULL_FACE);
   if (opts.drawOverlay) opts.drawOverlay(true);
@@ -675,6 +716,16 @@ function drawParticles(list) {
   const fill = arr => { const D = R.partData; let n = 0; for (const p of arr) { if (n >= 8192) break; const o = n * 16; const lf = p.light ? 0.3 + p.light[0] / 15 * 0.7 : 1; D[o] = p.x - cam[0]; D[o + 1] = p.y - cam[1]; D[o + 2] = p.z - cam[2]; D[o + 3] = p.size; D[o + 4] = p.r * lf; D[o + 5] = p.g * lf; D[o + 6] = p.b * lf; D[o + 7] = p.aCur ?? p.a; const uv = p.uv; if (uv) { D[o + 8] = uv[0]; D[o + 9] = uv[1]; D[o + 10] = uv[2]; D[o + 11] = uv[3]; } else { D[o + 8] = 0; D[o + 9] = 0; D[o + 10] = 1; D[o + 11] = 1; } D[o + 12] = p.rot || 0; D[o + 13] = p.layer; D[o + 14] = p.emis || 0; D[o + 15] = p.soft || (uv ? 0 : 0.01); n++; } gl.bindBuffer(gl.ARRAY_BUFFER, R.partBuf); gl.bufferSubData(gl.ARRAY_BUFFER, 0, D, 0, n * 16); return n; };
   let n = fill(alphaL); if (n) { gl.uniform1f(P.u.u_add, 0); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n); }
   n = fill(addL); if (n) { gl.uniform1f(P.u.u_add, 1); gl.blendFunc(gl.ONE, gl.ONE); gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n); }
+  gl.depthMask(true); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+}
+function drawFlames(F) {
+  const gl = R.gl; const P = R.progs.flame; if (!P) return; gl.useProgram(P.p); setCommon(P);
+  gl.uniformMatrix4fv(P.u.u_vp, false, R.vp); const v = R.view; gl.uniform3f(P.u.u_camFwd, -v[2], -v[6], -v[10]);
+  if (R.q >= 2 && R.fbo.copy) { gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, R.fbo.copy.depth); gl.uniform1i(P.u.u_depthCopy, 3); gl.uniform2f(P.u.u_res, R.w, R.h); gl.uniform1f(P.u.u_near, R.near); gl.uniform1f(P.u.u_far, R.far); gl.uniform1f(P.u.u_soft, 1); } else if (P.u.u_soft) gl.uniform1f(P.u.u_soft, 0);
+  gl.bindVertexArray(R.partVAO); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE); gl.depthMask(false); gl.disable(gl.CULL_FACE);
+  const D = R.partData, cam = R.cam; let n = 0;
+  for (let i = 0; i + 6 < F.length && n < 8192; i += 7) { const o = n * 16; D[o] = F[i] - cam[0]; D[o + 1] = F[i + 1] - cam[1]; D[o + 2] = F[i + 2] - cam[2]; D[o + 3] = F[i + 3]; D[o + 4] = F[i + 4]; D[o + 5] = F[i + 5]; D[o + 6] = F[i + 6]; D[o + 7] = 0; n++; }
+  if (n) { gl.bindBuffer(gl.ARRAY_BUFFER, R.partBuf); gl.bufferSubData(gl.ARRAY_BUFFER, 0, D, 0, n * 16); gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n); R.stats.draws++; }
   gl.depthMask(true); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 }
 function drawLines(pts, col) {

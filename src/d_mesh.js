@@ -177,7 +177,9 @@ function meshRegion(world, ch) {
         const nd = REG[nb]; if (nd && d.trans === 2 && nd.trans === 2 && d.cullSelf && nd.cullSelf && nb !== id && d.portal) continue;
         const layer = faceLayer(d, f, meta); emitFace(B, f, x, y, z, ri, nri, layer, flags, tintFor(d, f, ch, x, z), d.log && meta ? 1 : 0, 0, 1, null);
       }
-    } else if (d.render === 'cross' || d.render === 'fire') {
+    } else if (d.render === 'fire') {
+      // el fuego no tiene malla: se dibuja con llamas volumétricas (drawFlames) y partículas
+    } else if (d.render === 'cross') {
       const li = ri; const sky = regS[li], blk = regL[li]; const layer = d.stages ? d.stages[Math.min(3, meta >> 1)] : d.faces[0];
       let flags = F_CUT | 6 | F_FOLI; if (d.emissive) flags |= F_EMIS; if (d.render === 'fire') flags |= F_FIRE;
       const tint = d.tint ? (d.tint === 1 ? 1 + ch.biomes[x | z << 4] : 64 + ch.biomes[x | z << 4]) : 0;

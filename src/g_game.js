@@ -35,6 +35,7 @@ for (const [blk, it] of [['iron_block', 'iron_ingot'], ['gold_block', 'gold_ingo
 shaped('gold_ingot', 1, ['NNN', 'NNN', 'NNN'], { N: 'gold_nugget' }); shapeless('gold_nugget', 9, ['gold_ingot']);
 shaped('iron_ingot', 1, ['NNN', 'NNN', 'NNN'], { N: 'iron_nugget' }); shapeless('iron_nugget', 9, ['iron_ingot']);
 shaped('bucket', 1, ['I I', ' I '], { I: 'iron_ingot' }); shapeless('flint_and_steel', 1, ['iron_ingot', 'flint']);
+shaped('fire_extinguisher', 1, ['INI', 'I I', 'INI'], { I: 'iron_ingot', N: 'iron_nugget' });
 shaped('shears', 1, [' I', 'I '], { I: 'iron_ingot' }); shaped('compass', 1, [' I ', 'IRI', ' I '], { I: 'iron_ingot', R: 'redstone' }); shaped('clock', 1, [' G ', 'GRG', ' G '], { G: 'gold_ingot', R: 'redstone' });
 shaped('bow', 1, [' TS', 'T S', ' TS'], { T: 'stick', S: 'string' }); shaped('arrow', 4, ['F', 'S', 'E'], { F: 'flint', S: 'stick', E: 'feather' });
 shaped('crossbow', 1, ['STS', 'TIT', ' S '], { S: 'stick', T: 'string', I: 'iron_ingot' });
@@ -134,7 +135,7 @@ function raycast(w, ox, oy, oz, dx, dy, dz, maxD, liquids) {
     const b = w.get(x, y, z);
     if (b > 0) {
       const d = REG[b];
-      if (d.liquid ? (liquids && w.getMeta(x, y, z) === 0) : (d.render !== 'none')) {
+      if (d.liquid ? (liquids && w.getMeta(x, y, z) === 0) : (d.render !== 'none' && d.render !== 'fire')) {
         if (d.shape) { let best = null; for (const bb of shapeBoxes(d, w.getMeta(x, y, z), (dx, dz) => w.get(x + dx, y, z + dz))) { const hit = rayBox(ox, oy, oz, dx, dy, dz, x + bb[0] / 16, y + bb[1] / 16, z + bb[2] / 16, x + bb[3] / 16, y + bb[4] / 16, z + bb[5] / 16); if (hit && (!best || hit.t < best.t)) best = hit; } if (best && best.t <= maxD) return { x, y, z, id: b, n: best.n, t: best.t }; }
         else if (d.box || d.render === 'snow') { const bb = d.render === 'snow' ? [0, 0, 0, 16, Math.max(1, w.getMeta(x, y, z)) * 2, 16] : d.box; const hit = rayBox(ox, oy, oz, dx, dy, dz, x + bb[0] / 16, y + bb[1] / 16, z + bb[2] / 16, x + bb[3] / 16, y + Math.min(16, bb[4]) / 16, z + bb[5] / 16); if (hit && hit.t <= maxD) return { x, y, z, id: b, n: hit.n, t: hit.t }; }
         else return { x, y, z, id: b, n: face, t };
@@ -325,7 +326,11 @@ function fizz(w, x, y, z) { playSound('fizz', x, y, z, 0.5); for (let i = 0; i <
 function fireTick(w, x, y, z) {
   if (w.get(x, y, z) !== ID.fire) return; const below = w.get(x, y - 1, z);
   if (below > 0 && REG[below].infiniteFire) { return; }
-  if ((G.rainLevel > 0.5 && w.dim === 'overworld' && w.light(x, y, z)[0] >= 15) || Math.random() < 0.25) { w.set(x, y, z, 0); return; }
+  if (G.rainLevel > 0.5 && w.dim === 'overworld' && w.light(x, y, z)[0] >= 15) { w.set(x, y, z, 0); fizz(w, x, y, z); return; }
+  // sin combustible cerca, el fuego se consume poco a poco (no se apaga a golpes)
+  let fuel = below > 0 && REG[below].flammable;
+  if (!fuel) for (const [ax, ay, az] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, -1]]) { const n = w.get(x + ax, y + ay, z + az); if (n > 0 && REG[n].flammable) { fuel = true; break; } }
+  if (!fuel && Math.random() < 0.06) { w.set(x, y, z, 0); return; }
   // propagar a vecinos inflamables
   for (let i = 0; i < 3; i++) {
     const dx = (Math.random() * 3 | 0) - 1, dy = (Math.random() * 4 | 0) - 1, dz = (Math.random() * 3 | 0) - 1;
