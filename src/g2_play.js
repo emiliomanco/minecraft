@@ -220,7 +220,7 @@ const CREATIVE_TABS = [['Construcción', i => { const d = REG[i]; return d.isBlo
   ['Colores', i => /wool|terracotta|glass|concrete|carpet/.test(REG[i].name)],
   ['Naturales', i => { const d = REG[i]; return d.isBlock && (/ore|log|leaves|sand|gravel|dirt|grass|nylium|sapling|flower|mushroom|cactus|snow|ice|stone$|netherrack|soul|end_stone|moss|sculk|dripstone|clay|mud|basalt|blackstone|kelp|seagrass|lily|vine|fungus|roots|stem|wart|melon|pumpkin|bush|fern|poppy|dandelion|orchid|cornflower|daisy|amethyst|cane|chorus|petals|debris/.test(d.name)); }],
   ['Funcionales', i => { const d = REG[i]; return d.isBlock && (d.ui || d.light || /portal|spawner|bed|tnt|bars|fence|wall|rail|ladder|slab|scaffold|lever|button|plate|rod|lamp|detector|target|note|slime|honey/.test(d.name)); }],
-  ['Herramientas', i => { const d = REG[i]; return !d.isBlock && (d.tool && d.tool.type !== 'sword' || /bucket|flint_and|shears|compass|clock|spyglass|map|lead|brush|fishing|rocket|saddle|name_tag|bone_meal|eye_of|ender_pearl/.test(d.name)); }],
+  ['Herramientas', i => { const d = REG[i]; return !d.isBlock && (d.tool && d.tool.type !== 'sword' || /bucket|flint_and|extinguisher|shears|compass|clock|spyglass|map|lead|brush|fishing|rocket|saddle|name_tag|bone_meal|eye_of|ender_pearl/.test(d.name)); }],
   ['Combate', i => { const d = REG[i]; return !d.isBlock && (d.armor || (d.tool && d.tool.type === 'sword') || /bow|arrow|shield|trident|mace|totem|elytra|snowball/.test(d.name) || (d.tool && d.tool.type === 'axe')); }],
   ['Comida', i => !REG[i].isBlock && !!REG[i].food],
   ['Ingredientes', i => { const d = REG[i]; return !d.isBlock && !d.food && !d.tool && !d.armor && !d.dur && !d.bucket && !/bow|arrow|shield|trident|mace|totem|elytra/.test(d.name); }],
@@ -380,6 +380,7 @@ function placeBlock(hit, stack) {
   if ((id === ID.stone_slab || id === ID.oak_slab) && tb === id && hit.n[1] === 1) { setBlockNet(w, tx, ty, tz, id === ID.stone_slab ? ID.smooth_stone : ID.oak_planks); consumeHeld(p); return true; }
   if (!(tbd && tbd.replace && !(tb === ID.snow && w.getMeta(tx, ty, tz) > 1))) { tx += hit.n[0]; ty += hit.n[1]; tz += hit.n[2]; }
   const cur = w.get(tx, ty, tz); if (cur < 0 || ty < 0 || ty >= w.H) return false; if (cur !== 0 && !(REG[cur].replace)) return false;
+  if (cur === ID.fire) return false; // el fuego solo se apaga con agua o con el extintor
   let meta = 0;
   if (bd.orient) { const dx = -Math.sin(p.yaw), dz = -Math.cos(p.yaw); meta = Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? 3 : 1) : (dz > 0 ? 0 : 2); }
   if (bd.log) meta = hit.n[1] ? 0 : hit.n[0] ? 1 : 2;
@@ -435,6 +436,7 @@ function useItem(hit) {
   if (d.bow) { if (G.gameMode === 'creative' || countItem(p, ID.arrow) > 0) { p.bowT = 0.01; return 'hold'; } return false; }
   if (d.trident) { p.bowT = 0.01; return 'hold'; }
   if (d.spyglass) { p.spy = true; return 'hold'; }
+  if (d.extinguisher) { sprayExtinguisher(p); return 'hold'; }
   if (d.throwable) {
     const dir = lookDir(p);
     if (d.throwable === 'eye') {

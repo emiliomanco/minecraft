@@ -151,6 +151,7 @@ function updateParticles(dt, world) {
     let nx = p.x + p.vx * dt, ny = p.y + p.vy * dt, nz = p.z + p.vz * dt;
     if (p.collide && world) { const b = world.get(Math.floor(nx), Math.floor(ny), Math.floor(nz)); if (b > 0 && REG[b].solid) { if (p.vy < 0) { ny = Math.floor(ny) + 1.001; p.vy *= -0.3; p.vx *= 0.6; p.vz *= 0.6; } else { p.vx *= -0.3; p.vz *= -0.3; nx = p.x; nz = p.z; } } }
     p.x = nx; p.y = ny; p.z = nz; p.size = Math.max(0.01, p.size + p.grow * dt); p.rot += p.vrot * dt;
+    if (p.ext && world) extinguishAt(world, p);
     const t = p.life / p.max; p.aCur = p.a * (p.fade ? Math.min(1, t * 2.5) * Math.min(1, (1 - t) * 6 + 0.2) : 1);
     if (p.cool) { const k = Math.min(1, (1 - t) * 1.6); p.g = lerp(p.g0, p.cg, k); p.b = lerp(p.b0, p.cb, k); p.r = lerp(p.r0, p.cr, k); p.emis = k > 0.55 ? 0 : 3.2 * (1 - k / 0.55) + 0.6; }
     L[j++] = p;
@@ -224,10 +225,53 @@ function explosionFX(dim, x, y, z, power) {
   for (let i = 0; i < 90 * m; i++) { const a = Math.random() * 6.28, b = Math.random() * 3.14, s = 6 + Math.random() * 14; P_({ x, y: y + 0.5, z, vx: Math.cos(a) * Math.sin(b) * s, vy: Math.abs(Math.cos(b)) * s + 3, vz: Math.sin(a) * Math.sin(b) * s, life: 0.8 + Math.random() * 1.6, size: 0.06 + Math.random() * 0.08, add: true, emis: 8, r: 1, g: 0.7, b: 0.3, layer: TEX.ember, grav: 14, drag: 0.6, collide: true }); }
 }
 function fireFX(world, x, y, z, dt) {
+  // las llamas en sí son volumétricas (drawFlames); aquí solo chispas, lenguas sueltas y humo
   const q = SETTINGS.particles ?? 2; const k = [0.3, 0.7, 1][q];
-  if (Math.random() < 6 * dt * k) flame(x + 0.2 + Math.random() * 0.6, y + 0.1 + Math.random() * 0.4, z + 0.2 + Math.random() * 0.6, { size: 0.45 + Math.random() * 0.4, vy: 1.2 + Math.random() });
-  if (Math.random() < 2.8 * dt * k) smoke(x + 0.5, y + 0.9, z + 0.5, { r: 0.09, g: 0.085, b: 0.08, a: 0.6, size: 0.6 + Math.random() * 0.5, grow: 0.8, life: 3 + Math.random() * 3, vy: 1.6 + Math.random(), wind: true });
-  if (Math.random() < 1.5 * dt * k) P_({ x: x + Math.random(), y: y + 0.5, z: z + Math.random(), vx: (Math.random() - 0.5), vy: 2 + Math.random() * 2, vz: (Math.random() - 0.5), life: 1 + Math.random(), size: 0.05, add: true, emis: 8, r: 1, g: 0.6, b: 0.2, layer: TEX.ember, grav: -0.5, drag: 0.3 });
+  if (Math.random() < 1.2 * dt * k) flame(x + 0.25 + Math.random() * 0.5, y + 0.5 + Math.random() * 0.5, z + 0.25 + Math.random() * 0.5, { size: 0.18 + Math.random() * 0.15, vy: 1.6 + Math.random(), life: 0.35, emis: 3 });
+  if (Math.random() < 2.2 * dt * k) smoke(x + 0.3 + Math.random() * 0.4, y + 1.3, z + 0.3 + Math.random() * 0.4, { r: 0.07, g: 0.065, b: 0.06, a: 0.5, size: 0.5 + Math.random() * 0.5, grow: 0.9, life: 3 + Math.random() * 3, vy: 1.4 + Math.random(), wind: true });
+  if (Math.random() < 3 * dt * k) P_({ x: x + 0.2 + Math.random() * 0.6, y: y + 0.3 + Math.random() * 0.6, z: z + 0.2 + Math.random() * 0.6, vx: (Math.random() - 0.5) * 1.2, vy: 1.5 + Math.random() * 2.5, vz: (Math.random() - 0.5) * 1.2, life: 0.8 + Math.random() * 1.2, size: 0.035 + Math.random() * 0.03, add: true, emis: 10, r: 1, g: 0.55 + Math.random() * 0.3, b: 0.15, layer: TEX.ember, grav: -0.8, drag: 0.6, collide: true });
+}
+// instancias de llama para un bloque de fuego: [x, y, z, ancho, alto, semilla, intensidad] por llama.
+// Las llamas suben por las caras de los bloques inflamables vecinos, así el fuego "abraza" lo que quema.
+function fireFlames(w, x, y, z, out) {
+  const hs = (((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) >>> 0) % 1000 / 1000;
+  const below = w.get(x, y - 1, z); const bd = below > 0 ? REG[below] : null;
+  const fuel = bd && (bd.flammable || bd.infiniteFire) ? 1 : 0.8;
+  out.push(x + 0.5, y, z + 0.5, 1.15 * fuel, 1.75 * fuel, hs, 1);
+  out.push(x + 0.28 + hs * 0.1, y, z + 0.66, 0.7, 1.05 * fuel, hs + 0.37, 0.85);
+  out.push(x + 0.72, y, z + 0.32 - hs * 0.1, 0.7, 1.2 * fuel, hs + 0.71, 0.85);
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const n = w.get(x + dx, y, z + dz); if (!(n > 0 && REG[n].flammable)) continue;
+    for (let k = -1; k <= 1; k += 2) out.push(x + 0.5 + dx * 0.4 + dz * k * 0.24, y, z + 0.5 + dz * 0.4 + dx * k * 0.24, 0.65, 1.55, hs + 0.13 * (k + 3) + dx * 0.3 + dz * 0.5, 0.9);
+  }
+  const up = w.get(x, y + 1, z); if (up > 0 && REG[up].flammable) out.push(x + 0.5, y + 0.55, z + 0.5, 1.0, 0.7, hs + 0.9, 0.7);
+}
+// ------------------------------------------------------------ extintor
+function sprayExtinguisher(p) {
+  const now = performance.now(); const dt = Math.min(0.1, (now - (p._sprayT || now - 16)) / 1000); p._sprayT = now;
+  const dir = lookDir(p); const rx = Math.cos(p.yaw), rz = -Math.sin(p.yaw);
+  const ox = p.x + dir[0] * 0.6 + rx * 0.25, oy = p.eye - 0.35 + dir[1] * 0.6, oz = p.z + dir[2] * 0.6 + rz * 0.25;
+  const n = Math.max(1, Math.round(dt * [30, 50, 70][SETTINGS.particles ?? 2]));
+  for (let i = 0; i < n; i++) {
+    const sp = 11 + Math.random() * 5, j = 0.13;
+    const vx = (dir[0] + (Math.random() - 0.5) * j * 2) * sp, vy = (dir[1] + (Math.random() - 0.5) * j * 2) * sp, vz = (dir[2] + (Math.random() - 0.5) * j * 2) * sp;
+    const q = P_({ x: ox, y: oy, z: oz, vx, vy, vz, life: 1.8 + Math.random() * 1.2, size: 0.35 + Math.random() * 0.25, grow: 3.2 + Math.random() * 1.2, r: 0.97, g: 0.98, b: 1.0, a: 0.62, drag: 2.2, grav: -0.15, collide: true, soft: 1.0, layer: TEX['smoke_' + ((Math.random() * 4) | 0)], rot: Math.random() * 6, vrot: (Math.random() - 0.5) * 1.5 });
+    if (q) { q.ext = true; q.dim = p.dim; }
+  }
+  if (Math.random() < dt * 4) playSound('fizz', ox, oy, oz, 0.25);
+  p._sprayAcc = (p._sprayAcc || 0) + dt; if (p._sprayAcc > 0.25) { p._sprayAcc = 0; if (G.gameMode !== 'creative') { damageItem(p.inv, p.sel, 1); updateHUD(); } }
+  p.fire = 0;
+}
+// partícula de extintor: apaga fuego y entidades en llamas a su alrededor
+function extinguishAt(world, q) {
+  const r = Math.min(1.2, q.size * 0.45);
+  for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+    const bx = Math.floor(q.x + dx * r), by = Math.floor(q.y + dy * r), bz = Math.floor(q.z + dz * r);
+    const b = world.get(bx, by, bz);
+    if (b === ID.fire) { setBlockNet(world, bx, by, bz, 0); playSound('fizz', bx + 0.5, by + 0.5, bz + 0.5, 0.5); for (let i = 0; i < 3; i++) smoke(bx + Math.random(), by + 0.5, bz + Math.random(), { r: 0.85, g: 0.85, b: 0.85, a: 0.45, size: 0.6, life: 1.5 }); }
+    else if (b === ID.campfire) { /* la fogata es un bloque, se queda */ }
+  }
+  if (Math.random() < 0.2) for (const e of G.entities.values()) if (e.fire > 0 && e.dim === q.dim && Math.abs(e.x - q.x) < r + 0.6 && Math.abs(e.z - q.z) < r + 0.6 && q.y > e.y - 0.5 && q.y < e.y + (e.h || 1.8) + 0.5) e.fire = 0;
 }
 // ------------------------------------------------------------ daño
 function hurtEntity(e, amount, attacker, kx = 0, ky = 0, kz = 0, cause) {
