@@ -591,8 +591,51 @@ const VMAT = {
 };
 function flatEnough(gen, x, z, rad, maxd) { const h0 = gen.col(x, z).h; for (const [dx, dz] of [[rad, 0], [-rad, 0], [0, rad], [0, -rad], [rad, rad], [-rad, -rad]]) if (Math.abs(gen.col(x + dx, z + dz).h - h0) > maxd) return false; return true; }
 // 1. ALDEA ---------------------------------------------------------
+// Plano determinista (solo depende de la semilla y del terreno, no del chunk que se esté generando): plaza con pozo,
+// 4 calles principales con ramales, y parcelas a lo largo de las calles con al menos 3 bloques de separación entre
+// edificios, cada uno mirando a la calle con puerta, camino hasta la calle y el interior despejado delante de la puerta.
+const VTYPES = [['house', 3, 3, 30], ['house_big', 4, 4, 16], ['farm', 4, 3, 16], ['library', 4, 3, 7], ['smith', 4, 3, 8], ['pen', 3, 3, 7], ['lamp', 0, 0, 10], ['house', 3, 4, 6]];
+function villagePlan(gen, c) {
+  if (c.plan) return c.plan;
+  const r = mulberry32((c.seed ^ 0x51A9C3) >>> 0); const H = (x, z) => gen.col(x, z).h;
+  const roads = [], plots = [], occ = [{ x0: c.x - 5, z0: c.z - 5, x1: c.x + 5, z1: c.z + 5, kind: 'plaza' }];
+  const segs = [];
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) segs.push({ sx: c.x + dx * 5, sz: c.z + dz * 5, dx, dz, len: 26 + ((r() * 16) | 0), hw: 1 });
+  for (const sg of segs.slice()) { const nb = r() < 0.75 ? 1 + (r() < 0.35 ? 1 : 0) : 0; for (let k = 0; k < nb; k++) { const at = 10 + ((r() * Math.max(1, sg.len - 16)) | 0); const side = r() < 0.5 ? 1 : -1; segs.push({ sx: sg.sx + sg.dx * at + (sg.dz ? side * 2 : 0), sz: sg.sz + sg.dz * at + (sg.dx ? side * 2 : 0), dx: sg.dz ? side : 0, dz: sg.dx ? side : 0, len: 12 + ((r() * 12) | 0), hw: 1 }); } }
+  const hit = (a, m) => occ.some(o => !(a.x1 + m < o.x0 || a.x0 - m > o.x1 || a.z1 + m < o.z0 || a.z0 - m > o.z1) && (m > 1 || o.kind !== 'road' || true));
+  for (const sg of segs) { // las calles se cortan donde empieza el agua o un barranco
+    let L = 0, ph = H(sg.sx, sg.sz); for (let i = 0; i < sg.len; i++) { const x = sg.sx + sg.dx * i, z = sg.sz + sg.dz * i; const col = gen.col(x, z); if (col.h < SEA || col.river || col.lake || Math.abs(col.h - ph) > 2) break; ph = col.h; L = i + 1; }
+    sg.len = L; if (L < 4) continue; roads.push(sg);
+    const ex = sg.sx + sg.dx * (L - 1), ez = sg.sz + sg.dz * (L - 1);
+    occ.push({ x0: Math.min(sg.sx, ex) - (sg.dz ? 1 : 0), z0: Math.min(sg.sz, ez) - (sg.dx ? 1 : 0), x1: Math.max(sg.sx, ex) + (sg.dz ? 1 : 0), z1: Math.max(sg.sz, ez) + (sg.dx ? 1 : 0), kind: 'road' });
+  }
+  const tot = VTYPES.reduce((a, t) => a + t[3], 0); const pick = () => { let v = r() * tot; for (const t of VTYPES) { v -= t[3]; if (v <= 0) return t; } return VTYPES[0]; };
+  let n = 0;
+  for (const sg of roads) for (let i = 3; i < sg.len - 2;) {
+    let placed = 0;
+    for (const side of [-1, 1]) {
+      const [type, ha, hc] = pick(); // medias medidas a lo largo de la calle (ha) y hacia fuera (hc)
+      const off = sg.hw + (type === 'lamp' ? 1 : 3) + hc; // 2 bloques de camino entre la calle y la pared
+      const ax = sg.sx + sg.dx * (i + ha), az = sg.sz + sg.dz * (i + ha);
+      const cx = ax + (sg.dz ? side * off : 0), cz = az + (sg.dx ? side * off : 0);
+      const hx = sg.dx ? ha : hc, hz = sg.dx ? hc : ha;
+      const rect = { x0: cx - hx, z0: cz - hz, x1: cx + hx, z1: cz + hz };
+      // separación: 3 bloques con otros edificios y la plaza, 1 con las calles (el camino de entrada va en ese hueco)
+      if (occ.some(o => o.kind === 'road' ? !(rect.x1 + 1 < o.x0 || rect.x0 - 1 > o.x1 || rect.z1 + 1 < o.z0 || rect.z0 - 1 > o.z1) : !(rect.x1 + 3 < o.x0 || rect.x0 - 3 > o.x1 || rect.z1 + 3 < o.z0 || rect.z0 - 3 > o.z1))) continue;
+      // terreno: sin agua y sin desniveles grandes bajo el edificio
+      let lo = 1e9, hi = -1e9, bad = false; for (let x = rect.x0; x <= rect.x1; x += Math.max(1, hx)) for (let z = rect.z0; z <= rect.z1; z += Math.max(1, hz)) { const col = gen.col(x, z); if (col.h < SEA || col.river || col.lake) bad = true; lo = Math.min(lo, col.h); hi = Math.max(hi, col.h); }
+      if (bad || hi - lo > 4) continue;
+      const roadH = H(ax + (sg.dz ? side * (sg.hw) : 0), az + (sg.dx ? side * (sg.hw) : 0));
+      const y = clamp(H(cx, cz) + 1, roadH + 1, roadH + 2); // el suelo de la casa al nivel de la calle o 1 más alto (nunca más bajo: se entraría con la cabeza contra la pared)
+      const door = sg.dz ? [-side, 0] : [0, -side]; // la puerta mira hacia la calle
+      plots.push({ type, x: cx, z: cz, hx, hz, y, door, roadH, n: n++ }); occ.push(Object.assign(rect, { kind: type })); placed = Math.max(placed, ha);
+    }
+    i += placed ? placed * 2 + 4 : 2;
+  }
+  return (c.plan = { roads, plots });
+}
 defStruct({
-  name: 'village', clearR: 48, dim: 'overworld', spacing: 26, radius: 64, sep: 6,
+  name: 'village', clearR: 80, dim: 'overworld', spacing: 26, radius: 84, sep: 6,
   place(gen, x, z) {
     const c = gen.col(x, z); const b = c.biome; let style = null;
     if (b === BI.plains || b === BI.sunflower_plains) style = 'plains'; else if (b === BI.desert) style = 'desert'; else if (b === BI.savanna) style = 'savanna'; else if (b === BI.taiga) style = 'taiga'; else if (b === BI.snowy_plains) style = 'snowy';
@@ -600,61 +643,82 @@ defStruct({
   },
   build(S, c, r) {
     const M = {}; for (const k in VMAT[c.style]) M[k] = ID[VMAT[c.style][k]];
-    const cy = S.colH(c.x, c.z);
+    const P = villagePlan(S.gen, c); const cy = S.colH(c.x, c.z);
+    // plaza: suelo de camino alrededor del pozo
+    for (let dx = -5; dx <= 5; dx++) for (let dz = -5; dz <= 5; dz++) { const x = c.x + dx, z = c.z + dz; S.set(x, cy, z, M.path); S.fill(x, cy + 1, z, x, cy + 6, z, 0); S.foundation(x, z, cy, ID.dirt); }
     // pozo
     S.fill(c.x - 2, cy, c.z - 2, c.x + 1, cy, c.z + 1, ID.cobblestone);
     S.fill(c.x - 1, cy, c.z - 1, c.x, cy, c.z, ID.water); S.fill(c.x - 1, cy - 4, c.z - 1, c.x, cy - 1, c.z, ID.water);
-    for (const [dx, dz] of [[-2, -2], [1, -2], [-2, 1], [1, 1]]) { S.fill(c.x + dx, cy + 1, c.z + dz, c.x + dx, cy + 2, c.z + dz, ID.oak_fence); }
-    S.fill(c.x - 2, cy + 3, c.z - 2, c.x + 1, cy + 3, c.z + 1, ID.cobblestone); S.fill(c.x - 2, cy + 1, c.z - 2, c.x + 1, cy + 2, c.z + 1, 0); for (const [dx, dz] of [[-2, -2], [1, -2], [-2, 1], [1, 1]]) S.fill(c.x + dx, cy + 1, c.z + dz, c.x + dx, cy + 2, c.z + dz, ID.oak_fence);
-    // calles y casas
-    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-    let houseN = 0;
-    for (const [dx, dz] of dirs) {
-      const len = 22 + (r() * 16) | 0;
-      for (let i = 3; i < len; i++) {
-        const px = c.x + dx * i, pz = c.z + dz * i;
-        for (let w = -1; w <= 1; w++) { const qx = px + (dz !== 0 ? w : 0), qz = pz + (dx !== 0 ? w : 0); const h = S.colH(qx, qz); if (h >= SEA) { S.set(qx, h, qz, h === SEA ? M.planks : M.path); for (let k = 1; k <= 2; k++) S.setIfAir(qx, h + k, qz, 0); } else S.set(qx, SEA, qz, M.planks); }
-        if (i % 7 === 5) for (const side of [-1, 1]) {
-          const kind = r(); const off = 4 + (kind < 0.3 ? 1 : 0);
-          const hx = px + (dz !== 0 ? side * off : 0), hz = pz + (dx !== 0 ? side * off : 0);
-          const doorDir = dz !== 0 ? [-side, 0] : [0, -side];
-          if (kind < 0.62) villageHouse(S, hx, hz, M, r, doorDir, houseN++, c.style, kind < 0.25 ? 4 : 3);
-          else if (kind < 0.85) villageFarm(S, hx, hz, r);
-          else { const h = S.colH(hx, hz); S.set(hx, h + 1, hz, ID.oak_fence); S.set(hx, h + 2, hz, ID.oak_fence); S.set(hx, h + 3, hz, ID.wool_lamp || ID.glowstone); }
-        }
-      }
+    S.fill(c.x - 2, cy + 3, c.z - 2, c.x + 1, cy + 3, c.z + 1, ID.cobblestone); for (const [dx, dz] of [[-2, -2], [1, -2], [-2, 1], [1, 1]]) S.fill(c.x + dx, cy + 1, c.z + dz, c.x + dx, cy + 2, c.z + dz, ID.oak_fence);
+    // calles (3 de ancho) siguiendo el terreno, sin nada encima
+    for (const sg of P.roads) for (let i = -4; i < sg.len; i++) for (let w = -sg.hw; w <= sg.hw; w++) {
+      const x = sg.sx + sg.dx * i + (sg.dz ? w : 0), z = sg.sz + sg.dz * i + (sg.dx ? w : 0); const h = S.colH(x, z);
+      if (Math.abs(x - c.x) <= 5 && Math.abs(z - c.z) <= 5) continue;
+      S.set(x, h, z, M.path); S.fill(x, h + 1, z, x, h + 5, z, 0);
     }
-    // aldeanos y gólem
-    for (let i = 0; i < 6; i++) { const vx = c.x + (r() - 0.5) * 30, vz = c.z + (r() - 0.5) * 30; S.mob('villager', vx, S.colH(vx | 0, vz | 0) + 1, vz); }
-    S.mob('iron_golem', c.x + 3.5, cy + 1, c.z + 3.5);
-    if (c.style === 'plains') for (let i = 0; i < 3; i++) S.mob('cat', c.x + (r() - 0.5) * 20, cy + 1, c.z + (r() - 0.5) * 20);
+    for (const pl of P.plots) villageBuild(S, pl, M, c.style, mulberry32((c.seed ^ Math.imul(pl.n + 1, 2654435761)) >>> 0));
+    // aldeanos delante de las casas y en la plaza; gólem en la plaza
+    let v = 0; for (const pl of P.plots) { if (!/house|library|smith/.test(pl.type) || v >= 10) continue; v++; const fx = pl.x + pl.door[0] * (pl.hx + 2), fz = pl.z + pl.door[1] * (pl.hz + 2); S.mob('villager', fx + 0.5, S.colH(fx, fz) + 1, fz + 0.5); }
+    for (let i = 0; i < 2; i++) S.mob('villager', c.x + 3.5 - i * 6, cy + 1, c.z + 3.5);
+    S.mob('iron_golem', c.x + 3.5, cy + 1, c.z - 3.5);
+    if (c.style === 'plains') for (let i = 0; i < 2; i++) S.mob('cat', c.x - 3.5, cy + 1, c.z + 3.5 - i * 6);
   }
 });
-function villageHouse(S, x, z, M, r, door, n, style, half) {
-  const y = S.colH(x, z) + 1; const x0 = x - half, x1 = x + half, z0 = z - half, z1 = z + half, h = 4 + (half > 3 ? 1 : 0);
-  for (let xx = x0; xx <= x1; xx++) for (let zz = z0; zz <= z1; zz++) { S.foundation(xx, zz, y, M.base); S.set(xx, y - 1, zz, M.base); }
-  S.fillFn(x0, y, z0, x1, y + h, z1, (xx, yy, zz) => {
-    const edgeX = xx === x0 || xx === x1, edgeZ = zz === z0 || zz === z1;
-    if (edgeX && edgeZ) return M.log; if (edgeX || edgeZ) { if (yy === y + 1 && ((xx === x && edgeZ) || (zz === z && edgeX)) && style !== 'desert') return ID.glass; if (yy === y + 2 && ((xx === x && edgeZ) || (zz === z && edgeX))) return ID.glass; return yy === y ? M.base : M.planks; } return 0;
-  });
-  // techo a dos aguas
-  for (let k = 0; k <= half + 1; k++) for (let zz = z0 - 1; zz <= z1 + 1; zz++) { S.set(x0 - 1 + k, y + h + 1 + k, zz, M.roof); S.set(x1 + 1 - k, y + h + 1 + k, zz, M.roof); }
-  for (let k = 0; k <= half; k++) for (let xx = x0 + k; xx <= x1 - k; xx++) { S.set(xx, y + h + 1 + k, z0, M.planks); S.set(xx, y + h + 1 + k, z1, M.planks); if (k > 0) for (let zz = z0 + 1; zz < z1; zz++) S.set(xx, y + h + 1 + k, zz, 0); }
-  for (let xx = x0 + 1; xx < x1; xx++) for (let zz = z0 + 1; zz < z1; zz++) { S.set(xx, y + h, zz, 0); S.set(xx, y - 1, zz, M.planks); }
-  if (style === 'desert') S.fill(x0, y + h + 1, z0, x1, y + h + 8, z1, 0), S.fill(x0, y + h, z0, x1, y + h, z1, M.roof);
-  // puerta
-  const dx = x + door[0] * half, dz = z + door[1] * half; S.set(dx, y, dz, 0); S.set(dx, y + 1, dz, 0);
-  S.set(dx + door[0], y - 1, dz + door[1], M.path);
-  // interior
-  S.set(x0 + 1, y, z0 + 1, ID.bed); S.set(x1 - 1, y, z0 + 1, n % 3 === 0 ? ID.crafting_table : n % 3 === 1 ? ID.furnace : ID.smithing_table);
-  S.chest(x1 - 1, y, z1 - 1, 'village'); S.set(x0 + 1, y + 2, z1 - 1, ID.torch);
-  if (half > 3) { S.set(x0 + 1, y, z1 - 1, ID.bookshelf); S.set(x0 + 2, y, z1 - 1, ID.bookshelf); }
-}
-function villageFarm(S, x, z, r) {
-  const y = S.colH(x, z); for (let dx = -3; dx <= 3; dx++) for (let dz = -2; dz <= 2; dz++) {
-    const edge = Math.abs(dx) === 3 || Math.abs(dz) === 2; if (edge) { S.set(x + dx, y, z + dz, ID.oak_log); S.set(x + dx, y + 1, z + dz, 0); }
-    else if (dz === 0) S.set(x + dx, y, z + dz, ID.water); else { S.set(x + dx, y, z + dz, ID.farmland); S.set(x + dx, y + 1, z + dz, [ID.wheat, ID.wheat, ID.carrots, ID.potatoes, ID.beetroots][(Math.abs(x + z) >> 2) % 5], 4 + ((r() * 4) | 0)); }
+// meta de puerta: mira hacia el interior (dirección en que camina quien entra), como al colocarla a mano
+function doorMetaFor(dir) { const ix = -dir[0], iz = -dir[1]; return iz > 0 ? 0 : ix < 0 ? 1 : iz < 0 ? 2 : 3; }
+function villageBuild(S, pl, M, style, r) {
+  const { x, z, hx, hz, y, door } = pl; const x0 = x - hx, x1 = x + hx, z0 = z - hz, z1 = z + hz;
+  if (pl.type === 'lamp') { const h = S.colH(x, z); S.set(x, h, z, M.base); S.set(x, h + 1, z, ID.oak_fence); S.set(x, h + 2, z, ID.oak_fence); S.set(x, h + 3, z, ID.lantern || ID.glowstone); return; }
+  // terreno: aplanar la parcela (y un borde de 1) al nivel del suelo, cimientos hacia abajo y aire hacia arriba
+  for (let xx = x0 - 1; xx <= x1 + 1; xx++) for (let zz = z0 - 1; zz <= z1 + 1; zz++) { S.fill(xx, y, zz, xx, y + 12, zz, 0); S.set(xx, y - 1, zz, style === 'desert' ? ID.sand : ID.grass_block); S.foundation(xx, zz, y - 1, ID.dirt); }
+  // camino desde la puerta (o el lado de la calle) hasta la calle, con escalones de 1
+  const ddx = door[0], ddz = door[1]; const wx = x + ddx * (ddx ? hx : 0), wz = z + ddz * (ddz ? hz : 0);
+  let ph = y - 1; for (let k = 1; k <= 3; k++) { const px = wx + ddx * k, pz = wz + ddz * k; const target = pl.roadH; if (k > 1) ph += Math.sign(target - ph) * Math.min(1, Math.abs(target - ph)); /* delante de la puerta, al nivel del suelo */ S.set(px, ph, pz, M.path); S.foundation(px, pz, ph, ID.dirt); S.fill(px, ph + 1, pz, px, ph + 4, pz, 0); }
+  if (pl.type === 'farm') {
+    for (let xx = x0; xx <= x1; xx++) for (let zz = z0; zz <= z1; zz++) {
+      const edge = xx === x0 || xx === x1 || zz === z0 || zz === z1; const mid = (hx >= hz ? zz === z : xx === x);
+      if (edge) S.set(xx, y - 1, zz, M.log === ID.cut_sandstone ? ID.sandstone : ID.oak_log); else if (mid) S.set(xx, y - 1, zz, ID.water); else { S.set(xx, y - 1, zz, ID.farmland); S.set(xx, y, zz, [ID.wheat, ID.wheat, ID.carrots, ID.potatoes, ID.beetroots][(pl.n + (hx >= hz ? zz : xx)) % 5], 4 + ((r() * 4) | 0)); }
+    }
+    S.set(wx, y - 1, wz, M.path); S.set(wx, y, wz, 0); return; // entrada en el borde de la calle
   }
+  if (pl.type === 'pen') {
+    for (let xx = x0; xx <= x1; xx++) for (let zz = z0; zz <= z1; zz++) { if (xx === x0 || xx === x1 || zz === z0 || zz === z1) S.set(xx, y, zz, ID.oak_fence); }
+    S.set(wx, y, wz, ID.oak_fence_gate, doorMetaFor(door) & 3); S.set(x - 1, y, z + 1, ID.hay_block);
+    const an = ['sheep', 'cow', 'pig'][pl.n % 3]; S.mob(an, x + 0.5, y, z + 0.5); S.mob(an, x + 1.5, y, z - 0.5); return;
+  }
+  // casas, biblioteca, herrería: paredes, ventanas, techo, puerta y muebles lejos de la puerta
+  const h = pl.type === 'house_big' ? 5 : 4;
+  S.fillFn(x0, y, z0, x1, y + h - 1, z1, (xx, yy, zz) => {
+    const ex = xx === x0 || xx === x1, ez = zz === z0 || zz === z1;
+    if (ex && ez) return M.log; if (!(ex || ez)) return 0;
+    const midWall = (ez && Math.abs(xx - x) === 1) || (ex && Math.abs(zz - z) === 1);
+    if ((yy === y + 1 || yy === y + 2) && midWall && style !== 'desert') return ID.glass_pane; // ventanas a los lados de la puerta y en las demás paredes
+    if (yy === y + 1 && midWall && style === 'desert') return 0;
+    return yy === y ? M.base : M.planks;
+  });
+  for (let xx = x0 + 1; xx < x1; xx++) for (let zz = z0 + 1; zz < z1; zz++) S.set(xx, y - 1, zz, M.planks);
+  // techo
+  if (style === 'desert') S.fill(x0, y + h, z0, x1, y + h, z1, M.roof);
+  else if (hx >= hz) { for (let k = 0; k <= hz + 1; k++) for (let xx = x0 - 1; xx <= x1 + 1; xx++) { S.set(xx, y + h + k, z0 - 1 + k, M.roof); S.set(xx, y + h + k, z1 + 1 - k, M.roof); } for (let k = 0; k <= hz; k++) for (let zz = z0 + k; zz <= z1 - k; zz++) { S.set(x0, y + h + k, zz, M.planks); S.set(x1, y + h + k, zz, M.planks); } }
+  else { for (let k = 0; k <= hx + 1; k++) for (let zz = z0 - 1; zz <= z1 + 1; zz++) { S.set(x0 - 1 + k, y + h + k, zz, M.roof); S.set(x1 + 1 - k, y + h + k, zz, M.roof); } for (let k = 0; k <= hx; k++) for (let xx = x0 + k; xx <= x1 - k; xx++) { S.set(xx, y + h + k, z0, M.planks); S.set(xx, y + h + k, z1, M.planks); } }
+  // puerta de verdad (dos mitades) en la pared que da a la calle; en el desierto, vano abierto
+  const dm = doorMetaFor(door); const doorId = style === 'desert' ? 0 : style === 'taiga' || style === 'snowy' ? ID.spruce_door : ID.oak_door;
+  S.set(wx, y, wz, doorId, doorId ? dm : 0); S.set(wx, y + 1, wz, doorId, doorId ? dm | 8 : 0);
+  S.set(wx - ddx, y, wz - ddz, 0); S.set(wx - ddx, y + 1, wz - ddz, 0); // el interior delante de la puerta queda libre
+  // muebles: en las esquinas del fondo (opuestas a la puerta)
+  const back = (k, sideSign) => { // esquina interior al fondo; sideSign: -1/1 a cada lado
+    const bx = ddx ? x - ddx * (hx - 1) : x + sideSign * (hx - 1 - k), bz = ddz ? z - ddz * (hz - 1) : z + sideSign * (hz - 1 - k);
+    return ddx ? [bx, z + sideSign * (hz - 1 - k)] : [x + sideSign * (hx - 1 - k), bz];
+  };
+  const [ax, az] = back(0, -1), [bx2, bz2] = back(0, 1);
+  S.set(ax, y, az, ID.bed);
+  const station = pl.type === 'smith' ? ID.blast_furnace : pl.type === 'library' ? ID.bookshelf : [ID.crafting_table, ID.smoker, ID.barrel, ID.smithing_table, ID.furnace][pl.n % 5];
+  S.set(bx2, y, bz2, station);
+  const [cx2, cz2] = back(1, 1); if (cx2 !== x || cz2 !== z) S.chest(cx2, y, cz2, 'village');
+  const [tx, tz] = back(1, -1); S.set(tx, y, tz, ID.torch);
+  if (pl.type === 'library') { const [lx, lz] = back(1, 1); S.set(lx, y, lz, ID.bookshelf); S.set(lx, y + 1, lz, ID.bookshelf); S.set(bx2, y + 1, bz2, ID.bookshelf); }
+  if (pl.type === 'smith') { const [lx, lz] = back(2, 1); if (Math.abs(lx - wx) + Math.abs(lz - wz) > 2) S.set(lx, y, lz, ID.anvil || ID.smithing_table); }
+  if (style === 'snowy') S.fill(x0 - 1, y + h + Math.max(hx, hz) + 2, z0 - 1, x1 + 1, y + h + Math.max(hx, hz) + 2, z1 + 1, 0);
 }
 // 2. FORTALEZA (STRONGHOLD) ---------------------------------------
 function strongholdSpots(gen) {
