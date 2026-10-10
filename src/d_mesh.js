@@ -160,12 +160,13 @@ function meshRegion(world, ch) {
   const O = MB_O, T = MB_T; O.reset(); T.reset(); MB_W.reset();
   const H = world.H; const top = Math.min(H - 1, ch.top + 1);
   const fancy = MESH_QUALITY >= 1;
-  const bxw = ch.cx * 16, bzw = ch.cz * 16; const EM = [];
+  const bxw = ch.cx * 16, bzw = ch.cz * 16; const EM = []; let EMlava = 0;
   for (let y = 0; y <= top; y++) for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
     const ri = ((y + 1) * LR + z + LP + 1) * LR + x + LP + 1; const id = regB[ri]; if (!id) continue;
     const d = REG[id]; if (!d || d.render === 'none') continue;
     const meta = regM[ri];
-    if (d.light >= 10 && EM.length < 400 && (d.render !== 'cube' || d.liquid || id === ID.magma_block) && (!d.liquid || regB[ri + LRR] === 0)) EM.push(bxw + x, y, bzw + z, id);
+    // emisores (fuego, antorchas, lava...): la lava tiene su propio cupo para que un lago subterráneo no deje sin efectos a los fuegos y antorchas del chunk
+    if (d.light >= 10 && EM.length < 4096 && (d.render !== 'cube' || d.liquid || id === ID.magma_block) && (!d.liquid || (regB[ri + LRR] === 0 && (EMlava++ < 96)))) EM.push(bxw + x, y, bzw + z, id);
     if (d.render === 'cube') {
       const B = d.trans === 2 ? T : O; let flags = 0;
       if (d.trans === 1) flags |= F_CUT; if (d.wave === 1 && fancy) flags |= F_LEAF; if (d.leaves || d.wave) flags |= F_FOLI;

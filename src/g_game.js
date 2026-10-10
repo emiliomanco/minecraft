@@ -322,7 +322,7 @@ function fluidTick(w, x, y, z) {
     w.set(nx, y, nz, id, nl);
   }
 }
-function fizz(w, x, y, z) { playSound('fizz', x, y, z, 0.5); for (let i = 0; i < 6; i++) smoke(x + Math.random(), y + 1, z + Math.random(), { r: 0.7, g: 0.7, b: 0.7, a: 0.5, size: 0.4, life: 1.2 }); }
+function fizz(w, x, y, z) { playSound('fizz', x, y, z, 0.5); if (typeof vfxSmokeEmit === 'function') vfxSmokeEmit(x + 0.5, y + 1, z + 0.5, 1.0, 0.6, 2); for (let i = 0; i < 6; i++) smoke(x + Math.random(), y + 1, z + Math.random(), { r: 0.7, g: 0.7, b: 0.7, a: 0.5, size: 0.4, life: 1.2 }); }
 function fireTick(w, x, y, z) {
   if (w.get(x, y, z) !== ID.fire) return; const below = w.get(x, y - 1, z);
   if (below > 0 && REG[below].infiniteFire) { return; }

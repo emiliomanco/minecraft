@@ -743,7 +743,7 @@ function renderWorld(world, cam, yaw, pitch, opts = {}) {
   gl.depthMask(true);
   if (opts.drawTranslucentExtra) opts.drawTranslucentExtra();
   // partículas
-  if (opts.flames && opts.flames.length) drawFlames(opts.flames);
+  drawVFX(opts); // fuego (volumétrico en calidad alta) y humo
   if (opts.particles && opts.particles.length) drawParticles(opts.particles);
   gl.disable(gl.BLEND); gl.enable(gl.CULL_FACE);
   if (opts.drawOverlay) opts.drawOverlay(true);
