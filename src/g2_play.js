@@ -336,6 +336,7 @@ function onKeyDown(e) {
     case 'hideHud': hudHidden = !hudHidden; $('hud').style.display = hudHidden ? 'none' : 'block'; e.preventDefault(); break;
     case 'jump': { const now = performance.now(); if ((G.gameMode === 'creative') && now - lastSpace < 300) { G.player.flying = !G.player.flying; G.player.vy = 0; } lastSpace = now; const p = G.player; const el = p.armor[1] && p.armor[1].id === ID.elytra; if (el && !p.onGround && !p.flying && !p.inWater && p.vy < 0 && !p.gliding) { p.gliding = true; } break; }
     case 'forward': { const now = performance.now(); if (now - lastW < 250) INPUT.sprintToggle = true; lastW = now; break; }
+    case 'ragdoll': if (!INPUT.keys.F3 && typeof playerRagdollToggle === 'function') playerRagdollToggle(); break;
   }
   if (e.code === 'F2') { e.preventDefault(); screenshot(); }
   if (e.code === 'F11') { e.preventDefault(); if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen().then(() => { try { navigator.keyboard && navigator.keyboard.lock(); } catch (err) { } }).catch(() => { }); }

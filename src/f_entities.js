@@ -298,6 +298,7 @@ function hurtEntity(e, amount, attacker, kx = 0, ky = 0, kz = 0, cause) {
   if (e.type === 'ender_dragon' && cause === 'explosion') amount *= 0.25;
   e.hp -= amount; e.hurtTime = 10; e.invul = 10;
   e.vx += kx; e.vy += ky; e.vz += kz;
+  if (typeof ragKnock === 'function' && e.hp > 0) ragKnock(e, kx, ky, kz);
   if (e.def) {
     if (e.def.ai === 'passive') e.panic = 60;
     if (attacker && (e.def.ai === 'neutral' || e.def.ai === 'enderman' || e.def.ai === 'golem' || e.def.ai === 'piglin' || e.def.hostile)) { e.target = attacker; e.angry = 600; }
@@ -350,6 +351,7 @@ class Player extends Entity {
     if (G.difficulty === 0 && attacker && attacker.def) return false;
     if (this.effects.resistance) amount *= 0.6;
     this.hp -= amount; this.invul = 10; this.hurtTime = 10; this.vx += kx; this.vy += ky; this.vz += kz; this.lastHurt = performance.now();
+    if (typeof ragKnock === 'function' && this.hp > 0) ragKnock(this, kx, ky, kz);
     this.exh += 0.1; playSound('hurt', this.x, this.y, this.z, 1); flashHurt();
     if (this.hp <= 0) {
       const tot = this.offhand && this.offhand.id === ID.totem ? 'off' : (this.held() && this.held().id === ID.totem ? 'main' : null);
@@ -360,6 +362,7 @@ class Player extends Entity {
   }
   die(cause, attacker) {
     this.dead = true; this.hp = 0;
+    if (typeof startRagdoll === 'function') { if (this.ragdoll) { this.ragdoll.alive = false; this.ragdoll.dur = 1e9; } else startRagdoll(this, null, false, 1e9); } // el cuerpo cae como muñeco hasta reaparecer
     const msgs = { fall: 'cayó desde muy alto', lava: 'intentó nadar en lava', fire: 'ardió hasta morir', drown: 'se ahogó', starve: 'murió de hambre', explosion: 'voló por los aires', void: 'cayó al vacío', cactus: 'murió pinchado' };
     const msg = this.name + ' ' + (msgs[cause] || (attacker && attacker.type ? 'fue asesinado por ' + mobName(attacker.type) : 'murió'));
     if (G.gameMode === 'survival' && !G.keepInventory) { for (const arr of [this.inv, this.armor]) for (let i = 0; i < arr.length; i++) if (arr[i]) { dropItem(this.dim, this.x, this.y + 1, this.z, arr[i], (Math.random() - 0.5) * 4, 3, (Math.random() - 0.5) * 4, 40); arr[i] = null; } }
@@ -440,6 +443,7 @@ function updatePlayerPhysics(p, dt, input) {
     const vyBefore = p.vy; const wasGround = p.onGround;
     moveEntity(w, p, mx, p.vy * dt, mz);
     if (p.vy < 0 || vyBefore < 0) p.fallDist += Math.max(0, -vyBefore * dt);
+    if (vyBefore < -12 && typeof ragFallCheck === 'function' && G.gameMode !== 'creative' && G.gameMode !== 'spectator') ragFallCheck(p, vyBefore);
     if (p.onGround) {
       const land = blockAt(w, p.x, p.y - 0.05, p.z); const ld = land > 0 ? REG[land] : null;
       if (ld && ld.bouncy && !p.sneaking && vyBefore < -3) { p.vy = -vyBefore * 0.8; p.onGround = false; p.fallDist = 0; }
@@ -507,6 +511,8 @@ function entityTick(e, dt) {
   if (!(e instanceof Mob)) return;
   const d = e.def;
   if (e.hurtTime > 0) e.hurtTime--; if (e.invul > 0) e.invul--;
+  if (e.dead && e.deathTime === 0 && typeof startRagdoll === 'function' && !e.ragdoll) startRagdoll(e, null, false);
+  if (e.ragdoll && !e.dead) { if (e.fire > 0) { e.fire--; if (e.age % 20 === 0 && !d.fireImmune) hurtEntity(e, 1, null, 0, 0, 0, 'fire'); } return; } // en ragdoll: sin IA ni física propia
   if (e.dead) { e.deathTime++; if (e.deathTime === 1) mobDie(e); if (e.deathTime > (e.type === 'ender_dragon' ? 100 : 20)) e.removed = true; if (e.type === 'ender_dragon') { e.y += 0.1; if (e.deathTime % 3 === 0) explosionFX(e.dim, e.x + (Math.random() - 0.5) * 8, e.y + Math.random() * 4, e.z + (Math.random() - 0.5) * 8, 2); } return; }
   // medio
   const feet = liquidAt(w, e.x, e.y + 0.2, e.z); e.inWater = feet === 1; e.inLava = feet === 2;
@@ -608,6 +614,7 @@ function entityTick(e, dt) {
   e.vy = Math.max(e.vy, -60);
   const vyB = e.vy; moveEntity(w, e, e.vx * dt, e.vy * dt, e.vz * dt);
   if (vyB < 0 && !e.onGround) e.fallDist += -vyB * dt;
+  if (vyB < -12 && typeof ragFallCheck === 'function' && !d.climb && !d.noGrav) ragFallCheck(e, vyB);
   if (e.onGround) { if (e.fallDist > 3.5 && !d.climb && e.type !== 'chicken' && e.type !== 'cat') hurtEntity(e, Math.floor(e.fallDist - 3), null, 0, 0, 0, 'fall'); e.fallDist = 0; }
   if (e.type === 'chicken' && !e.onGround && e.vy < -2) e.vy = -2;
   const hd = Math.hypot(e.x - e.px, e.z - e.pz); e.walk += hd * 1.5; e.walkAmt = lerp(e.walkAmt, Math.min(1, hd / dt / 3), 0.3);

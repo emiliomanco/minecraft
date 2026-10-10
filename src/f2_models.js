@@ -76,12 +76,12 @@ const MODEL_SCALE = { ghast: 4, dragon: 1.4, magma: 1.6, warden: 1, golem: 1, cr
 function partRot(pt, e, t, f) {
   const ws = Math.sin(e.walk * 1.4) * 0.9 * e.walkAmt; const r = pt.r;
   switch (r) {
-    case 'head': return [-(e.pitch || 0), (e.headRel || 0), 0];
-    case 'armR': return [ws + (e.swing ? -Math.sin(e.swing / 6 * Math.PI) * 1.4 : 0), 0, -0.05];
+    case 'head': return [(e.pitch || 0), (e.headRel || 0), 0]; // el frente del modelo es −Z: rotX positivo = mirar arriba
+    case 'armR': return [ws + (e.swing ? Math.sin(e.swing / 6 * Math.PI) * 1.4 : 0), 0, -0.05];
     case 'armL': return [-ws, 0, 0.05];
-    case 'armZ': case 'armZL': return [-1.45 + Math.sin(t * 2) * 0.05, 0, 0];
-    case 'armB': case 'armBL': return [e.target ? -1.5 : ws * (r === 'armB' ? 1 : -1), r === 'armBL' && e.target ? 0.3 : 0, 0];
-    case 'armX': case 'armXL': return [-0.75, 0, 0];
+    case 'armZ': case 'armZL': return [1.45 + Math.sin(t * 2) * 0.05, 0, 0]; // brazos estirados HACIA DELANTE (antes apuntaban atrás)
+    case 'armB': case 'armBL': return [e.target ? 1.5 : ws * (r === 'armB' ? 1 : -1), r === 'armBL' && e.target ? -0.3 : 0, 0];
+    case 'armX': case 'armXL': return [0.75, 0, 0];
     case 'armE': case 'armEL': return [ws * 0.6 * (r === 'armE' ? 1 : -1), 0, 0];
     case 'legR': case 'legFL': case 'legBR': return [-ws, 0, 0];
     case 'legL': case 'legFR': case 'legBL': return [ws, 0, 0];
@@ -123,6 +123,7 @@ function drawModel(parts, e, x, y, z, yaw, scale, light, tint, flash, t, emis) {
 }
 function lerpAngle(a, b, t) { let d = b - a; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; return a + d * t; }
 function drawEntity(e, alpha, t) {
+  if (e.ragdoll) return; // lo dibuja drawRagdolls
   const x = lerp(e.px ?? e.x, e.x, alpha), y = lerp(e.py ?? e.y, e.y, alpha), z = lerp(e.pz ?? e.z, e.z, alpha), yaw = lerpAngle(e.pyaw ?? e.yaw, e.yaw, alpha);
   const light = entLight(e); const flash = e.hurtTime > 0 || (e.dead && e.deathTime) ? [0.7, 0, 0, 0.45] : e.fuse > 0 && (e.fuse >> 2) % 2 ? [1, 1, 1, 0.6] : null;
   if (e.type === 'item') return drawItemEnt(e, x, y, z, light, t);
@@ -140,21 +141,24 @@ function drawEntity(e, alpha, t) {
   drawModel(mdl, e, x, y + (d.model === 'ghast' ? Math.sin(t * 1.5) * 0.3 : 0), z, yaw, sc, light, tint, flash, t, emis);
   if (e.type === 'sheep') { /* lana tintada en cuerpo ya */ }
 }
+// piezas de armadura del jugador (mismos papeles que el modelo base, así el ragdoll las agrupa con cada miembro)
+function playerArmorParts(e) {
+  const arm = e.armor || []; const base = MODELS.steve; const mats = arm.map(a => a ? (REG[a.id].armor ? REG[a.id].armor.mat : null) : null);
+  const overlay = []; if (!mats.some(Boolean)) return overlay;
+  const L = n => L6('armor_' + (n === 'turtle' ? 'leather' : n));
+  if (mats[0]) overlay.push(Object.assign({}, base[0], { s: [9, 9, 9], o: [-4.5, -0.5, -4.5], t: L(mats[0]) }));
+  if (mats[1] && arm[1].id !== ID.elytra) { overlay.push(Object.assign({}, base[1], { s: [9, 12.5, 5], o: [-4.5, -0.25, -2.5], t: L(mats[1]) })); overlay.push(Object.assign({}, base[2], { s: [5, 6, 5], o: [-2.5, -4, -2.5], t: L(mats[1]) })); overlay.push(Object.assign({}, base[3], { s: [5, 6, 5], o: [-2.5, -4, -2.5], t: L(mats[1]) })); }
+  if (mats[2]) { overlay.push(Object.assign({}, base[4], { s: [4.6, 8, 4.6], o: [-2.3, -8, -2.3], t: L(mats[2]) })); overlay.push(Object.assign({}, base[5], { s: [4.6, 8, 4.6], o: [-2.3, -8, -2.3], t: L(mats[2]) })); }
+  if (mats[3]) { overlay.push(Object.assign({}, base[4], { s: [4.8, 4.5, 4.8], o: [-2.4, -12.2, -2.4], t: L(mats[3]) })); overlay.push(Object.assign({}, base[5], { s: [4.8, 4.5, 4.8], o: [-2.4, -12.2, -2.4], t: L(mats[3]) })); }
+  return overlay;
+}
 function drawPlayerModel(e, x, y, z, yaw, light, flash, t) {
   e.headRel = 0; const sneak = e.sneaking; const yy = y - (sneak ? 0.12 : 0);
   drawModel(MODELS.steve, e, x, yy, z, yaw, 0.9375, light, [1, 1, 1, 1], flash, t);
   // armadura
+  const overlay = playerArmorParts(e);
+  if (overlay.length) drawModel(overlay, e, x, yy, z, yaw, 0.9375, light, [1, 1, 1, 1], flash, t);
   const arm = e.armor || [];
-  const base = MODELS.steve; const mats = arm.map(a => a ? (REG[a.id].armor ? REG[a.id].armor.mat : null) : null);
-  if (mats.some(Boolean)) {
-    const overlay = [];
-    const L = n => L6('armor_' + (n === 'turtle' ? 'leather' : n));
-    if (mats[0]) overlay.push(Object.assign({}, base[0], { s: [9, 9, 9], o: [-4.5, -0.5, -4.5], t: L(mats[0]) }));
-    if (mats[1] && arm[1].id !== ID.elytra) { overlay.push(Object.assign({}, base[1], { s: [9, 12.5, 5], o: [-4.5, -0.25, -2.5], t: L(mats[1]) })); overlay.push(Object.assign({}, base[2], { s: [5, 6, 5], o: [-2.5, -4, -2.5], t: L(mats[1]) })); overlay.push(Object.assign({}, base[3], { s: [5, 6, 5], o: [-2.5, -4, -2.5], t: L(mats[1]) })); }
-    if (mats[2]) { overlay.push(Object.assign({}, base[4], { s: [4.6, 8, 4.6], o: [-2.3, -8, -2.3], t: L(mats[2]) })); overlay.push(Object.assign({}, base[5], { s: [4.6, 8, 4.6], o: [-2.3, -8, -2.3], t: L(mats[2]) })); }
-    if (mats[3]) { overlay.push(Object.assign({}, base[4], { s: [4.8, 4.5, 4.8], o: [-2.4, -12.2, -2.4], t: L(mats[3]) })); overlay.push(Object.assign({}, base[5], { s: [4.8, 4.5, 4.8], o: [-2.4, -12.2, -2.4], t: L(mats[3]) })); }
-    drawModel(overlay, e, x, yy, z, yaw, 0.9375, light, [1, 1, 1, 1], flash, t);
-  }
   if (arm[1] && arm[1].id === ID.elytra) drawModel([part([10, 20, 2], [0, 22, 2], [-5, -20, 0], 'elytra_tex', e.gliding ? 'none' : 'none')], e, x, yy, z, yaw, 0.9375, light, [1, 1, 1, 1], null, t);
   // objeto en mano
   const h = e.heldItem !== undefined ? e.heldItem : (e.inv ? e.inv[e.sel] : null);
@@ -188,6 +192,7 @@ function drawAllEntities(dim, alpha, selfView) {
     if (e.remotePlayer && e.spectator) continue;
     drawEntity(e, alpha, t);
   }
+  if (typeof drawRagdolls === 'function') drawRagdolls(dim, !selfView);
   if (selfView && G.player) drawEntity(Object.assign(Object.create(Object.getPrototypeOf(G.player)), G.player, { px: G.player.px, heldItem: G.player.held(), pitch: G.player.pitch }), 1, t);
 }
 // rayos (guardián, curación del dragón)

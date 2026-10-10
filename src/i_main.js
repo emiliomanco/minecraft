@@ -297,7 +297,9 @@ function gameFrame(dt) {
   if (!pausedSP) { acc += dt * 1000; let n = 0; while (acc >= 50 && n < 4) { gameTick(); acc -= 50; n++; } if (n >= 4) acc = 0; }
   const typing = $('chatIn').classList.contains('on');
   const input = (UI.open || typing || G.paused || p.dead) ? {} : { f: held('forward'), b: held('back'), l: held('left'), r: held('right'), jump: held('jump'), sneak: held('sneak'), sprint: held('sprint') || INPUT.sprintToggle, useHeld: p.eatT > 0 || p.bowT > 0 };
-  if (!pausedSP && !p.dead) { p.savePrev(); const steps = dt > 0.034 ? 2 : 1; for (let i = 0; i < steps; i++) updatePlayerPhysics(p, dt / steps, input); }
+  if (!pausedSP && !p.dead && !p.ragdoll) { p.savePrev(); const steps = dt > 0.034 ? 2 : 1; for (let i = 0; i < steps; i++) updatePlayerPhysics(p, dt / steps, input); }
+  if (!pausedSP && p.ragdoll && input.jump && p.ragdoll.alive && p.ragdoll.t > 0.5) p.ragdoll.dur = 0; // saltar = levantarse
+  if (!pausedSP && typeof ragUpdate === 'function') ragUpdate(dt);
   if (!pausedSP) updateInteraction(dt);
   smoothProxies(dt); updateParticles(pausedSP ? 0 : dt, w);
   if (!pausedSP) { emitterFX(w, dt); weatherFX(w, dt); }
@@ -305,19 +307,22 @@ function gameFrame(dt) {
   manageChunks(w, p.x, p.z, R.q === 0 ? 5 : 8);
   // cámara
   let yaw = p.yaw, pitch = p.pitch; let eye = [p.x, p.eye, p.z];
-  let bob = null; if (SETTINGS.bob && perspective === 0 && p.onGround) { const bw = p.walk * Math.PI * 0.75; bob = [Math.sin(bw) * 0.035 * p.walkAmt, -Math.abs(Math.cos(bw)) * 0.05 * p.walkAmt]; }
+  let ragRoll = 0; if (p.ragdoll && perspective === 0 && typeof ragdollCamera === 'function') { const rc = ragdollCamera(p); if (rc) { eye = rc.eye; yaw = rc.yaw; pitch = rc.pitch; ragRoll = rc.roll; } }
+  let bob = null; if (SETTINGS.bob && perspective === 0 && p.onGround && !p.ragdoll) { const bw = p.walk * Math.PI * 0.75; bob = [Math.sin(bw) * 0.035 * p.walkAmt, -Math.abs(Math.cos(bw)) * 0.05 * p.walkAmt]; }
   if (perspective > 0) { const d = lookDir(p); const s = perspective === 1 ? -1 : 1; const h = raycast(w, eye[0], eye[1], eye[2], d[0] * s, d[1] * s, d[2] * s, 4, false); const dist = h ? Math.max(0.3, h.t - 0.3) : 4; eye = [eye[0] + d[0] * s * dist, eye[1] + d[1] * s * dist, eye[2] + d[2] * s * dist]; if (perspective === 2) { yaw += Math.PI; pitch = -pitch; } }
-  let roll = 0; if (G.shake > 0) { G.shake = Math.max(0, G.shake - dt * 2.5); roll = (Math.random() - 0.5) * G.shake * 0.08; pitch += (Math.random() - 0.5) * G.shake * 0.05; yaw += (Math.random() - 0.5) * G.shake * 0.05; }
+  let roll = ragRoll; if (G.shake > 0) { G.shake = Math.max(0, G.shake - dt * 2.5); roll = (Math.random() - 0.5) * G.shake * 0.08; pitch += (Math.random() - 0.5) * G.shake * 0.05; yaw += (Math.random() - 0.5) * G.shake * 0.05; }
   if (p.hurtTime > 0) roll += Math.sin(p.hurtTime / 10 * Math.PI) * 0.06;
   { const cl = w.dim === 'overworld' ? Math.min(1, w.light(Math.floor(eye[0]), Math.floor(eye[1]), Math.floor(eye[2]))[0] / 12) : 1; R.camSky = lerp(R.camSky ?? 1, cl, Math.min(1, dt * 3)); }
   const camB = blockAt(w, eye[0], eye[1], eye[2]); const under = camB > 0 && (REG[camB].liquid === 1 || REG[camB].inWater);
-  const tfov = SETTINGS.fov * (p.sprinting ? 1.12 : 1) * (p.spy ? 0.14 : 1) * (p.bowT > 0 ? 1 - Math.min(1, p.bowT) * 0.15 : 1) * (p.gliding ? 1.1 : 1);
+  // zoom (mantener la tecla; la rueda cambia el aumento entre 2x y 12x)
+  const zoomOn = held('zoom') && !UI.open && !G.paused && !$('chatIn').classList.contains('on'); G.zoomCur = lerp(G.zoomCur || 1, zoomOn ? (G.zoomMag || 4) : 1, Math.min(1, dt * 12));
+  const tfov = SETTINGS.fov * (p.sprinting && !zoomOn ? 1.12 : 1) * (p.spy ? 0.14 : 1) * (p.bowT > 0 ? 1 - Math.min(1, p.bowT) * 0.15 : 1) * (p.gliding ? 1.1 : 1) / G.zoomCur;
   G.fovCur = lerp(G.fovCur || tfov, tfov, Math.min(1, dt * 10));
   R.yawCam = yaw; const alpha = pausedSP ? 1 : acc / 50;
   renderWorld(w, eye, yaw, pitch, {
     fov: G.fovCur, under, roll, bob, biome: w.biomeAt(Math.floor(p.x), Math.floor(p.z)),
     drawEntities: () => { drawAllEntities(p.dim, alpha, perspective > 0 && G.gameMode !== 'spectator'); },
-    particles: G.particles, flames: G._flames, drawOverlay: tr => drawOverlays(tr), drawHand: perspective === 0 && !hudHidden && G.gameMode !== 'spectator' && !p.spy ? drawHand : null,
+    particles: G.particles, flames: G._flames, drawOverlay: tr => drawOverlays(tr), drawHand: perspective === 0 && !hudHidden && G.gameMode !== 'spectator' && !p.spy && !p.ragdoll && (G.zoomCur || 1) < 1.3 ? drawHand : null,
     exposure: p.effects.night ? 1.6 : 1
   });
   // HUD dinámico
@@ -535,14 +540,14 @@ function setupInput() {
   window.addEventListener('mousemove', e => {
     if (UI.open) { const c = $('cursorItem'); c.style.left = (e.clientX - 18) + 'px'; c.style.top = (e.clientY - 18) + 'px'; const t = $('tooltip'); t.style.left = (e.clientX + 14) + 'px'; t.style.top = (e.clientY - 30) + 'px'; }
     if (G.mode !== 'game' || document.pointerLockElement !== cv || UI.open || G.paused) return;
-    const p = G.player; const s = SETTINGS.sens * 0.0042 * (p.spy ? 0.2 : 1);
+    const p = G.player; const s = SETTINGS.sens * 0.0042 * (p.spy ? 0.2 : 1) / (G.zoomCur || 1); // con zoom, la cámara gira más despacio
     let mx = e.movementX, my = e.movementY; const now = performance.now();
     // Chrome a veces envía un salto enorme al bloquear el puntero o al cruzar el borde de la ventana: se descarta
     if (now - (INPUT.lockT || 0) < 120 || Math.abs(mx) > 700 || Math.abs(my) > 700) return;
     const mag = Math.hypot(mx, my), avg = INPUT.mAvg || 0; if (mag > 250 && mag > avg * 6 + 200) { INPUT.mAvg = avg * 0.9 + 20; return; } INPUT.mAvg = avg * 0.8 + mag * 0.2;
     p.yaw -= mx * s; p.pitch -= my * s * (SETTINGS.invertY ? -1 : 1); p.pitch = clamp(p.pitch, -1.5705, 1.5705);
   });
-  window.addEventListener('wheel', e => { if (G.mode !== 'game' || UI.open || G.paused) return; const p = G.player; p.sel = (p.sel + (e.deltaY > 0 ? 1 : 8)) % 9; updateHUD(); showItemName(); }, { passive: true });
+  window.addEventListener('wheel', e => { if (G.mode !== 'game' || UI.open || G.paused) return; if (held('zoom')) { G.zoomMag = clamp((G.zoomMag || 4) * (e.deltaY > 0 ? 0.85 : 1.18), 2, 12); return; } const p = G.player; p.sel = (p.sel + (e.deltaY > 0 ? 1 : 8)) % 9; updateHUD(); showItemName(); }, { passive: true });
   document.addEventListener('pointerlockchange', () => { INPUT.lockT = performance.now(); INPUT.mAvg = 0; if (G.mode === 'game' && document.pointerLockElement !== $('gl') && !UI.open && !G.paused && !$('chatIn').classList.contains('on') && !G.player.dead && !$('sCredits').classList.contains('on')) pauseGame(true); INPUT.mouse = {}; });
   window.addEventListener('blur', () => { INPUT.keys = {}; INPUT.mouse = {}; });
   window.addEventListener('resize', () => { drawLogo(); });

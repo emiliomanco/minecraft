@@ -109,9 +109,9 @@ function rleDecode(b64, len, wide) {
 const DEFAULT_KEYS = {
   forward: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD', jump: 'Space', sneak: 'ShiftLeft', sprint: 'KeyR',
   inventory: 'KeyE', drop: 'KeyQ', chat: 'KeyT', command: 'Slash', perspective: 'F5', hideHud: 'F1', debug: 'F3',
-  attack: 'Mouse0', use: 'Mouse2', pick: 'Mouse1', playerlist: 'Tab'
+  attack: 'Mouse0', use: 'Mouse2', pick: 'Mouse1', playerlist: 'Tab', zoom: 'KeyC', ragdoll: 'KeyG'
 };
-const KEY_NAMES = { forward: 'Avanzar', back: 'Retroceder', left: 'Izquierda', right: 'Derecha', jump: 'Saltar', sneak: 'Agacharse', sprint: 'Correr', inventory: 'Inventario', drop: 'Soltar objeto', chat: 'Abrir chat', command: 'Abrir comando', perspective: 'Cambiar perspectiva', hideHud: 'Ocultar HUD', debug: 'Menú de depuración (F3)', attack: 'Atacar / Destruir', use: 'Usar objeto / Colocar', pick: 'Elegir bloque', playerlist: 'Lista de jugadores' };
+const KEY_NAMES = { forward: 'Avanzar', back: 'Retroceder', left: 'Izquierda', right: 'Derecha', jump: 'Saltar', sneak: 'Agacharse', sprint: 'Correr', inventory: 'Inventario', drop: 'Soltar objeto', chat: 'Abrir chat', command: 'Abrir comando', perspective: 'Cambiar perspectiva', hideHud: 'Ocultar HUD', debug: 'Menú de depuración (F3)', attack: 'Atacar / Destruir', use: 'Usar objeto / Colocar', pick: 'Elegir bloque', playerlist: 'Lista de jugadores', zoom: 'Zoom (mantener; rueda = acercar)', ragdoll: 'Ragdoll (dejarse caer)' };
 const SETTINGS = Object.assign({
   fov: 70, rd: 6, sens: 0.5, vol: 0.7, quality: 2, gui: 2, bob: true, invertY: false, name: 'Jugador' + Math.floor(Math.random() * 900 + 100),
   clouds: true, particles: 2, brightness: 0.5, dynres: true, resScale: 1, gpuPref: 'high-performance', fpsCap: 0, threads: 0
