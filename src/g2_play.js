@@ -598,7 +598,7 @@ function debugText(fps) {
     `CPU: ${navigator.hardwareConcurrency || '?'}x núcleos`,
     '',
     `Pantalla: ${R.w}x${R.h} (${R.vendor || 'GPU'})`,
-    `${R.gpu}`,
+    `${R.gpu}${R.gpuKind === "cpu" ? " [SIN GPU: dibujando con la CPU]" : R.gpuKind ? " [" + R.gpuKind + "]" : ""}`,
     `WebGL 2.0  Sombras: ${R.shadowSize || 'no'}  HDR: ${R.cfb ? 'sí' : 'no'}`,
     '',
   ];

@@ -421,19 +421,51 @@ function compile(vs, fs, defs) {
   for (let i = 0; i < n; i++) { const info = gl.getActiveUniform(p, i); const name = info.name.replace('[0]', ''); u[name] = gl.getUniformLocation(p, info.name); }
   return { p, u };
 }
+// tipo de procesador gráfico según el nombre del renderer: 'cpu' (render por software), 'integrada', 'dedicada' o ''
+function gpuKind(name) {
+  if (R.software || /SwiftShader|llvmpipe|softpipe|Software|Basic Render|Microsoft Basic|GDI Generic/i.test(name)) return 'cpu';
+  if (/NVIDIA|GeForce|Quadro|RTX|GTX|Radeon RX|Radeon Pro|Radeon \d{3,4}|FirePro|Arc\(TM\) A|Intel\(R\) Arc/i.test(name)) return 'dedicada';
+  if (/Intel|UHD|Iris|HD Graphics|Radeon\(TM\)|Radeon Graphics|Vega \d+ Graphics|Apple|Mali|Adreno|PowerVR/i.test(name)) return 'integrada';
+  return '';
+}
 function initGL() {
-  const cv = $('gl'); const gl = cv.getContext('webgl2', { antialias: false, alpha: false, depth: true, powerPreference: SETTINGS.gpuPref || 'high-performance', preserveDrawingBuffer: false });
+  const cv = $('gl'); const attrs = { antialias: false, alpha: false, depth: true, stencil: false, powerPreference: SETTINGS.gpuPref || 'high-performance', preserveDrawingBuffer: false };
+  // 1º pedir un contexto SIN "penalización grave de rendimiento": el navegador lo niega si fuera a dibujar por software (CPU).
+  // Así se sabe con certeza si la GPU no se está usando, aunque el nombre del renderer no lo diga.
+  let gl = cv.getContext('webgl2', Object.assign({ failIfMajorPerformanceCaveat: true }, attrs)); R.caveat = !gl;
+  if (!gl) gl = cv.getContext('webgl2', attrs);
   if (!gl) { alert('Tu navegador no soporta WebGL2. Minecraft 2 necesita WebGL2.'); throw new Error('no webgl2'); }
-  R.gl = gl; R.cfb = gl.getExtension('EXT_color_buffer_float') || gl.getExtension('EXT_color_buffer_half_float');
-  const an = gl.getExtension('EXT_texture_filter_anisotropic'); if (an) { R.anisoExt = an; R.maxAniso = gl.getParameter(an.MAX_TEXTURE_MAX_ANISOTROPY_EXT); }
+  R.gl = gl;
   const dbg = gl.getExtension('WEBGL_debug_renderer_info'); R.gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER); R.vendor = dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR);
-  R.software = /SwiftShader|llvmpipe|Software|Basic Render/i.test(R.gpu);
-  buildTextureArray();
+  R.software = R.caveat || /SwiftShader|llvmpipe|softpipe|Software|Basic Render|GDI Generic/i.test(R.gpu); R.gpuKind = gpuKind(R.gpu);
+  // si la GPU se reinicia (driver, suspensión, cuelgue) el contexto se pierde: no dejar que el navegador lo descarte, y reconstruir todo al volver
+  if (!R.lostHooked) {
+    R.lostHooked = true;
+    cv.addEventListener('webglcontextlost', e => { e.preventDefault(); R.lost = true; try { chatMsg('La GPU se reinició; recuperando gráficos…', '#fc8'); } catch (err) { } }, false);
+    cv.addEventListener('webglcontextrestored', () => { try { restoreGL(); } catch (err) { console.error('restoreGL', err); } }, false);
+  }
+  initGLResources();
+  // modo CPU: si se dibuja por software, bajar todo lo que más cuesta para que siga fluido; se deshace solo cuando vuelve la GPU
+  if (R.software && !SETTINGS.cpuMode) { SETTINGS.cpuMode = { quality: SETTINGS.quality, resScale: SETTINGS.resScale, rd: SETTINGS.rd, particles: SETTINGS.particles }; SETTINGS.quality = 0; SETTINGS.resScale = Math.min(SETTINGS.resScale || 1, 0.6); SETTINGS.rd = Math.min(SETTINGS.rd, 4); SETTINGS.particles = Math.min(SETTINGS.particles ?? 2, 1); SETTINGS.dynres = true; saveSettings(); }
+  else if (!R.software && SETTINGS.cpuMode) { Object.assign(SETTINGS, SETTINGS.cpuMode); delete SETTINGS.cpuMode; saveSettings(); }
   if (SETTINGS.qualityAuto === undefined) { // primer arranque: elegir calidad según el hardware
-    const weak = /SwiftShader|llvmpipe|Software|Intel|HD Graphics|UHD|Iris|Mali|Adreno|PowerVR|Apple GPU|Radeon\(TM\) Graphics|Vega [0-9]+ Graphics/i.test(R.gpu) || (navigator.hardwareConcurrency || 4) <= 4 || (navigator.deviceMemory || 8) <= 4;
-    SETTINGS.quality = weak ? 1 : 2; if (weak) { SETTINGS.rd = Math.min(SETTINGS.rd, 5); SETTINGS.particles = 1; }
+    const weak = R.gpuKind !== 'dedicada' || (navigator.hardwareConcurrency || 4) <= 4 || (navigator.deviceMemory || 8) <= 4;
+    SETTINGS.quality = R.software ? 0 : weak ? 1 : 2; if (weak) { SETTINGS.rd = Math.min(SETTINGS.rd, 5); SETTINGS.particles = 1; }
     SETTINGS.qualityAuto = true; saveSettings();
   }
+  setQuality(SETTINGS.quality);
+}
+// texto con instrucciones para que el navegador use la GPU (se muestra en el chat y en Opciones)
+function gpuHelpText() {
+  if (R.software) return 'El juego se está dibujando con la CPU: el navegador NO está usando tu tarjeta gráfica (por eso va lento). Para arreglarlo: 1) en chrome://settings/system activa «Usar la aceleración gráfica cuando esté disponible» y cierra Chrome por completo (o abre chrome://restart). 2) Si sigue igual, abre chrome://gpu: si dice «Software only», activa chrome://flags/#ignore-gpu-blocklist y reinicia Chrome; actualiza también los drivers de la tarjeta gráfica. 3) En Windows: Configuración → Sistema → Pantalla → Gráficos → Google Chrome → «Alto rendimiento». Mientras tanto se activó el modo CPU (gráficos rápidos y menos resolución) para que vaya fluido.';
+  if (R.gpuKind === 'integrada') return 'Estás usando la gráfica integrada. Si tu PC tiene tarjeta dedicada (NVIDIA/AMD), en Windows ve a Configuración → Sistema → Pantalla → Gráficos → Google Chrome → «Alto rendimiento» y reinicia Chrome.';
+  return '';
+}
+function initGLResources() {
+  const gl = R.gl;
+  R.cfb = gl.getExtension('EXT_color_buffer_float') || gl.getExtension('EXT_color_buffer_half_float');
+  const an = gl.getExtension('EXT_texture_filter_anisotropic'); if (an) { R.anisoExt = an; R.maxAniso = gl.getParameter(an.MAX_TEXTURE_MAX_ANISOTROPY_EXT); }
+  buildTextureArray();
   // cubo unidad para cajas
   const pos = [], uv = [], face = [], idx = [];
   for (let f = 0; f < 6; f++) { const F = FACE[f]; for (let k = 0; k < 4; k++) { const c = F.c[k]; pos.push(c[0], c[1], c[2]); const [u, v] = faceUV(f, c[0], c[1], c[2]); uv.push(u, v); face.push(f); } const b = f * 4; idx.push(b, b + 1, b + 2, b, b + 2, b + 3); }
@@ -451,7 +483,15 @@ function initGL() {
   R.lineVAO = gl.createVertexArray(); gl.bindVertexArray(R.lineVAO); R.lineBuf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, R.lineBuf); gl.bufferData(gl.ARRAY_BUFFER, 4 * 3 * 4096, gl.DYNAMIC_DRAW); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
   R.emptyVAO = gl.createVertexArray();
   gl.bindVertexArray(null);
-  setQuality(SETTINGS.quality);
+}
+// el contexto WebGL volvió tras perderse: todo recurso de GPU anterior ya no existe
+function restoreGL() {
+  R.fbo = {}; R.progs = {}; R.w = R.h = 0; R.shadowCam = null; R.adI = 0; R.dummyShadow = null; R.adTex = null;
+  initGLResources(); setQuality(SETTINGS.quality);
+  for (const h of (R.restoreHooks || [])) try { h(); } catch (e) { console.error(e); }
+  const worlds = [...Object.values(G.worlds || {}), MENU && MENU.world].filter(Boolean);
+  for (const w of worlds) for (const c of w.chunks.values()) { c.mesh = null; c.dirty = true; c.meshPending = false; }
+  R.lost = false; try { chatMsg('Gráficos recuperados.', '#8f8'); } catch (e) { }
 }
 function buildTextureArray() {
   const gl = R.gl; const n = TEXNAMES.length; const data = new Uint8Array(16 * 16 * 4 * n);
@@ -580,6 +620,7 @@ function boxVisible(P, x0, y0, z0, x1, y1, z1) { for (const p of P) { const x = 
 
 // ---------------------------------------------------------- frame
 function renderWorld(world, cam, yaw, pitch, opts = {}) {
+  if (R.lost) return; // contexto de GPU perdido: esperar a que se restaure
   const gl = R.gl; resize(); R.time = performance.now() / 1000;
   R.dimIdx = world.dim === 'overworld' ? 0 : world.dim === 'nether' ? 1 : 2;
   R.cam = cam; R.under = !!opts.under;

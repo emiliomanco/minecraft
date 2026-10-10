@@ -141,7 +141,7 @@ function finishLoading() {
   G.mode = 'game'; hideScreens(); $('hud').style.display = 'block'; $('hotbar').innerHTML = ''; updateHUD(); applyGui();
   $('debugL').style.display = $('debugR').style.display = F3 ? 'block' : 'none';
   if (p.dim === 'end' && (!G.net || G.net.role === 'host')) initEnd();
-  if (R.software) chatMsg('⚠ El navegador está dibujando con la CPU (aceleración por hardware desactivada). Actívala en la configuración del navegador para usar la GPU y ganar mucho rendimiento.', '#f88');
+  if (R.software) chatMsg('⚠ ' + gpuHelpText(), '#f88');
   chatMsg('Bienvenido a Minecraft 2. Pulsa E para el inventario, T para chatear, F3 para depurar. Escribe /help para comandos.', '#aaa');
   lockPointer(); AU.music = 20 * 30;
 }
@@ -477,7 +477,7 @@ function buildOptions() {
   toggle('Balanceo de vista', 'bob', [true, false], ['Sí', 'No']);
   toggle('Invertir ratón', 'invertY', [false, true], ['No', 'Sí']);
   slider('Escala de interfaz', 'gui', 1, 3, 0.25, v => v + 'x', applyGui);
-  const gi = document.createElement('div'); gi.className = 'note'; gi.style.gridColumn = '1/-1'; gi.innerHTML = 'Dibujando con: <b>' + esc(R.gpu || '?') + '</b>' + (R.software ? '<br><span style="color:#f66">⚠ Tu navegador está dibujando con la CPU (sin aceleración por hardware). Activa «Usar aceleración por hardware» en la configuración del navegador para usar la GPU.</span>' : ''); box.appendChild(gi);
+  const gi = document.createElement('div'); gi.className = 'note'; gi.style.gridColumn = '1/-1'; gi.innerHTML = 'Dibujando con: <b>' + esc(R.gpu || '?') + '</b>' + (R.gpuKind ? ' (' + ({ cpu: 'CPU, sin GPU', integrada: 'GPU integrada', dedicada: 'GPU dedicada' })[R.gpuKind] + ')' : '') + (gpuHelpText() ? '<br><span style="color:' + (R.software ? '#f66' : '#fc8') + '">⚠ ' + esc(gpuHelpText()) + '</span>' : ''); box.appendChild(gi);
   const n = document.createElement('div'); n.className = 'note'; n.style.gridColumn = '1/-1'; n.textContent = 'Consejo: en computadoras de bajos recursos usa gráficos «Rápidos», 4-6 chunks y partículas reducidas. El juego usa culling de caras ocultas, de frustum y por distancia.'; box.appendChild(n);
 }
 function applyGui() { document.documentElement.style.setProperty('--ui', (SETTINGS.gui / 2).toFixed(2)); }
