@@ -116,8 +116,13 @@ void main(){
   if((fl&8u)!=0u && t.a<0.4) discard;
   vec3 alb=pow(t.rgb,vec3(2.2))*v_tint; float alpha=t.a;
   vec3 N=NR[min(fi,6u)];
-  if((fl&2048u)!=0u && fi==2u){ vec2 nn=vec2(float(v_snowN>>4u),float(v_snowN&15u))/15.0*2.0-1.0; N=normalize(vec3(nn.x,sqrt(max(0.05,1.0-dot(nn,nn))),nn.y)); }
-  float sky=v_lit.x, blk=v_lit.y, ao=v_lit.z; ao=mix(0.32,1.0,ao); ao*=ao;
+  float snowComp=0.0; // nieve pisada (0 = polvo suelto, 1 = compactada); viaja en el canal de AO
+  if((fl&2048u)!=0u && fi==2u){ vec2 nn=vec2(float(v_snowN>>4u),float(v_snowN&15u))/15.0*2.0-1.0; N=normalize(vec3(nn.x,sqrt(max(0.05,1.0-dot(nn,nn))),nn.y));
+    snowComp=clamp((1.0-v_lit.z)*2.0,0.0,1.0);
+    // polvo: relieve esponjoso fino (grumos suaves); la nieve compactada queda lisa
+    vec2 g=v_world.xz*7.0; float f0=vnoise(g), fx=vnoise(g+vec2(0.15,0.0)), fz=vnoise(g+vec2(0.0,0.15));
+    N=normalize(N+vec3(f0-fx,0.0,f0-fz)*1.4*(1.0-snowComp)); }
+  float sky=v_lit.x, blk=v_lit.y, ao=v_lit.z; ao=mix(0.32,1.0,ao); ao*=ao; if((fl&2048u)!=0u && fi==2u) ao=mix(1.0,0.8,snowComp);
   vec3 V=normalize(v_pos);
   vec3 col;
   if((fl&1024u)!=0u){ // portal del End: campo estelar
@@ -137,8 +142,10 @@ void main(){
   col=alb*(u_sunCol*direct+(amb+torch)*ao);
   if((fl&2048u)!=0u){ // nieve: dispersión subsuperficial + destellos
     col=mix(col,col*vec3(0.82,0.9,1.08),1.0-direct);
+    col*=mix(1.0,0.78,snowComp); // compactada: más densa y algo más gris
+    { vec3 R2=reflect(V,N); col+=u_sunCol*direct*pow(max(dot(R2,u_sunDir),0.0),28.0)*0.1*snowComp; } // y un poco más brillante, como hielo
     vec3 R=reflect(V,N); float h=hash13(floor(v_world*28.0+floor(u_time*0.0)));
-    col+=u_sunCol*direct*step(0.988,h)*pow(max(dot(R,u_sunDir),0.0),6.0)*2.5;
+    col+=u_sunCol*direct*step(0.988,h)*pow(max(dot(R,u_sunDir),0.0),6.0)*2.5*(1.0-snowComp);
     col+=u_sunCol*direct*pow(max(dot(R,u_sunDir),0.0),20.0)*0.25;
   }
   if((fl&256u)!=0u) col=alb*2.4+col*0.3;

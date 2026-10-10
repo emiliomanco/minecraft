@@ -2246,7 +2246,20 @@ function buildTables() {
 }
 const LP = 14, LR = 16 + LP * 2 + 2, LRR = LR * LR;
 let regB = null, regM = null, regS = null, regL = null, regH = 0, lq = new Int32Array(1 << 21);
+// compactación de la nieve: por columna, 8x8 subceldas con la profundidad pisada en 1/64 de bloque (Uint8Array(64))
+// regSC = región 18x18 columnas (el chunk y un borde de 1) × 64, o null si no hay nada pisado cerca
+let regSC = null;
+function buildSnowRegion(world, ch) {
+  let any = false; for (let dz = -1; dz <= 1 && !any; dz++) for (let dx = -1; dx <= 1 && !any; dx++) { const c = world.chunk(ch.cx + dx, ch.cz + dz); if (c && c.snowC && c.snowC.size) any = true; }
+  if (!any) { regSC = null; return; }
+  regSC = new Uint8Array(18 * 18 * 64);
+  for (let lz = 0; lz < 18; lz++) for (let lx = 0; lx < 18; lx++) {
+    const wx = ch.cx * 16 + lx - 1, wz = ch.cz * 16 + lz - 1; const c = world.chunk(wx >> 4, wz >> 4); if (!c || !c.snowC) continue;
+    const a = c.snowC.get((wx & 15) | ((wz & 15) << 4)); if (a) regSC.set(a, (lz * 18 + lx) * 64);
+  }
+}
 function buildRegion(world, ch) {
+  buildSnowRegion(world, ch);
   const H = world.H; const size = LRR * (H + 2);
   if (!regB || regH !== H) { regB = new Uint16Array(size); regM = new Uint8Array(size); regS = new Uint8Array(size); regL = new Uint8Array(size); regH = H; }
   regB.fill(B_PAD); regM.fill(0);
@@ -2530,6 +2543,8 @@ function snowCellH(ri) { // altura de la superficie en una celda vecina (-1 = si
   if (T_FULL[b]) return 1.0; const below = regB[ri - LRR];
   if (T_FULL[below] || below === ID.snow) return 0.0; return -0.35;
 }
+// profundidad pisada (bloques) en la subcelda (gx,gz) del chunk, en unidades de 1/8 de bloque (puede salir 1 columna fuera)
+function snowCompAt(gx, gz) { if (!regSC) return 0; const lx = (gx >> 3) + 1, lz = (gz >> 3) + 1; if (lx < 0 || lz < 0 || lx > 17 || lz > 17) return 0; return regSC[(lz * 18 + lx) * 64 + (gz & 7) * 8 + (gx & 7)] / 64; }
 function emitSnow(B, x, y, z, ri, meta, ch, bxw, bzw) {
   const own = Math.max(1, meta) / 8;
   const H = new Float32Array(25); // alturas de las 5x5 celdas alrededor (incluye 2 de margen)
@@ -2546,16 +2561,32 @@ function emitSnow(B, x, y, z, ri, meta, ch, bxw, bzw) {
     h += (Math.sin(wx * 0.9 + wz * 0.35) * Math.cos(wz * 0.8 - wx * 0.25)) * 0.06 + Math.sin(wx * 2.7 + Math.cos(wz * 2.1)) * 0.015;
     return Math.max(0.015, Math.min(own + 0.25, h));
   };
-  const sub = MESH_QUALITY >= 2 ? 4 : MESH_QUALITY >= 1 ? 3 : 1;
+  // ¿hay pisadas en esta columna o al lado? entonces más subdivisión para que las huellas tengan forma
+  let pressed = false; if (regSC && MESH_QUALITY >= 1) { for (let dz = -1; dz <= 1 && !pressed; dz++) for (let dx = -1; dx <= 1 && !pressed; dx++) { const o = ((z + dz + 1) * 18 + (x + dx + 1)) * 64; for (let k = 0; k < 64; k++) if (regSC[o + k]) { pressed = true; break; } } }
+  const sub = pressed ? (MESH_QUALITY >= 2 ? 8 : 4) : MESH_QUALITY >= 2 ? 4 : MESH_QUALITY >= 1 ? 3 : 1;
   const up = ri + LRR; const sky = Math.max(regS[ri], regS[up]), blk = Math.max(regL[ri], regL[up]); const layer = TEX.snow; const fl = F_SNOW;
-  const N = sub + 1; const hs = new Float32Array(N * N), ns = new Uint8Array(N * N);
+  const N = sub + 1; const hs = new Float32Array(N * N), ns = new Uint8Array(N * N), cs = new Float32Array(N * N);
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
-    const u = i / sub, v = j / sub; const h = field(u, v); hs[j * N + i] = h;
-    const e = 0.18; const gx = (field(u + e, v) - field(u - e, v)) / (2 * e), gz = (field(u, v + e) - field(u, v - e)) / (2 * e);
-    const l = Math.hypot(gx, 1, gz); const nx = -gx / l, nz = -gz / l;
-    ns[j * N + i] = (clamp(Math.round((nx * 0.5 + 0.5) * 15), 0, 15) << 4) | clamp(Math.round((nz * 0.5 + 0.5) * 15), 0, 15);
+    const u = i / sub, v = j / sub; let h = field(u, v);
+    if (pressed) {
+      // hundimiento: media de las 4 subceldas que tocan el vértice; borde: la nieve apartada se levanta un poco alrededor
+      const gx = x * 8 + Math.round(u * 8), gz = z * 8 + Math.round(v * 8);
+      // filtro suave 4x4 (las 4 subceldas del vértice pesan más) para que las huellas sean redondeadas y no en dientes de sierra
+      let c = 0, wsum = 0, ring = 0; for (let b = -2; b <= 1; b++) for (let a = -2; a <= 1; a++) { const inner = a >= -1 && a <= 0 && b >= -1 && b <= 0; const v = snowCompAt(gx + a, gz + b); const wg = inner ? 1 : 0.3; c += v * wg; wsum += wg; if (!inner) ring = Math.max(ring, v); }
+      c /= wsum;
+      const lim = Math.max(0, h - 0.02); h -= Math.min(c, lim); h += Math.max(0, ring * 0.5 - c) * 0.18; cs[j * N + i] = Math.min(1, c / Math.max(0.05, lim)); // borde: la nieve apartada se levanta un poco
+    }
+    hs[j * N + i] = h;
   }
-  const V = (i, j) => { const k = j * N + i; B.v(x + i / sub, y + hs[k], z + j / sub, i / sub, j / sub, layer, fl | 2, sky, blk, 3, ns[k]); };
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { // normales suaves desde la malla de alturas
+    const k = j * N + i; let gx, gz;
+    if (pressed) { const hx0 = hs[j * N + Math.max(0, i - 1)], hx1 = hs[j * N + Math.min(sub, i + 1)], hz0 = hs[Math.max(0, j - 1) * N + i], hz1 = hs[Math.min(sub, j + 1) * N + i]; gx = (hx1 - hx0) / ((Math.min(sub, i + 1) - Math.max(0, i - 1)) / sub); gz = (hz1 - hz0) / ((Math.min(sub, j + 1) - Math.max(0, j - 1)) / sub); }
+    else { const u = i / sub, v = j / sub, e = 0.18; gx = (field(u + e, v) - field(u - e, v)) / (2 * e); gz = (field(u, v + e) - field(u, v - e)) / (2 * e); }
+    const l = Math.hypot(gx, 1, gz); const nx = -gx / l, nz = -gz / l;
+    ns[k] = (clamp(Math.round((nx * 0.5 + 0.5) * 15), 0, 15) << 4) | clamp(Math.round((nz * 0.5 + 0.5) * 15), 0, 15);
+  }
+  // la compactación viaja en el canal de AO (3 = nieve suelta, menor = pisada)
+  const V = (i, j) => { const k = j * N + i; B.v(x + i / sub, y + hs[k], z + j / sub, i / sub, j / sub, layer, fl | 2, sky, blk, 3 - cs[k] * 1.5, ns[k]); };
   for (let j = 0; j < sub; j++) for (let i = 0; i < sub; i++) { B.grow(); V(i, j + 1); V(i + 1, j + 1); V(i + 1, j); V(i, j); B.quad(false); }
   // laterales donde el terreno cae (cubren el hueco bajo el borde redondeado)
   const sides = [[0, 1, [1, 1], [1, 0]], [1, -1, [0, 0], [0, 1]], [4, LR, [0, 1], [1, 1]], [5, -LR, [1, 0], [0, 0]]];
@@ -2587,14 +2618,14 @@ const WORKER_MAIN = function () {
         const c = new Chunk(w, m.cx, m.cz); w.gen.generate(c);
         self.postMessage({ t: 'gen', id: m.id, wid: m.wid, cx: m.cx, cz: m.cz, blocks: c.blocks, meta: c.meta, biomes: c.biomes, loot: c.loot, spawners: c.spawners, spawns: c.spawns, top: c.top }, [c.blocks.buffer, c.meta.buffer, c.biomes.buffer]);
       } else if (m.t === 'mesh') {
-        MESH_QUALITY = m.q; regB = m.regB; regM = m.regM; regH = m.H;
+        MESH_QUALITY = m.q; regB = m.regB; regM = m.regM; regH = m.H; regSC = m.regSC || null;
         if (!regS || regS.length !== regB.length) { regS = new Uint8Array(regB.length); regL = new Uint8Array(regB.length); }
         const ch = { cx: m.cx, cz: m.cz, top: m.top, biomes: m.biomes, light: null, emitters: null };
         const r = meshRegion({ dim: m.dim, H: m.H }, ch);
         const tr = [ch.light.buffer];
         for (const k of ['o', 't', 'w']) { const d = r[k]; tr.push(d.pos.buffer, d.tex.buffer, d.lit.buffer, d.idx.buffer); }
         self.postMessage({ t: 'mesh', id: m.id, wid: m.wid, cx: m.cx, cz: m.cz, ver: m.ver, mesh: r, light: ch.light, emitters: ch.emitters }, tr);
-        regB = null; regM = null;
+        regB = null; regM = null; regSC = null;
       }
     } catch (err) { self.postMessage({ t: 'err', id: m.id, wid: m.wid, cx: m.cx, cz: m.cz, kind: m.t, msg: String(err && err.stack || err) }); }
   };
@@ -2620,8 +2651,8 @@ function requestGen(w, cx, cz) {
 function requestMesh(w, c) {
   buildRegion(w, c);
   c.meshVer = (c.meshVer || 0) + 1; c.meshPending = true; c.dirty = false; c.urgent = false;
-  const b = regB.slice(), m = regM.slice();
-  wpost({ t: 'mesh', wid: worldId(w), dim: w.dim, H: w.H, cx: c.cx, cz: c.cz, top: c.top, biomes: c.biomes, q: MESH_QUALITY, ver: c.meshVer, regB: b, regM: m }, [b.buffer, m.buffer]);
+  const b = regB.slice(), m = regM.slice(); const sc = regSC; regSC = null;
+  wpost({ t: 'mesh', wid: worldId(w), dim: w.dim, H: w.H, cx: c.cx, cz: c.cz, top: c.top, biomes: c.biomes, q: MESH_QUALITY, ver: c.meshVer, regB: b, regM: m, regSC: sc }, sc ? [b.buffer, m.buffer, sc.buffer] : [b.buffer, m.buffer]);
 }
 function onWorkerMsg(e) {
   const m = e.data; this.busy = Math.max(0, this.busy - 1);
@@ -2763,8 +2794,13 @@ void main(){
   if((fl&8u)!=0u && t.a<0.4) discard;
   vec3 alb=pow(t.rgb,vec3(2.2))*v_tint; float alpha=t.a;
   vec3 N=NR[min(fi,6u)];
-  if((fl&2048u)!=0u && fi==2u){ vec2 nn=vec2(float(v_snowN>>4u),float(v_snowN&15u))/15.0*2.0-1.0; N=normalize(vec3(nn.x,sqrt(max(0.05,1.0-dot(nn,nn))),nn.y)); }
-  float sky=v_lit.x, blk=v_lit.y, ao=v_lit.z; ao=mix(0.32,1.0,ao); ao*=ao;
+  float snowComp=0.0; // nieve pisada (0 = polvo suelto, 1 = compactada); viaja en el canal de AO
+  if((fl&2048u)!=0u && fi==2u){ vec2 nn=vec2(float(v_snowN>>4u),float(v_snowN&15u))/15.0*2.0-1.0; N=normalize(vec3(nn.x,sqrt(max(0.05,1.0-dot(nn,nn))),nn.y));
+    snowComp=clamp((1.0-v_lit.z)*2.0,0.0,1.0);
+    // polvo: relieve esponjoso fino (grumos suaves); la nieve compactada queda lisa
+    vec2 g=v_world.xz*7.0; float f0=vnoise(g), fx=vnoise(g+vec2(0.15,0.0)), fz=vnoise(g+vec2(0.0,0.15));
+    N=normalize(N+vec3(f0-fx,0.0,f0-fz)*1.4*(1.0-snowComp)); }
+  float sky=v_lit.x, blk=v_lit.y, ao=v_lit.z; ao=mix(0.32,1.0,ao); ao*=ao; if((fl&2048u)!=0u && fi==2u) ao=mix(1.0,0.8,snowComp);
   vec3 V=normalize(v_pos);
   vec3 col;
   if((fl&1024u)!=0u){ // portal del End: campo estelar
@@ -2784,8 +2820,10 @@ void main(){
   col=alb*(u_sunCol*direct+(amb+torch)*ao);
   if((fl&2048u)!=0u){ // nieve: dispersión subsuperficial + destellos
     col=mix(col,col*vec3(0.82,0.9,1.08),1.0-direct);
+    col*=mix(1.0,0.78,snowComp); // compactada: más densa y algo más gris
+    { vec3 R2=reflect(V,N); col+=u_sunCol*direct*pow(max(dot(R2,u_sunDir),0.0),28.0)*0.1*snowComp; } // y un poco más brillante, como hielo
     vec3 R=reflect(V,N); float h=hash13(floor(v_world*28.0+floor(u_time*0.0)));
-    col+=u_sunCol*direct*step(0.988,h)*pow(max(dot(R,u_sunDir),0.0),6.0)*2.5;
+    col+=u_sunCol*direct*step(0.988,h)*pow(max(dot(R,u_sunDir),0.0),6.0)*2.5*(1.0-snowComp);
     col+=u_sunCol*direct*pow(max(dot(R,u_sunDir),0.0),20.0)*0.25;
   }
   if((fl&256u)!=0u) col=alb*2.4+col*0.3;
@@ -4005,11 +4043,7 @@ function updatePlayerPhysics(p, dt, input) {
   }
   // distancia caminada para animación / sonidos
   const hd = Math.hypot(p.x - p.px, p.z - p.pz); p.walk += hd; p.walkAmt = lerp(p.walkAmt, Math.min(1, hd / dt / 4.3), Math.min(1, dt * 10));
-  if (p.onGround && hd > 0 && G.gameMode !== 'spectator') { // huellas en la nieve: cada paso hunde la capa y deja un surco
-    p.snowAcc = (p.snowAcc || 0) + hd; const sx = Math.floor(p.x), sy = Math.floor(p.y - 0.05), sz = Math.floor(p.z);
-    if (p.snowAcc > 0.7 && w.get(sx, sy, sz) === ID.snow) { p.snowAcc = 0; const m = Math.max(1, w.getMeta(sx, sy, sz)); if (m > 2 && !p.flying) setBlockNet(w, sx, sy, sz, ID.snow, Math.max(2, m - (p.sneaking ? 1 : 2)));
-      for (let i = 0; i < 5; i++) P_({ x: p.x + (Math.random() - 0.5) * 0.5, y: p.y + 0.05, z: p.z + (Math.random() - 0.5) * 0.5, vx: (Math.random() - 0.5) * 1.5 - p.vx * 0.1, vy: 0.8 + Math.random(), vz: (Math.random() - 0.5) * 1.5 - p.vz * 0.1, life: 0.9, size: 0.18 + Math.random() * 0.12, grow: 0.3, layer: TEX.soft, r: 0.95, g: 0.97, b: 1, a: 0.6, grav: 4, drag: 2, soft: 0.3 }); }
-  }
+  // (las huellas en la nieve las deja snowStampTick para todas las entidades)
   if (p.onGround && hd > 0) { p.stepAcc = (p.stepAcc || 0) + hd; if (p.stepAcc > 1.8) { p.stepAcc = 0; playSound('step', p.x, p.y, p.z, 0.25, below); if (p.sprinting) p.exh += 0.1 * 1.8; } }
   if (p.y < -64) p.damage(4, 'void');
 }
@@ -4275,6 +4309,80 @@ function initEnd() {
   if (G.endInit) return; G.endInit = true;
   const w = G.worlds.end; for (const p of endPillars(w.seed)) { const c = spawnMob('end_crystal', 'end', p.x + 0.5, p.h + 2, p.z + 0.5); }
   if (!G.dragonKilled) { const d = spawnMob('ender_dragon', 'end', 0, 90, 40); }
+}
+
+// ------------------------------------------------------------ NIEVE: huellas y rastros (compactación por subceldas)
+// Cada columna con nieve pisada guarda 8x8 subceldas con la profundidad hundida (1/64 de bloque). Las entidades
+// que caminan dejan huellas con forma (botas alternando izquierda/derecha, patas, surcos), más hondas al caer.
+const SNOWST = { dirty: new Map(), decayT: 0 };
+const BIPED_MODELS = new Set(['steve', 'zombie', 'drowned', 'skeleton', 'villager', 'illager', 'piglin', 'enderman', 'golem', 'warden']);
+function snowCfg() { const o = SETTINGS.physics && SETTINGS.physics.snow; return Object.assign({ prints: true, depth: 1 }, o || {}); }
+// bloque de nieve donde pisa una entidad (null si no pisa nieve)
+function snowUnder(w, x, y, z) { const bx = Math.floor(x), bz = Math.floor(z); for (const yy of [Math.floor(y - 0.02), Math.floor(y - 0.2)]) if (w.get(bx, yy, bz) === ID.snow) return yy; return null; }
+// hunde una elipse (centro cx,cz; dirección a; largo/ancho en bloques; profundidad en bloques)
+function snowStamp(w, cx, cz, a, len, wid, depth) {
+  const fx = -Math.sin(a), fz = -Math.cos(a); const R = Math.max(len, wid) + 0.13; len += 0.04; wid += 0.04; // margen de media subcelda
+  const g0x = Math.floor((cx - R) * 8), g1x = Math.floor((cx + R) * 8), g0z = Math.floor((cz - R) * 8), g1z = Math.floor((cz + R) * 8);
+  for (let gz = g0z; gz <= g1z; gz++) for (let gx = g0x; gx <= g1x; gx++) {
+    const px = (gx + 0.5) / 8 - cx, pz = (gz + 0.5) / 8 - cz; const al = px * fx + pz * fz, sd = px * fz - pz * fx;
+    const ww = wid * (al > 0 ? 1 : 0.82); const r2 = (al / len) ** 2 + (sd / ww) ** 2; if (r2 > 1) continue; // talón algo más estrecho que la punta
+    const bx = gx >> 3, bz = gz >> 3; const c = w.chunk(bx >> 4, bz >> 4); if (!c) continue;
+    let y = -1; for (let yy = Math.min(w.H - 2, c.top + 1); yy > 0; yy--) { const b = c.blocks[(bx & 15) | ((bz & 15) << 4) | (yy << 8)]; if (b === ID.snow) { y = yy; break; } if (b && b !== ID.snow && REG[b] && REG[b].solid) break; }
+    if (y < 0) continue;
+    const hgt = Math.max(1, c.meta[(bx & 15) | ((bz & 15) << 4) | (y << 8)]) / 8; const maxD = hgt * 0.9 * 64;
+    const v = Math.min(maxD, depth * Math.sqrt(1 - r2 * 0.92) * 64) | 0; if (v <= 0) continue; // fondo plano y paredes redondeadas
+    if (!c.snowC) c.snowC = new Map(); const col = (bx & 15) | ((bz & 15) << 4); let arr = c.snowC.get(col); if (!arr) { arr = new Uint8Array(64); c.snowC.set(col, arr); }
+    const k = (gz & 7) * 8 + (gx & 7); if (arr[k] < v) { arr[k] = v; snowMarkDirty(w, c, bx & 15, bz & 15); }
+  }
+}
+function snowMarkDirty(w, c, lx, lz) {
+  SNOWST.dirty.set(c, w);
+  if (lx === 0) { const n = w.chunk(c.cx - 1, c.cz); if (n) SNOWST.dirty.set(n, w); } if (lx === 15) { const n = w.chunk(c.cx + 1, c.cz); if (n) SNOWST.dirty.set(n, w); }
+  if (lz === 0) { const n = w.chunk(c.cx, c.cz - 1); if (n) SNOWST.dirty.set(n, w); } if (lz === 15) { const n = w.chunk(c.cx, c.cz + 1); if (n) SNOWST.dirty.set(n, w); }
+}
+function snowPuff(x, y, z, n) { for (let i = 0; i < n; i++) P_({ x: x + (Math.random() - 0.5) * 0.4, y: y + 0.05, z: z + (Math.random() - 0.5) * 0.4, vx: (Math.random() - 0.5) * 1.2, vy: 0.5 + Math.random() * 0.8, vz: (Math.random() - 0.5) * 1.2, life: 0.8, size: 0.14 + Math.random() * 0.1, grow: 0.3, layer: TEX.soft, r: 0.95, g: 0.97, b: 1, a: 0.5, grav: 4, drag: 2, soft: 0.3 }); }
+function snowStepEntity(w, e, isPlayer) {
+  const yy = snowUnder(w, e.x, e.y, e.z); const was = e._snGround; e._snGround = e.onGround;
+  if (yy === null || !e.onGround) { e._snLast = null; e._snVy = e.vy; return; }
+  const dc = snowCfg().depth;
+  // aterrizaje: cráter (más hondo cuanto más rápido caía)
+  if (!was && (e._snVy || 0) < -6) { const k = Math.min(1, (-(e._snVy) - 6) / 14); snowStamp(w, e.x, e.z, e.yaw || 0, 0.32 + k * 0.2, 0.32 + k * 0.2, (0.12 + k * 0.25) * dc); snowPuff(e.x, e.y, e.z, 8); }
+  e._snVy = e.vy;
+  if (!e._snLast) { e._snLast = [e.x, e.z]; e._snFoot = 0; return; }
+  const dx = e.x - e._snLast[0], dz = e.z - e._snLast[1]; const dist = Math.hypot(dx, dz);
+  const d = MOB[e.type]; const model = isPlayer ? 'steve' : d && d.model; const biped = BIPED_MODELS.has(model);
+  const scale = isPlayer ? 1 : ((MODEL_SCALE[model] || 1) * ((d && d.scale) || 1));
+  const stride = (biped ? (e.sprinting ? 0.68 : 0.46) : 0.38) * Math.max(0.6, scale);
+  if (dist < stride) return;
+  if (dist > 6) { e._snLast = [e.x, e.z]; return; } // teletransporte: sin rastro
+  const a = Math.atan2(-dx, -dz); const steps = Math.floor(dist / stride); const sx0 = e._snLast[0], sz0 = e._snLast[1];
+  e._snLast = [sx0 + dx / dist * stride * steps, sz0 + dz / dist * stride * steps];
+  for (let k = 1; k <= steps; k++) snowPrint(w, e, sx0 + dx / dist * stride * k, sz0 + dz / dist * stride * k, a, isPlayer, model, biped, scale, k === steps);
+}
+function snowPrint(w, e, px, pz, a, isPlayer, model, biped, scale, last) {
+  const dc = snowCfg().depth;
+  const weight = isPlayer ? (e.sneaking ? 0.55 : 1) : biped ? (model === 'golem' || model === 'warden' ? 1.6 : 1) : model === 'chicken' || model === 'cat' ? 0.35 : 0.8;
+  const depth = 0.24 * weight * dc; // en nieve suelta el pie se hunde bastante
+  const sx = -Math.cos(a), sz = Math.sin(a); // vector lateral
+  if (biped) { const side = (e._snFoot = (e._snFoot || 0) ^ 1) ? 1 : -1; const o = 0.13 * scale; snowStamp(w, px + sx * o * side, pz + sz * o * side, a, 0.17 * scale, 0.09 * scale, depth); }
+  else if (model === 'slime' || model === 'magma') snowStamp(w, px, pz, a, 0.3 * scale, 0.3 * scale, depth);
+  else { // cuadrúpedos: patas delanteras y traseras alternas
+    const L = 0.28 * scale, o = 0.12 * scale; const fx = -Math.sin(a), fz = -Math.cos(a); const f = (e._snFoot = (e._snFoot || 0) ^ 1) ? 1 : -1;
+    snowStamp(w, px + fx * L + sx * o * f, pz + fz * L + sz * o * f, a, 0.09 * scale, 0.08 * scale, depth); snowStamp(w, px - fx * L - sx * o * f, pz - fz * L - sz * o * f, a, 0.09 * scale, 0.08 * scale, depth);
+  }
+  if (last && (isPlayer || Math.random() < 0.4)) snowPuff(px, e.y, pz, isPlayer ? 3 : 2);
+}
+function snowStampTick(dt) {
+  const w = G.world, p = G.player; if (!w || !p || !snowCfg().prints || R.q === 0) return;
+  if (!p.flying && G.gameMode !== 'spectator' && !p.ragdoll) snowStepEntity(w, p, true);
+  for (const e of G.entities.values()) { if (!(e instanceof Mob) || e.dead || e.dim !== p.dim || e.ragdoll) continue; if (Math.abs(e.x - p.x) > 48 || Math.abs(e.z - p.z) > 48) continue; snowStepEntity(w, e, false); }
+  // ragdolls tirados en la nieve: marca del cuerpo
+  if (typeof RAG !== 'undefined') for (const rd of RAG.list) { if (rd.dim !== p.dim || rd.world !== w) continue; for (const b of rd.bodies) { if (!b.contact) continue; const c = [b.p[0], b.p[1], b.p[2]]; const k = ((c[0] * 4) | 0) + ',' + ((c[2] * 4) | 0); if (b._sk === k) continue; b._sk = k; if (snowUnder(w, c[0], c[1] - 0.15, c[2]) !== null) snowStamp(w, c[0], c[2], 0, Math.max(b.half[0], b.half[2]) + 0.05, Math.max(b.half[0], b.half[2]) + 0.05, 0.12); } }
+  // volver a mallar los chunks pisados como mucho cada 0,3 s
+  const now = performance.now();
+  for (const [c, cw] of SNOWST.dirty) { if (now - (c._snMesh || 0) < 300) continue; c._snMesh = now; c.dirty = true; SNOWST.dirty.delete(c); }
+  // nevando: la nieve nueva va tapando las huellas poco a poco
+  SNOWST.decayT += dt; if (SNOWST.decayT > 1.5) { SNOWST.decayT = 0; if ((G.rainLevel || 0) > 0.3 && w.dim === 'overworld') { const pcx = Math.floor(p.x) >> 4, pcz = Math.floor(p.z) >> 4; for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) { const c = w.chunk(pcx + dx, pcz + dz); if (!c || !c.snowC || !c.snowC.size) continue; for (const [k, arr] of c.snowC) { let any = 0; for (let i = 0; i < 64; i++) { if (arr[i]) { arr[i] = Math.max(0, arr[i] - 1); any |= arr[i]; } } if (!any) c.snowC.delete(k); } SNOWST.dirty.set(c, w); } } }
 }
 
 // ===== f2_models.js
@@ -6997,6 +7105,7 @@ function gameFrame(dt) {
   if (!pausedSP && p.ragdoll && input.jump && p.ragdoll.alive && p.ragdoll.t > 0.5) p.ragdoll.dur = 0; // saltar = levantarse
   if (!pausedSP && typeof ragUpdate === 'function') ragUpdate(dt);
   if (!pausedSP && typeof debrisUpdate === 'function') { debrisUpdate(dt); boomUpdate(dt); }
+  if (!pausedSP && typeof snowStampTick === 'function') snowStampTick(dt);
   if (!pausedSP) updateInteraction(dt);
   smoothProxies(dt); updateParticles(pausedSP ? 0 : dt, w);
   if (!pausedSP) { emitterFX(w, dt); weatherFX(w, dt); if (typeof vfxTick === 'function') vfxTick(w, dt); }

@@ -465,11 +465,7 @@ function updatePlayerPhysics(p, dt, input) {
   }
   // distancia caminada para animación / sonidos
   const hd = Math.hypot(p.x - p.px, p.z - p.pz); p.walk += hd; p.walkAmt = lerp(p.walkAmt, Math.min(1, hd / dt / 4.3), Math.min(1, dt * 10));
-  if (p.onGround && hd > 0 && G.gameMode !== 'spectator') { // huellas en la nieve: cada paso hunde la capa y deja un surco
-    p.snowAcc = (p.snowAcc || 0) + hd; const sx = Math.floor(p.x), sy = Math.floor(p.y - 0.05), sz = Math.floor(p.z);
-    if (p.snowAcc > 0.7 && w.get(sx, sy, sz) === ID.snow) { p.snowAcc = 0; const m = Math.max(1, w.getMeta(sx, sy, sz)); if (m > 2 && !p.flying) setBlockNet(w, sx, sy, sz, ID.snow, Math.max(2, m - (p.sneaking ? 1 : 2)));
-      for (let i = 0; i < 5; i++) P_({ x: p.x + (Math.random() - 0.5) * 0.5, y: p.y + 0.05, z: p.z + (Math.random() - 0.5) * 0.5, vx: (Math.random() - 0.5) * 1.5 - p.vx * 0.1, vy: 0.8 + Math.random(), vz: (Math.random() - 0.5) * 1.5 - p.vz * 0.1, life: 0.9, size: 0.18 + Math.random() * 0.12, grow: 0.3, layer: TEX.soft, r: 0.95, g: 0.97, b: 1, a: 0.6, grav: 4, drag: 2, soft: 0.3 }); }
-  }
+  // (las huellas en la nieve las deja snowStampTick para todas las entidades)
   if (p.onGround && hd > 0) { p.stepAcc = (p.stepAcc || 0) + hd; if (p.stepAcc > 1.8) { p.stepAcc = 0; playSound('step', p.x, p.y, p.z, 0.25, below); if (p.sprinting) p.exh += 0.1 * 1.8; } }
   if (p.y < -64) p.damage(4, 'void');
 }
@@ -735,4 +731,78 @@ function initEnd() {
   if (G.endInit) return; G.endInit = true;
   const w = G.worlds.end; for (const p of endPillars(w.seed)) { const c = spawnMob('end_crystal', 'end', p.x + 0.5, p.h + 2, p.z + 0.5); }
   if (!G.dragonKilled) { const d = spawnMob('ender_dragon', 'end', 0, 90, 40); }
+}
+
+// ------------------------------------------------------------ NIEVE: huellas y rastros (compactación por subceldas)
+// Cada columna con nieve pisada guarda 8x8 subceldas con la profundidad hundida (1/64 de bloque). Las entidades
+// que caminan dejan huellas con forma (botas alternando izquierda/derecha, patas, surcos), más hondas al caer.
+const SNOWST = { dirty: new Map(), decayT: 0 };
+const BIPED_MODELS = new Set(['steve', 'zombie', 'drowned', 'skeleton', 'villager', 'illager', 'piglin', 'enderman', 'golem', 'warden']);
+function snowCfg() { const o = SETTINGS.physics && SETTINGS.physics.snow; return Object.assign({ prints: true, depth: 1 }, o || {}); }
+// bloque de nieve donde pisa una entidad (null si no pisa nieve)
+function snowUnder(w, x, y, z) { const bx = Math.floor(x), bz = Math.floor(z); for (const yy of [Math.floor(y - 0.02), Math.floor(y - 0.2)]) if (w.get(bx, yy, bz) === ID.snow) return yy; return null; }
+// hunde una elipse (centro cx,cz; dirección a; largo/ancho en bloques; profundidad en bloques)
+function snowStamp(w, cx, cz, a, len, wid, depth) {
+  const fx = -Math.sin(a), fz = -Math.cos(a); const R = Math.max(len, wid) + 0.13; len += 0.04; wid += 0.04; // margen de media subcelda
+  const g0x = Math.floor((cx - R) * 8), g1x = Math.floor((cx + R) * 8), g0z = Math.floor((cz - R) * 8), g1z = Math.floor((cz + R) * 8);
+  for (let gz = g0z; gz <= g1z; gz++) for (let gx = g0x; gx <= g1x; gx++) {
+    const px = (gx + 0.5) / 8 - cx, pz = (gz + 0.5) / 8 - cz; const al = px * fx + pz * fz, sd = px * fz - pz * fx;
+    const ww = wid * (al > 0 ? 1 : 0.82); const r2 = (al / len) ** 2 + (sd / ww) ** 2; if (r2 > 1) continue; // talón algo más estrecho que la punta
+    const bx = gx >> 3, bz = gz >> 3; const c = w.chunk(bx >> 4, bz >> 4); if (!c) continue;
+    let y = -1; for (let yy = Math.min(w.H - 2, c.top + 1); yy > 0; yy--) { const b = c.blocks[(bx & 15) | ((bz & 15) << 4) | (yy << 8)]; if (b === ID.snow) { y = yy; break; } if (b && b !== ID.snow && REG[b] && REG[b].solid) break; }
+    if (y < 0) continue;
+    const hgt = Math.max(1, c.meta[(bx & 15) | ((bz & 15) << 4) | (y << 8)]) / 8; const maxD = hgt * 0.9 * 64;
+    const v = Math.min(maxD, depth * Math.sqrt(1 - r2 * 0.92) * 64) | 0; if (v <= 0) continue; // fondo plano y paredes redondeadas
+    if (!c.snowC) c.snowC = new Map(); const col = (bx & 15) | ((bz & 15) << 4); let arr = c.snowC.get(col); if (!arr) { arr = new Uint8Array(64); c.snowC.set(col, arr); }
+    const k = (gz & 7) * 8 + (gx & 7); if (arr[k] < v) { arr[k] = v; snowMarkDirty(w, c, bx & 15, bz & 15); }
+  }
+}
+function snowMarkDirty(w, c, lx, lz) {
+  SNOWST.dirty.set(c, w);
+  if (lx === 0) { const n = w.chunk(c.cx - 1, c.cz); if (n) SNOWST.dirty.set(n, w); } if (lx === 15) { const n = w.chunk(c.cx + 1, c.cz); if (n) SNOWST.dirty.set(n, w); }
+  if (lz === 0) { const n = w.chunk(c.cx, c.cz - 1); if (n) SNOWST.dirty.set(n, w); } if (lz === 15) { const n = w.chunk(c.cx, c.cz + 1); if (n) SNOWST.dirty.set(n, w); }
+}
+function snowPuff(x, y, z, n) { for (let i = 0; i < n; i++) P_({ x: x + (Math.random() - 0.5) * 0.4, y: y + 0.05, z: z + (Math.random() - 0.5) * 0.4, vx: (Math.random() - 0.5) * 1.2, vy: 0.5 + Math.random() * 0.8, vz: (Math.random() - 0.5) * 1.2, life: 0.8, size: 0.14 + Math.random() * 0.1, grow: 0.3, layer: TEX.soft, r: 0.95, g: 0.97, b: 1, a: 0.5, grav: 4, drag: 2, soft: 0.3 }); }
+function snowStepEntity(w, e, isPlayer) {
+  const yy = snowUnder(w, e.x, e.y, e.z); const was = e._snGround; e._snGround = e.onGround;
+  if (yy === null || !e.onGround) { e._snLast = null; e._snVy = e.vy; return; }
+  const dc = snowCfg().depth;
+  // aterrizaje: cráter (más hondo cuanto más rápido caía)
+  if (!was && (e._snVy || 0) < -6) { const k = Math.min(1, (-(e._snVy) - 6) / 14); snowStamp(w, e.x, e.z, e.yaw || 0, 0.32 + k * 0.2, 0.32 + k * 0.2, (0.12 + k * 0.25) * dc); snowPuff(e.x, e.y, e.z, 8); }
+  e._snVy = e.vy;
+  if (!e._snLast) { e._snLast = [e.x, e.z]; e._snFoot = 0; return; }
+  const dx = e.x - e._snLast[0], dz = e.z - e._snLast[1]; const dist = Math.hypot(dx, dz);
+  const d = MOB[e.type]; const model = isPlayer ? 'steve' : d && d.model; const biped = BIPED_MODELS.has(model);
+  const scale = isPlayer ? 1 : ((MODEL_SCALE[model] || 1) * ((d && d.scale) || 1));
+  const stride = (biped ? (e.sprinting ? 0.68 : 0.46) : 0.38) * Math.max(0.6, scale);
+  if (dist < stride) return;
+  if (dist > 6) { e._snLast = [e.x, e.z]; return; } // teletransporte: sin rastro
+  const a = Math.atan2(-dx, -dz); const steps = Math.floor(dist / stride); const sx0 = e._snLast[0], sz0 = e._snLast[1];
+  e._snLast = [sx0 + dx / dist * stride * steps, sz0 + dz / dist * stride * steps];
+  for (let k = 1; k <= steps; k++) snowPrint(w, e, sx0 + dx / dist * stride * k, sz0 + dz / dist * stride * k, a, isPlayer, model, biped, scale, k === steps);
+}
+function snowPrint(w, e, px, pz, a, isPlayer, model, biped, scale, last) {
+  const dc = snowCfg().depth;
+  const weight = isPlayer ? (e.sneaking ? 0.55 : 1) : biped ? (model === 'golem' || model === 'warden' ? 1.6 : 1) : model === 'chicken' || model === 'cat' ? 0.35 : 0.8;
+  const depth = 0.24 * weight * dc; // en nieve suelta el pie se hunde bastante
+  const sx = -Math.cos(a), sz = Math.sin(a); // vector lateral
+  if (biped) { const side = (e._snFoot = (e._snFoot || 0) ^ 1) ? 1 : -1; const o = 0.13 * scale; snowStamp(w, px + sx * o * side, pz + sz * o * side, a, 0.17 * scale, 0.09 * scale, depth); }
+  else if (model === 'slime' || model === 'magma') snowStamp(w, px, pz, a, 0.3 * scale, 0.3 * scale, depth);
+  else { // cuadrúpedos: patas delanteras y traseras alternas
+    const L = 0.28 * scale, o = 0.12 * scale; const fx = -Math.sin(a), fz = -Math.cos(a); const f = (e._snFoot = (e._snFoot || 0) ^ 1) ? 1 : -1;
+    snowStamp(w, px + fx * L + sx * o * f, pz + fz * L + sz * o * f, a, 0.09 * scale, 0.08 * scale, depth); snowStamp(w, px - fx * L - sx * o * f, pz - fz * L - sz * o * f, a, 0.09 * scale, 0.08 * scale, depth);
+  }
+  if (last && (isPlayer || Math.random() < 0.4)) snowPuff(px, e.y, pz, isPlayer ? 3 : 2);
+}
+function snowStampTick(dt) {
+  const w = G.world, p = G.player; if (!w || !p || !snowCfg().prints || R.q === 0) return;
+  if (!p.flying && G.gameMode !== 'spectator' && !p.ragdoll) snowStepEntity(w, p, true);
+  for (const e of G.entities.values()) { if (!(e instanceof Mob) || e.dead || e.dim !== p.dim || e.ragdoll) continue; if (Math.abs(e.x - p.x) > 48 || Math.abs(e.z - p.z) > 48) continue; snowStepEntity(w, e, false); }
+  // ragdolls tirados en la nieve: marca del cuerpo
+  if (typeof RAG !== 'undefined') for (const rd of RAG.list) { if (rd.dim !== p.dim || rd.world !== w) continue; for (const b of rd.bodies) { if (!b.contact) continue; const c = [b.p[0], b.p[1], b.p[2]]; const k = ((c[0] * 4) | 0) + ',' + ((c[2] * 4) | 0); if (b._sk === k) continue; b._sk = k; if (snowUnder(w, c[0], c[1] - 0.15, c[2]) !== null) snowStamp(w, c[0], c[2], 0, Math.max(b.half[0], b.half[2]) + 0.05, Math.max(b.half[0], b.half[2]) + 0.05, 0.12); } }
+  // volver a mallar los chunks pisados como mucho cada 0,3 s
+  const now = performance.now();
+  for (const [c, cw] of SNOWST.dirty) { if (now - (c._snMesh || 0) < 300) continue; c._snMesh = now; c.dirty = true; SNOWST.dirty.delete(c); }
+  // nevando: la nieve nueva va tapando las huellas poco a poco
+  SNOWST.decayT += dt; if (SNOWST.decayT > 1.5) { SNOWST.decayT = 0; if ((G.rainLevel || 0) > 0.3 && w.dim === 'overworld') { const pcx = Math.floor(p.x) >> 4, pcz = Math.floor(p.z) >> 4; for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) { const c = w.chunk(pcx + dx, pcz + dz); if (!c || !c.snowC || !c.snowC.size) continue; for (const [k, arr] of c.snowC) { let any = 0; for (let i = 0; i < 64; i++) { if (arr[i]) { arr[i] = Math.max(0, arr[i] - 1); any |= arr[i]; } } if (!any) c.snowC.delete(k); } SNOWST.dirty.set(c, w); } } }
 }
