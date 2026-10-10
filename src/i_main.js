@@ -314,6 +314,7 @@ function gameFrame(dt) {
   if (!pausedSP && !p.dead && !p.ragdoll) { p.savePrev(); const steps = dt > 0.034 ? 2 : 1; for (let i = 0; i < steps; i++) updatePlayerPhysics(p, dt / steps, input); }
   if (!pausedSP && p.ragdoll && input.jump && p.ragdoll.alive && p.ragdoll.t > 0.5) p.ragdoll.dur = 0; // saltar = levantarse
   if (!pausedSP && typeof ragUpdate === 'function') ragUpdate(dt);
+  if (!pausedSP && typeof debrisUpdate === 'function') { debrisUpdate(dt); boomUpdate(dt); }
   if (!pausedSP) updateInteraction(dt);
   smoothProxies(dt); updateParticles(pausedSP ? 0 : dt, w);
   if (!pausedSP) { emitterFX(w, dt); weatherFX(w, dt); if (typeof vfxTick === 'function') vfxTick(w, dt); }

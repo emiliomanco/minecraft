@@ -193,6 +193,7 @@ function drawAllEntities(dim, alpha, selfView) {
     drawEntity(e, alpha, t);
   }
   if (typeof drawRagdolls === 'function') drawRagdolls(dim, !selfView);
+  if (typeof drawDebris === 'function') drawDebris(dim);
   if (selfView && G.player) drawEntity(Object.assign(Object.create(Object.getPrototypeOf(G.player)), G.player, { px: G.player.px, heldItem: G.player.held(), pitch: G.player.pitch }), 1, t);
 }
 // rayos (guardián, curación del dragón)

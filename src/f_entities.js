@@ -175,10 +175,17 @@ function explode(world, x, y, z, power, fire, source) {
       }
     }
   }
-  let debris = 0; const q = SETTINGS.particles ?? 2;
-  for (const [bx, by, bz, b] of broken.values()) {
-    if (b === ID.tnt) { world.set(bx, by, bz, 0); const t = new Projectile('tnt', world.dim, bx + 0.5, by, bz + 0.5, (Math.random() - 0.5) * 2, 2, (Math.random() - 0.5) * 2); t.fuse = 10 + Math.random() * 20; t.grav = 20; t.w = 0.98; t.h = 0.98; G.entities.set(t.id, t); continue; }
+  let debris = 0, flung = 0; const q = SETTINGS.particles ?? 2;
+  // los bloques más cercanos al centro salen volando primero
+  const order = [...broken.values()].sort((A, B) => ((A[0] - x) ** 2 + (A[1] - y) ** 2 + (A[2] - z) ** 2) - ((B[0] - x) ** 2 + (B[1] - y) ** 2 + (B[2] - z) ** 2));
+  for (const [bx, by, bz, b] of order) {
+    if (b === ID.tnt) { // la TNT sale despedida encendida (reacciones en cadena)
+      world.set(bx, by, bz, 0); let dx = bx + 0.5 - x, dy = by + 0.5 - y, dz = bz + 0.5 - z; const l = Math.hypot(dx, dy, dz) || 1; const sp = clamp(power * 5 / (0.5 + l * 0.5), 3, 16);
+      const t = new Projectile('tnt', world.dim, bx + 0.5, by, bz + 0.5, dx / l * sp, Math.max(dy / l, 0.3) * sp + 3, dz / l * sp); t.fuse = 12 + Math.random() * 25; t.grav = 20; t.w = 0.98; t.h = 0.98; G.entities.set(t.id, t); continue;
+    }
+    if (typeof debrisFromExplosion === 'function' && debrisFromExplosion(world, bx, by, bz, b, x, y, z, power, flung)) { flung++; world.set(bx, by, bz, 0); continue; }
     world.set(bx, by, bz, 0);
+    if (REG[b] && REG[b].trans === 2) { blockParticles(world, bx, by, bz, b, 18, 6); playSound('glass', bx, by, bz, 0.6); continue; } // cristal/hielo: esquirlas
     if (Math.random() < 1 / power) dropBlockItems(world, bx, by, bz, b, null, true);
     if (debris < [8, 25, 60][q] && Math.random() < 0.6) {
       debris++; const d = REG[b]; const dir = [bx + 0.5 - x, by + 0.5 - y + 0.8, bz + 0.5 - z]; const l = Math.hypot(...dir) || 1; const sp = 6 + Math.random() * 10;
@@ -200,6 +207,7 @@ function explode(world, x, y, z, power, fire, source) {
   }
   explosionFX(world.dim, x, y, z, power);
   if (G.net && G.net.role === 'host') netBroadcast({ t: 'fx', k: 'boom', d: world.dim, x, y, z, p: power });
+  if (typeof debrisNetFlush === 'function') debrisNetFlush(world.dim);
 }
 function explosionFX(dim, x, y, z, power) {
   playSound('explode', x, y, z, 1);
@@ -207,14 +215,17 @@ function explosionFX(dim, x, y, z, power) {
   const q = SETTINGS.particles ?? 2; const m = [0.35, 0.7, 1][q];
   const d = Math.hypot(G.player.x - x, G.player.y - y, G.player.z - z); G.shake = Math.max(G.shake, clamp(power * 2.5 / (d + 1), 0, 1.5));
   R.plights.push({ x, y: y + 1, z, r: power * 5, c: [3.5, 1.7, 0.6], life: 0.6, max: 0.6, kind: 'flash' });
-  // bola de fuego central
-  for (let i = 0; i < 70 * m * power / 4; i++) {
+  const vol = typeof boomVolumetric === 'function' && boomVolumetric(); if (vol) boomAdd(dim, x, y, z, power); // bola de fuego volumétrica
+  const smk = typeof smokeOn === 'function' && smokeOn();
+  if (smk) { for (let i = 0; i < 14; i++) { const a = Math.random() * 6.28, r = Math.random() * power * 0.5; vfxSmokeEmit(x + Math.cos(a) * r, y + 0.5 + Math.random() * power * 0.5, z + Math.sin(a) * r, power * 0.9, 1.2, 0); } }
+  // bola de fuego central (partículas; con la volumétrica solo unas lenguas sueltas)
+  for (let i = 0; i < 70 * m * power / 4 * (vol ? 0.15 : 1); i++) {
     const a = Math.random() * 6.28, b = Math.acos(Math.random() * 2 - 1), s = (1 + Math.random() * 3.5) * power / 4;
     const p = P_({ x: x + (Math.random() - 0.5), y: y + 0.5 + (Math.random() - 0.5), z: z + (Math.random() - 0.5), vx: Math.cos(a) * Math.sin(b) * s * 2, vy: Math.abs(Math.cos(b)) * s * 2 + 1.5, vz: Math.sin(a) * Math.sin(b) * s * 2, life: 0.7 + Math.random() * 0.8, size: (0.8 + Math.random() * 1.4) * power / 4 * 1.5, grow: 1.6 * power / 4, add: false, emis: 3.2, r: 1, g: 0.45 + Math.random() * 0.3, b: 0.12, a: 0.95, layer: TEX['smoke_' + ((Math.random() * 4) | 0)], rot: Math.random() * 6, vrot: (Math.random() - 0.5) * 2, drag: 2.2, soft: 1 });
     if (p) { p.cool = true; p.r0 = 1; p.g0 = p.g; p.b0 = 0.12; p.cr = 0.09; p.cg = 0.08; p.cb = 0.07; }
   }
-  // columna de humo oscuro y espeso
-  for (let i = 0; i < 55 * m * power / 4; i++) {
+  // columna de humo oscuro y espeso (con el humo volumétrico, muchas menos partículas)
+  for (let i = 0; i < 55 * m * power / 4 * (smk ? 0.25 : 1); i++) {
     const a = Math.random() * 6.28, r = Math.random() * power * 0.6;
     smoke(x + Math.cos(a) * r, y + Math.random() * power * 0.6, z + Math.sin(a) * r, { vx: Math.cos(a) * (1 + Math.random() * 3), vy: 1.5 + Math.random() * 3.5, vz: Math.sin(a) * (1 + Math.random() * 3), life: 3.5 + Math.random() * 4, size: (1.2 + Math.random() * 1.6) * power / 4 * 1.4, grow: 1.1, r: 0.11, g: 0.1, b: 0.095, a: 0.75, drag: 1.1, wind: true, soft: 1.5 });
   }

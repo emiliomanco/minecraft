@@ -434,7 +434,7 @@ void main(){ vec2 s=textureLod(u_lum,vec2(0.5),10.0).rg; float cur=exp(s.r/max(s
   float rate=cur>prev?2.2:0.9; float a=1.0-exp(-u_dt*rate); o=vec4(prev+(cur-prev)*a,0.0,0.0,1.0); }`;
 const FS_FINAL = `#version 300 es
 precision highp float; uniform sampler2D u_scene; uniform sampler2D u_depth; uniform sampler2D u_bloom;
-uniform vec2 u_sunUV; uniform float u_sunVis; uniform vec3 u_rayCol; uniform float u_under; uniform float u_time; uniform float u_exposure; uniform float u_q; uniform float u_nether; uniform vec3 u_underCol;
+uniform vec4 u_shock; uniform vec2 u_sunUV; uniform float u_sunVis; uniform vec3 u_rayCol; uniform float u_under; uniform float u_time; uniform float u_exposure; uniform float u_q; uniform float u_nether; uniform vec3 u_underCol;
 in vec2 v_uv; out vec4 o;
 vec3 aces(vec3 x){ return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14),0.0,1.0); }
 ${'##AE##'}
@@ -442,6 +442,7 @@ void main(){
   vec2 uv=v_uv;
   if(u_under>0.5) uv+=vec2(sin(uv.y*20.0+u_time*2.0),cos(uv.x*20.0+u_time*1.7))*0.0025;
   if(u_nether>0.5) uv+=vec2(sin(uv.y*12.0+u_time*3.0),0.0)*0.0008;
+  if(u_shock.w>0.0){ vec2 d=uv-u_shock.xy; d.x*=1.6; float r=length(d); float ring=exp(-pow((r-u_shock.z)/0.03,2.0)); uv-=d/max(r,1e-3)*ring*u_shock.w*vec2(1.0/1.6,1.0); } // onda expansiva
   vec3 c=texture(u_scene,uv).rgb;
   if(u_q>=1.0) c+=texture(u_bloom,uv).rgb*0.14;
   if(u_q>=2.0 && u_sunVis>0.001){
@@ -779,6 +780,7 @@ function renderWorld(world, cam, yaw, pitch, opts = {}) {
   if (opts.drawTranslucentExtra) opts.drawTranslucentExtra();
   // partículas
   drawVFX(opts); // fuego (volumétrico en calidad alta) y humo
+  if (typeof drawBooms === 'function') drawBooms(); // bolas de fuego de explosiones
   if (opts.particles && opts.particles.length) drawParticles(opts.particles);
   gl.disable(gl.BLEND); gl.enable(gl.CULL_FACE);
   if (opts.drawOverlay) opts.drawOverlay(true);
@@ -822,7 +824,7 @@ function postProcess(world, opts) {
   let vis = 0; if (sp[3] > 0 && world.dim === 'overworld' && !R.under && (R.camSky ?? 1) > 0.3) { vis = clamp(s[1] * 3 + 0.4, 0, 1) * (1 - (G.rainLevel || 0)); const ex = Math.max(Math.abs(sp[0]), Math.abs(sp[1])); vis *= (1 - smooth(clamp((ex - 1) / 0.6, 0, 1))) * smooth(clamp(((R.camSky ?? 1) - 0.3) / 0.6, 0, 1)); }
   gl.uniform2f(P.u.u_sunUV, sp[0] * 0.5 + 0.5, sp[1] * 0.5 + 0.5); gl.uniform1f(P.u.u_sunVis, vis);
   const warm = Math.exp(-Math.max(0, s[1]) * 4); gl.uniform3f(P.u.u_rayCol, 1.0, lerp(0.85, 0.55, warm), lerp(0.7, 0.3, warm));
-  expoU(P, R.fbo.b1.tex);
+  expoU(P, R.fbo.b1.tex); if (P.u.u_shock) gl.uniform4fv(P.u.u_shock, typeof boomShock === 'function' ? boomShock() : [0, 0, 0, 0]);
   gl.uniform1f(P.u.u_under, R.under ? 1 : 0); gl.uniform1f(P.u.u_time, R.time); gl.uniform1f(P.u.u_exposure, opts.exposure || 1.0); gl.uniform1f(P.u.u_q, R.q);
   gl.uniform1f(P.u.u_nether, world.dim === 'nether' ? 1 : 0); gl.uniform3f(P.u.u_underCol, 0.5, 0.85, 1.1);
   gl.drawArrays(gl.TRIANGLES, 0, 3);

@@ -136,6 +136,7 @@ function clientHandle(m, resolve, reject) {
     case 'chat': chatMsg(m.m, m.sys ? '#ff8' : null); break;
     case 'cd': if (UI.pendingKey === m.k) { UI.pendingKey = null; openScreen(m.kind, { c: m.c, key: m.k, block: m.b, title: REG[m.b].disp }); } break;
     case 'fx': if (m.k === 'boom') explosionFX(m.d, m.x, m.y, m.z, m.p); break;
+    case 'deb': if (typeof debrisNetRecv === 'function') debrisNetRecv(m); break;
     case 'kick': G.net = null; disconnected(m.m); break;
   }
 }
