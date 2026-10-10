@@ -272,7 +272,7 @@ function emitLiquid(B, x, y, z, ri, liq, ch, meta) {
   };
   const h00 = corner(0, 0), h10 = corner(1, 0), h11 = corner(1, 1), h01 = corner(0, 1);
   const layer = liq === 1 ? TEX.water : TEX.lava; const flags = liq === 1 ? F_WATER : (F_LAVA | F_EMIS);
-  const tint = liq === 1 ? ((meta & LIQ_OCEAN) ? 1 + ch.biomes[x | z << 4] : 200) : 0; // 200 = agua finita (sin olas de mar)
+  const tint = liq === 1 ? ((meta & LIQ_OCEAN) ? 1 + ch.biomes[x | z << 4] : (meta & LIQ_FALL) ? 201 : 200) : 0; // 200 = agua finita (sin olas de mar), 201 = chorro cayendo
   const isSame = j => { const b = regB[j]; const d = REG[b]; return d && (d.liquid === liq || (liq === 1 && d.inWater)); };
   const up = ri + LRR;
   B.grow();
