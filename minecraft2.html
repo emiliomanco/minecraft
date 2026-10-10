@@ -2976,6 +2976,8 @@ out vec2 v_uv; out vec3 v_pos; out float v_seed; out float v_int;
 void main(){ vec3 b=i_pos.xyz; vec2 d=b.xz; float l=length(d); d=l>1e-3?d/l:vec2(1.0,0.0); vec3 right=vec3(-d.y,0.0,d.x);
   float w=i_pos.w, h=i_col.x;
   float lean=clamp(-u_camFwd.y,0.0,1.0); vec3 tilt=normalize(mix(vec3(0.0,1.0,0.0),normalize(vec3(-u_camFwd.x,0.0,-u_camFwd.z)+vec3(1e-4)),lean*0.75));
+  // llamas pegadas a una pared (i_col.w = 1..4: cara +x,-x,+z,-z): el plano de la llama es la propia cara, sin girar hacia la cámara
+  int ori=int(i_col.w+0.5); if(ori>0){ right=ori<=2?vec3(0.0,0.0,1.0):vec3(1.0,0.0,0.0); tilt=vec3(0.0,1.0,0.0); }
   vec3 p=b+right*(a_corner.x-0.5)*w+tilt*a_corner.y*h;
   v_uv=a_corner; v_pos=p; v_seed=i_col.y; v_int=i_col.z; gl_Position=u_vp*vec4(p,1.0); }`;
 const FS_FLAME = `#version 300 es
@@ -2996,7 +2998,7 @@ void main(){
   if(d<0.015) discard;
 #if Q>=2
   // modo densidad: solo se acumula la densidad; el color se aplica después sobre la suma (FS_FLAMECOMP)
-  if(u_dens>0.5){ float sd=linD(texture(u_depthCopy,gl_FragCoord.xy/u_res).r); float pd=linD(gl_FragCoord.z); o=vec4(d*0.55*clamp((sd-pd)/0.3,0.0,1.0),0.0,0.0,1.0); return; }
+  if(u_dens>0.5){ float sd=linD(texture(u_depthCopy,gl_FragCoord.xy/u_res).r); float pd=linD(gl_FragCoord.z); o=vec4(d*0.55*step(pd,sd+0.02),0.0,0.0,1.0); return; } // prueba de profundidad dura: la base toca la superficie
 #endif
   vec3 c=vec3(0.45,0.03,0.0)*smoothstep(0.0,0.2,d);
   c=mix(c,vec3(1.0,0.28,0.02),smoothstep(0.12,0.45,d));
@@ -3479,7 +3481,7 @@ function drawFlames(F) {
   if (R.q >= 2 && R.fbo.copy) { gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, R.fbo.copy.depth); gl.uniform1i(P.u.u_depthCopy, 3); gl.uniform2f(P.u.u_res, R.w, R.h); gl.uniform1f(P.u.u_near, R.near); gl.uniform1f(P.u.u_far, R.far); gl.uniform1f(P.u.u_soft, 1); } else if (P.u.u_soft) gl.uniform1f(P.u.u_soft, 0);
   gl.bindVertexArray(R.partVAO); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE); gl.depthMask(false); gl.disable(gl.CULL_FACE);
   const D = R.partData, cam = R.cam; let n = 0;
-  for (let i = 0; i + 6 < F.length && n < 8192; i += 7) { const o = n * 16; D[o] = F[i] - cam[0]; D[o + 1] = F[i + 1] - cam[1]; D[o + 2] = F[i + 2] - cam[2]; D[o + 3] = F[i + 3]; D[o + 4] = F[i + 4]; D[o + 5] = F[i + 5]; D[o + 6] = F[i + 6]; D[o + 7] = 0; n++; }
+  for (let i = 0; i + 7 < F.length && n < 8192; i += 8) { const o = n * 16; D[o] = F[i] - cam[0]; D[o + 1] = F[i + 1] - cam[1]; D[o + 2] = F[i + 2] - cam[2]; D[o + 3] = F[i + 3]; D[o + 4] = F[i + 4]; D[o + 5] = F[i + 5]; D[o + 6] = F[i + 6]; D[o + 7] = F[i + 7]; n++; }
   if (!n) { gl.depthMask(true); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); return; }
   gl.bindBuffer(gl.ARRAY_BUFFER, R.partBuf); gl.bufferSubData(gl.ARRAY_BUFFER, 0, D, 0, n * 16);
   const fl = R.fbo.fl, dens = !!(fl && R.fbo.copy && R.progs.flameComp);
@@ -3741,28 +3743,27 @@ function fireFX(world, x, y, z, dt) {
 // Las llamas se pegan a las caras de lo que se está quemando (suelo, paredes, techo) y crecen cuando hay
 // más fuego alrededor; con calidad alta se suman en un búfer de densidad, así un grupo de fuegos se ve
 // como un solo incendio en vez de muchos fueguitos.
+// llamas planas (calidad Rápida/Normal): [x, y, z, ancho, alto, semilla, intensidad, orientación] por llama.
+// En el suelo miran a la cámara; en las paredes que arden son planos pegados a la cara del bloque (no flotan).
 function fireFlames(w, x, y, z, out) {
   const H = k => { let h = (x * 374761393 + y * 668265263 + z * 2147483647 + k * 1274126177) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
   let n = 0; for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) if ((dx || dy || dz) && w.get(x + dx, y + dy, z + dz) === ID.fire) n++;
   const grow = Math.min(2.4, 1 + 0.16 * n), wide = Math.min(1.5, 1 + 0.05 * n), ink = 1 / (1 + 0.07 * n);
   const fl = id => id > 0 && (REG[id].flammable || REG[id].infiniteFire);
   const below = w.get(x, y - 1, z), floorFuel = fl(below);
-  // suelo: llamas repartidas por toda la cara superior del bloque que arde, no en el centro de la celda
   const nf = floorFuel ? 3 : 2;
   for (let k = 0; k < nf; k++) {
-    const u = 0.15 + 0.7 * H(k * 3 + 1), v = 0.15 + 0.7 * H(k * 3 + 2);
-    out.push(x + u, y, z + v, (0.75 + 0.35 * H(k + 20)) * wide, (floorFuel ? 1.1 : 0.7) * (0.7 + 0.6 * H(k * 3 + 3)) * grow, H(k + 40), (floorFuel ? 1 : 0.75) * ink);
+    const u = 0.22 + 0.56 * H(k * 3 + 1), v = 0.22 + 0.56 * H(k * 3 + 2);
+    out.push(x + u, y - 0.02, z + v, (0.75 + 0.35 * H(k + 20)) * wide, (floorFuel ? 1.1 : 0.7) * (0.7 + 0.6 * H(k * 3 + 3)) * grow, H(k + 40), (floorFuel ? 1 : 0.75) * ink, 0);
   }
-  // paredes inflamables: una lámina de llamas pegada a la cara
-  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+  // paredes que arden: lámina de llamas sobre la propia cara (a 1 cm), a lo ancho de toda la celda
+  const sides = [[1, 0, 1], [-1, 0, 2], [0, 1, 3], [0, -1, 4]];
+  for (const [dx, dz, ori] of sides) {
     if (!fl(w.get(x + dx, y, z + dz))) continue;
-    for (let k = 0; k < 2; k++) {
-      const a = (k ? 0.27 : -0.27) + (H(dx * 7 + dz * 13 + k + 60) - 0.5) * 0.2;
-      out.push(x + 0.5 + dx * 0.44 + dz * a, y, z + 0.5 + dz * 0.44 + dx * a, 0.7 * wide, 1.5 * (0.8 + 0.4 * H(dx * 5 + dz * 3 + k + 80)) * grow, H(dx * 11 + dz * 17 + k + 90), 0.95 * ink);
-    }
+    const fx = x + 0.5 + dx * 0.49, fz = z + 0.5 + dz * 0.49;
+    for (let k = 0; k < 2; k++) { const a = (k ? 0.24 : -0.24) + (H(ori * 7 + k + 60) - 0.5) * 0.12; out.push(fx + (dz ? a : 0), y - 0.02, fz + (dx ? a : 0), 0.62 * wide, 1.45 * (0.8 + 0.4 * H(ori * 5 + k + 80)) * grow, H(ori * 11 + k + 90), 0.95 * ink, ori); }
   }
-  // techo inflamable: llamas que lamen la cara inferior
-  if (fl(w.get(x, y + 1, z))) out.push(x + 0.3 + 0.4 * H(101), y + 0.55, z + 0.3 + 0.4 * H(102), 1.0 * wide, 0.5, H(103), 0.7 * ink);
+  if (fl(w.get(x, y + 1, z))) out.push(x + 0.3 + 0.4 * H(101), y + 0.55, z + 0.3 + 0.4 * H(102), 1.0 * wide, 0.45, H(103), 0.7 * ink, 0);
 }
 // ------------------------------------------------------------ extintor
 function sprayExtinguisher(p) {
@@ -6185,22 +6186,25 @@ float bitm(float m, float b){ return mod(floor(m/b+0.001),2.0); }
 vec2 fireField(vec3 wp, vec3 c, float H, float burn, float nb, float seed){
   vec3 u=wp-c; float h=u.y; if(h<-0.08||h>H) return vec2(0.0);
   float hn=clamp(h/H,0.0,1.0);
-  float e=1.0; // borde suave solo hacia celdas SIN fuego (entre fuegos vecinos el volumen es continuo)
-  if(bitm(nb,1.0)<0.5) e*=smoothstep(1.02,0.7,u.x); if(bitm(nb,2.0)<0.5) e*=smoothstep(-0.02,0.3,u.x);
-  if(bitm(nb,4.0)<0.5) e*=smoothstep(1.02,0.7,u.z); if(bitm(nb,8.0)<0.5) e*=smoothstep(-0.02,0.3,u.z);
+  // borde suave solo hacia celdas abiertas: entre fuegos vecinos el volumen es continuo, y contra una pared
+  // (bits 16..128) la llama llega hasta la cara del bloque en vez de quedarse separada flotando
+  float e=1.0;
+  if(bitm(nb,1.0)+bitm(nb,16.0)<0.5) e*=smoothstep(1.02,0.7,u.x); if(bitm(nb,2.0)+bitm(nb,32.0)<0.5) e*=smoothstep(-0.02,0.3,u.x);
+  if(bitm(nb,4.0)+bitm(nb,64.0)<0.5) e*=smoothstep(1.02,0.7,u.z); if(bitm(nb,8.0)+bitm(nb,128.0)<0.5) e*=smoothstep(-0.02,0.3,u.z);
   float wall=0.0; // paredes que arden: el combustible está pegado a la cara, la llama la lame hacia arriba
   if(bitm(burn,2.0)>0.5) wall=max(wall,smoothstep(0.45,0.98,u.x)); if(bitm(burn,4.0)>0.5) wall=max(wall,smoothstep(0.55,0.02,u.x));
   if(bitm(burn,8.0)>0.5) wall=max(wall,smoothstep(0.45,0.98,u.z)); if(bitm(burn,16.0)>0.5) wall=max(wall,smoothstep(0.55,0.02,u.z));
   float ceilF=bitm(burn,32.0)>0.5?smoothstep(H-0.6,H,h)*0.6:0.0;
   float fl=bitm(burn,1.0)>0.5?1.0:0.7;
-  vec3 q=wp*vec3(1.25,0.7,1.25)+vec3(0.0,-u_time*1.9,0.0)+seed*5.3;
+  vec3 q=wp*vec3(1.6,0.55,1.6)+vec3(0.0,-u_time*2.3,0.0)+seed*5.3;
   vec3 w=vec3(n3(q*0.6+vec3(3.1,-u_time*0.6,1.7)),n3(q*0.6+vec3(7.2,-u_time*0.5,4.4)),0.0)-0.5;
   q.xz+=w.xy*1.3;
   float n=n3(q)*0.55+n3(q*2.07+vec3(0.0,-u_time*1.4,0.0))*0.3+n3(q*4.3)*0.15;
-  float base=fl*(1.0-hn)*(1.0-hn*0.3)+wall*(1.0-hn*0.55)*0.95+ceilF;
-  float d=base*1.25+(n-0.5)*1.9-hn*0.45;
-  d=smoothstep(0.0,0.75,d)*e*smoothstep(-0.08,0.04,h);
-  return vec2(d,d*(1.05-hn*0.65));
+  float base=fl*pow(1.0-hn,1.4)*0.85+wall*(1.0-hn*0.6)*0.85+ceilF;
+  // lenguas de fuego: el ruido recorta la densidad también abajo (no una masa lisa) y las puntas se separan
+  float d=base+(n-0.56)*1.7-hn*0.22;
+  d=smoothstep(0.04,0.55,d)*e*smoothstep(-0.08,0.03,h);
+  return vec2(d,clamp(d*(0.78-hn*0.5)+(n-0.5)*0.3+wall*0.08,0.0,1.0));
 }
 vec3 blackbody(float t){ vec3 c=vec3(0.5,0.035,0.0)*smoothstep(0.0,0.2,t); c=mix(c,vec3(1.0,0.27,0.02),smoothstep(0.12,0.42,t)); c=mix(c,vec3(1.0,0.58,0.12),smoothstep(0.38,0.75,t)); return mix(c,vec3(1.0,0.86,0.55),smoothstep(0.75,1.1,t)); }
 `;
@@ -6221,7 +6225,7 @@ void main(){
   vec3 col=vec3(0.0); float T=1.0;
   for(int i=0;i<N;i++){
     vec3 p=rd*(ta+(float(i)+j)*dt); vec2 f=fireField(p+u_camPos,c,v_a.w,v_b.x,v_b.y,v_b.w);
-    if(f.x>0.004){ col+=T*blackbody(f.y)*f.x*dt*4.2; T*=exp(-f.x*dt*2.5); if(T<0.03) break; }
+    if(f.x>0.004){ col+=T*blackbody(f.y)*(0.25+f.y*1.4)*f.x*dt*10.0; T*=exp(-f.x*dt*2.2); if(T<0.03) break; } // emisión fuerte (HDR): el fuego siempre es más brillante que lo que tiene detrás
   }
   o=vec4(col*u_bright2,1.0-T);
 }`;
@@ -6299,6 +6303,8 @@ function vfxFireCell(w, x, y, z, out) {
   const isF = (a, b, c) => w.get(a, b, c) === ID.fire; const fl = id => id > 0 && REG[id] && (REG[id].flammable || REG[id].infiniteFire);
   let burn = 0; if (fl(w.get(x, y - 1, z))) burn |= 1; if (fl(w.get(x + 1, y, z))) burn |= 2; if (fl(w.get(x - 1, y, z))) burn |= 4; if (fl(w.get(x, y, z + 1))) burn |= 8; if (fl(w.get(x, y, z - 1))) burn |= 16; if (fl(w.get(x, y + 1, z))) burn |= 32;
   let nb = 0; if (isF(x + 1, y, z)) nb |= 1; if (isF(x - 1, y, z)) nb |= 2; if (isF(x, y, z + 1)) nb |= 4; if (isF(x, y, z - 1)) nb |= 8;
+  const sol = (a, b, c) => { const id = w.get(a, b, c); const d = id > 0 && REG[id]; return d && d.solid && !d.shape && !d.box && d.render === 'cube'; };
+  if (sol(x + 1, y, z)) nb |= 16; if (sol(x - 1, y, z)) nb |= 32; if (sol(x, y, z + 1)) nb |= 64; if (sol(x, y, z - 1)) nb |= 128;
   let n = 0; for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) for (let dy = -1; dy <= 1; dy++) if ((dx || dz || dy) && isF(x + dx, y + dy, z + dz)) n++;
   const up = w.get(x, y + 1, z); const roof = up > 0 && REG[up] && REG[up].solid;
   let H = (1.35 + Math.min(1.9, n * 0.085) + (burn & 30 ? 0.35 : 0)) * vfxCfg().fire.height; if (roof) H = Math.min(H, 1.0); // bajo un techo la llama se aplasta contra él
@@ -6827,8 +6833,8 @@ function emitterFX(w, dt) {
     const c = w.chunk(pcx + dx, pcz + dz); if (!c || !c.emitters) continue; const E = c.emitters;
     for (let i = 0; i < E.length; i += 4) {
       const x = E[i], y = E[i + 1], z = E[i + 2], id = E[i + 3];
-      if (id === ID.fire) { fireFX(w, x, y, z, dt); if (vol) { if (cells.length < 8 * 1500) vfxFireCell(w, x, y, z, cells); } else if (flames.length < 7 * 600) fireFlames(w, x, y, z, flames); fires.push([x + 0.5, y + 0.6, z + 0.5]); if (smk) vfxSmokeEmit(x + 0.5, y + 1.4, z + 0.5, 0.9 * dt, 0.9 * dt * 4, 0); }
-      else if (id === ID.campfire) { if (vol) cells.push(x, y + 0.42, z, 0.85, 1, 0, 0, (x * 0.37 + z * 0.61) % 1); if (smk) vfxSmokeEmit(x + 0.5, y + 1.3, z + 0.5, 0.45 * dt, 2 * dt, 1); flames.push(x + 0.5, y + 0.3, z + 0.5, 0.8, 1.1, (x * 0.37 + z * 0.61) % 1, 0.95, x + 0.35, y + 0.3, z + 0.6, 0.5, 0.75, (x * 0.71 + z * 0.13) % 1, 0.8); if (!smk && Math.random() < 2.5 * dt) smoke(x + 0.5, y + 0.9, z + 0.5, { r: 0.22, g: 0.21, b: 0.2, a: 0.5, size: 0.5, grow: 0.5, life: 7, vy: 2.2, drag: 0.1, wind: true }); fires.push([x + 0.5, y + 0.5, z + 0.5]); }
+      if (id === ID.fire) { fireFX(w, x, y, z, dt); if (vol) { if (cells.length < 8 * 1500) vfxFireCell(w, x, y, z, cells); } else if (flames.length < 8 * 600) fireFlames(w, x, y, z, flames); fires.push([x + 0.5, y + 0.6, z + 0.5]); if (smk) vfxSmokeEmit(x + 0.5, y + 1.4, z + 0.5, 0.9 * dt, 0.9 * dt * 4, 0); }
+      else if (id === ID.campfire) { if (vol) cells.push(x, y + 0.42, z, 0.85, 1, 0, 0, (x * 0.37 + z * 0.61) % 1); if (smk) vfxSmokeEmit(x + 0.5, y + 1.3, z + 0.5, 0.45 * dt, 2 * dt, 1); flames.push(x + 0.5, y + 0.3, z + 0.5, 0.8, 1.1, (x * 0.37 + z * 0.61) % 1, 0.95, 0, x + 0.35, y + 0.3, z + 0.6, 0.5, 0.75, (x * 0.71 + z * 0.13) % 1, 0.8, 0); if (!smk && Math.random() < 2.5 * dt) smoke(x + 0.5, y + 0.9, z + 0.5, { r: 0.22, g: 0.21, b: 0.2, a: 0.5, size: 0.5, grow: 0.5, life: 7, vy: 2.2, drag: 0.1, wind: true }); fires.push([x + 0.5, y + 0.5, z + 0.5]); }
       else if (id === ID.lava) { if (Math.random() < dt * 0.15) { P_({ x: x + Math.random(), y: y + 0.95, z: z + Math.random(), vx: (Math.random() - 0.5) * 2, vy: 4 + Math.random() * 3, vz: (Math.random() - 0.5) * 2, life: 1.5, size: 0.07, add: true, emis: 8, r: 1, g: 0.55, b: 0.15, layer: TEX.ember, grav: 16, collide: true }); } if (Math.random() < dt * 0.05) smoke(x + 0.5, y + 1, z + 0.5, { r: 0.12, g: 0.11, b: 0.1, size: 0.4, life: 2, a: 0.35 }); if (Math.random() < 0.02) fires.push([x + 0.5, y + 1, z + 0.5, 1]); }
       else if (id === ID.torch || id === ID.soul_torch || id === ID.redstone_torch) { const m = w.getMeta(x, y, z); const o = m >= 1 && m <= 4 ? [[0, 0.32], [-0.32, 0], [0, -0.32], [0.32, 0]][m - 1] : [0, 0]; const ty = y + 0.72 + (m ? 0.2 : 0); if (Math.random() < dt * 4) { const soul = id === ID.soul_torch, red = id === ID.redstone_torch; P_({ x: x + 0.5 + o[0], y: ty, z: z + 0.5 + o[1], vy: 0.25, life: 0.4, size: 0.12, grow: -0.2, add: true, emis: 3, r: soul ? 0.4 : 1, g: soul ? 0.9 : red ? 0.15 : 0.6, b: soul ? 1 : 0.2, layer: TEX['flame_' + (Math.random() * 3 | 0)] }); } if (Math.random() < dt * 0.8) smoke(x + 0.5 + o[0], ty + 0.1, z + 0.5 + o[1], { size: 0.12, grow: 0.15, life: 1.5, a: 0.3, vy: 0.5, r: 0.2, g: 0.2, b: 0.2 }); }
       else if (id === ID.end_rod && Math.random() < dt) P_({ x: x + 0.5, y: y + 0.5 + Math.random() * 0.5, z: z + 0.5, vx: (Math.random() - 0.5) * 0.4, vy: (Math.random() - 0.5) * 0.4, vz: (Math.random() - 0.5) * 0.4, life: 2, size: 0.08, add: true, emis: 3, layer: TEX.spark, r: 1, g: 1, b: 1 });

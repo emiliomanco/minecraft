@@ -329,6 +329,8 @@ out vec2 v_uv; out vec3 v_pos; out float v_seed; out float v_int;
 void main(){ vec3 b=i_pos.xyz; vec2 d=b.xz; float l=length(d); d=l>1e-3?d/l:vec2(1.0,0.0); vec3 right=vec3(-d.y,0.0,d.x);
   float w=i_pos.w, h=i_col.x;
   float lean=clamp(-u_camFwd.y,0.0,1.0); vec3 tilt=normalize(mix(vec3(0.0,1.0,0.0),normalize(vec3(-u_camFwd.x,0.0,-u_camFwd.z)+vec3(1e-4)),lean*0.75));
+  // llamas pegadas a una pared (i_col.w = 1..4: cara +x,-x,+z,-z): el plano de la llama es la propia cara, sin girar hacia la cámara
+  int ori=int(i_col.w+0.5); if(ori>0){ right=ori<=2?vec3(0.0,0.0,1.0):vec3(1.0,0.0,0.0); tilt=vec3(0.0,1.0,0.0); }
   vec3 p=b+right*(a_corner.x-0.5)*w+tilt*a_corner.y*h;
   v_uv=a_corner; v_pos=p; v_seed=i_col.y; v_int=i_col.z; gl_Position=u_vp*vec4(p,1.0); }`;
 const FS_FLAME = `#version 300 es
@@ -349,7 +351,7 @@ void main(){
   if(d<0.015) discard;
 #if Q>=2
   // modo densidad: solo se acumula la densidad; el color se aplica después sobre la suma (FS_FLAMECOMP)
-  if(u_dens>0.5){ float sd=linD(texture(u_depthCopy,gl_FragCoord.xy/u_res).r); float pd=linD(gl_FragCoord.z); o=vec4(d*0.55*clamp((sd-pd)/0.3,0.0,1.0),0.0,0.0,1.0); return; }
+  if(u_dens>0.5){ float sd=linD(texture(u_depthCopy,gl_FragCoord.xy/u_res).r); float pd=linD(gl_FragCoord.z); o=vec4(d*0.55*step(pd,sd+0.02),0.0,0.0,1.0); return; } // prueba de profundidad dura: la base toca la superficie
 #endif
   vec3 c=vec3(0.45,0.03,0.0)*smoothstep(0.0,0.2,d);
   c=mix(c,vec3(1.0,0.28,0.02),smoothstep(0.12,0.45,d));
@@ -832,7 +834,7 @@ function drawFlames(F) {
   if (R.q >= 2 && R.fbo.copy) { gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, R.fbo.copy.depth); gl.uniform1i(P.u.u_depthCopy, 3); gl.uniform2f(P.u.u_res, R.w, R.h); gl.uniform1f(P.u.u_near, R.near); gl.uniform1f(P.u.u_far, R.far); gl.uniform1f(P.u.u_soft, 1); } else if (P.u.u_soft) gl.uniform1f(P.u.u_soft, 0);
   gl.bindVertexArray(R.partVAO); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE); gl.depthMask(false); gl.disable(gl.CULL_FACE);
   const D = R.partData, cam = R.cam; let n = 0;
-  for (let i = 0; i + 6 < F.length && n < 8192; i += 7) { const o = n * 16; D[o] = F[i] - cam[0]; D[o + 1] = F[i + 1] - cam[1]; D[o + 2] = F[i + 2] - cam[2]; D[o + 3] = F[i + 3]; D[o + 4] = F[i + 4]; D[o + 5] = F[i + 5]; D[o + 6] = F[i + 6]; D[o + 7] = 0; n++; }
+  for (let i = 0; i + 7 < F.length && n < 8192; i += 8) { const o = n * 16; D[o] = F[i] - cam[0]; D[o + 1] = F[i + 1] - cam[1]; D[o + 2] = F[i + 2] - cam[2]; D[o + 3] = F[i + 3]; D[o + 4] = F[i + 4]; D[o + 5] = F[i + 5]; D[o + 6] = F[i + 6]; D[o + 7] = F[i + 7]; n++; }
   if (!n) { gl.depthMask(true); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); return; }
   gl.bindBuffer(gl.ARRAY_BUFFER, R.partBuf); gl.bufferSubData(gl.ARRAY_BUFFER, 0, D, 0, n * 16);
   const fl = R.fbo.fl, dens = !!(fl && R.fbo.copy && R.progs.flameComp);

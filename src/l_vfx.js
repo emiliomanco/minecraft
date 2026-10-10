@@ -27,22 +27,25 @@ float bitm(float m, float b){ return mod(floor(m/b+0.001),2.0); }
 vec2 fireField(vec3 wp, vec3 c, float H, float burn, float nb, float seed){
   vec3 u=wp-c; float h=u.y; if(h<-0.08||h>H) return vec2(0.0);
   float hn=clamp(h/H,0.0,1.0);
-  float e=1.0; // borde suave solo hacia celdas SIN fuego (entre fuegos vecinos el volumen es continuo)
-  if(bitm(nb,1.0)<0.5) e*=smoothstep(1.02,0.7,u.x); if(bitm(nb,2.0)<0.5) e*=smoothstep(-0.02,0.3,u.x);
-  if(bitm(nb,4.0)<0.5) e*=smoothstep(1.02,0.7,u.z); if(bitm(nb,8.0)<0.5) e*=smoothstep(-0.02,0.3,u.z);
+  // borde suave solo hacia celdas abiertas: entre fuegos vecinos el volumen es continuo, y contra una pared
+  // (bits 16..128) la llama llega hasta la cara del bloque en vez de quedarse separada flotando
+  float e=1.0;
+  if(bitm(nb,1.0)+bitm(nb,16.0)<0.5) e*=smoothstep(1.02,0.7,u.x); if(bitm(nb,2.0)+bitm(nb,32.0)<0.5) e*=smoothstep(-0.02,0.3,u.x);
+  if(bitm(nb,4.0)+bitm(nb,64.0)<0.5) e*=smoothstep(1.02,0.7,u.z); if(bitm(nb,8.0)+bitm(nb,128.0)<0.5) e*=smoothstep(-0.02,0.3,u.z);
   float wall=0.0; // paredes que arden: el combustible está pegado a la cara, la llama la lame hacia arriba
   if(bitm(burn,2.0)>0.5) wall=max(wall,smoothstep(0.45,0.98,u.x)); if(bitm(burn,4.0)>0.5) wall=max(wall,smoothstep(0.55,0.02,u.x));
   if(bitm(burn,8.0)>0.5) wall=max(wall,smoothstep(0.45,0.98,u.z)); if(bitm(burn,16.0)>0.5) wall=max(wall,smoothstep(0.55,0.02,u.z));
   float ceilF=bitm(burn,32.0)>0.5?smoothstep(H-0.6,H,h)*0.6:0.0;
   float fl=bitm(burn,1.0)>0.5?1.0:0.7;
-  vec3 q=wp*vec3(1.25,0.7,1.25)+vec3(0.0,-u_time*1.9,0.0)+seed*5.3;
+  vec3 q=wp*vec3(1.6,0.55,1.6)+vec3(0.0,-u_time*2.3,0.0)+seed*5.3;
   vec3 w=vec3(n3(q*0.6+vec3(3.1,-u_time*0.6,1.7)),n3(q*0.6+vec3(7.2,-u_time*0.5,4.4)),0.0)-0.5;
   q.xz+=w.xy*1.3;
   float n=n3(q)*0.55+n3(q*2.07+vec3(0.0,-u_time*1.4,0.0))*0.3+n3(q*4.3)*0.15;
-  float base=fl*(1.0-hn)*(1.0-hn*0.3)+wall*(1.0-hn*0.55)*0.95+ceilF;
-  float d=base*1.25+(n-0.5)*1.9-hn*0.45;
-  d=smoothstep(0.0,0.75,d)*e*smoothstep(-0.08,0.04,h);
-  return vec2(d,d*(1.05-hn*0.65));
+  float base=fl*pow(1.0-hn,1.4)*0.85+wall*(1.0-hn*0.6)*0.85+ceilF;
+  // lenguas de fuego: el ruido recorta la densidad también abajo (no una masa lisa) y las puntas se separan
+  float d=base+(n-0.56)*1.7-hn*0.22;
+  d=smoothstep(0.04,0.55,d)*e*smoothstep(-0.08,0.03,h);
+  return vec2(d,clamp(d*(0.78-hn*0.5)+(n-0.5)*0.3+wall*0.08,0.0,1.0));
 }
 vec3 blackbody(float t){ vec3 c=vec3(0.5,0.035,0.0)*smoothstep(0.0,0.2,t); c=mix(c,vec3(1.0,0.27,0.02),smoothstep(0.12,0.42,t)); c=mix(c,vec3(1.0,0.58,0.12),smoothstep(0.38,0.75,t)); return mix(c,vec3(1.0,0.86,0.55),smoothstep(0.75,1.1,t)); }
 `;
@@ -63,7 +66,7 @@ void main(){
   vec3 col=vec3(0.0); float T=1.0;
   for(int i=0;i<N;i++){
     vec3 p=rd*(ta+(float(i)+j)*dt); vec2 f=fireField(p+u_camPos,c,v_a.w,v_b.x,v_b.y,v_b.w);
-    if(f.x>0.004){ col+=T*blackbody(f.y)*f.x*dt*4.2; T*=exp(-f.x*dt*2.5); if(T<0.03) break; }
+    if(f.x>0.004){ col+=T*blackbody(f.y)*(0.25+f.y*1.4)*f.x*dt*10.0; T*=exp(-f.x*dt*2.2); if(T<0.03) break; } // emisión fuerte (HDR): el fuego siempre es más brillante que lo que tiene detrás
   }
   o=vec4(col*u_bright2,1.0-T);
 }`;
@@ -141,6 +144,8 @@ function vfxFireCell(w, x, y, z, out) {
   const isF = (a, b, c) => w.get(a, b, c) === ID.fire; const fl = id => id > 0 && REG[id] && (REG[id].flammable || REG[id].infiniteFire);
   let burn = 0; if (fl(w.get(x, y - 1, z))) burn |= 1; if (fl(w.get(x + 1, y, z))) burn |= 2; if (fl(w.get(x - 1, y, z))) burn |= 4; if (fl(w.get(x, y, z + 1))) burn |= 8; if (fl(w.get(x, y, z - 1))) burn |= 16; if (fl(w.get(x, y + 1, z))) burn |= 32;
   let nb = 0; if (isF(x + 1, y, z)) nb |= 1; if (isF(x - 1, y, z)) nb |= 2; if (isF(x, y, z + 1)) nb |= 4; if (isF(x, y, z - 1)) nb |= 8;
+  const sol = (a, b, c) => { const id = w.get(a, b, c); const d = id > 0 && REG[id]; return d && d.solid && !d.shape && !d.box && d.render === 'cube'; };
+  if (sol(x + 1, y, z)) nb |= 16; if (sol(x - 1, y, z)) nb |= 32; if (sol(x, y, z + 1)) nb |= 64; if (sol(x, y, z - 1)) nb |= 128;
   let n = 0; for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) for (let dy = -1; dy <= 1; dy++) if ((dx || dz || dy) && isF(x + dx, y + dy, z + dz)) n++;
   const up = w.get(x, y + 1, z); const roof = up > 0 && REG[up] && REG[up].solid;
   let H = (1.35 + Math.min(1.9, n * 0.085) + (burn & 30 ? 0.35 : 0)) * vfxCfg().fire.height; if (roof) H = Math.min(H, 1.0); // bajo un techo la llama se aplasta contra él

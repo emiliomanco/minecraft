@@ -234,28 +234,27 @@ function fireFX(world, x, y, z, dt) {
 // Las llamas se pegan a las caras de lo que se está quemando (suelo, paredes, techo) y crecen cuando hay
 // más fuego alrededor; con calidad alta se suman en un búfer de densidad, así un grupo de fuegos se ve
 // como un solo incendio en vez de muchos fueguitos.
+// llamas planas (calidad Rápida/Normal): [x, y, z, ancho, alto, semilla, intensidad, orientación] por llama.
+// En el suelo miran a la cámara; en las paredes que arden son planos pegados a la cara del bloque (no flotan).
 function fireFlames(w, x, y, z, out) {
   const H = k => { let h = (x * 374761393 + y * 668265263 + z * 2147483647 + k * 1274126177) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
   let n = 0; for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) if ((dx || dy || dz) && w.get(x + dx, y + dy, z + dz) === ID.fire) n++;
   const grow = Math.min(2.4, 1 + 0.16 * n), wide = Math.min(1.5, 1 + 0.05 * n), ink = 1 / (1 + 0.07 * n);
   const fl = id => id > 0 && (REG[id].flammable || REG[id].infiniteFire);
   const below = w.get(x, y - 1, z), floorFuel = fl(below);
-  // suelo: llamas repartidas por toda la cara superior del bloque que arde, no en el centro de la celda
   const nf = floorFuel ? 3 : 2;
   for (let k = 0; k < nf; k++) {
-    const u = 0.15 + 0.7 * H(k * 3 + 1), v = 0.15 + 0.7 * H(k * 3 + 2);
-    out.push(x + u, y, z + v, (0.75 + 0.35 * H(k + 20)) * wide, (floorFuel ? 1.1 : 0.7) * (0.7 + 0.6 * H(k * 3 + 3)) * grow, H(k + 40), (floorFuel ? 1 : 0.75) * ink);
+    const u = 0.22 + 0.56 * H(k * 3 + 1), v = 0.22 + 0.56 * H(k * 3 + 2);
+    out.push(x + u, y - 0.02, z + v, (0.75 + 0.35 * H(k + 20)) * wide, (floorFuel ? 1.1 : 0.7) * (0.7 + 0.6 * H(k * 3 + 3)) * grow, H(k + 40), (floorFuel ? 1 : 0.75) * ink, 0);
   }
-  // paredes inflamables: una lámina de llamas pegada a la cara
-  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+  // paredes que arden: lámina de llamas sobre la propia cara (a 1 cm), a lo ancho de toda la celda
+  const sides = [[1, 0, 1], [-1, 0, 2], [0, 1, 3], [0, -1, 4]];
+  for (const [dx, dz, ori] of sides) {
     if (!fl(w.get(x + dx, y, z + dz))) continue;
-    for (let k = 0; k < 2; k++) {
-      const a = (k ? 0.27 : -0.27) + (H(dx * 7 + dz * 13 + k + 60) - 0.5) * 0.2;
-      out.push(x + 0.5 + dx * 0.44 + dz * a, y, z + 0.5 + dz * 0.44 + dx * a, 0.7 * wide, 1.5 * (0.8 + 0.4 * H(dx * 5 + dz * 3 + k + 80)) * grow, H(dx * 11 + dz * 17 + k + 90), 0.95 * ink);
-    }
+    const fx = x + 0.5 + dx * 0.49, fz = z + 0.5 + dz * 0.49;
+    for (let k = 0; k < 2; k++) { const a = (k ? 0.24 : -0.24) + (H(ori * 7 + k + 60) - 0.5) * 0.12; out.push(fx + (dz ? a : 0), y - 0.02, fz + (dx ? a : 0), 0.62 * wide, 1.45 * (0.8 + 0.4 * H(ori * 5 + k + 80)) * grow, H(ori * 11 + k + 90), 0.95 * ink, ori); }
   }
-  // techo inflamable: llamas que lamen la cara inferior
-  if (fl(w.get(x, y + 1, z))) out.push(x + 0.3 + 0.4 * H(101), y + 0.55, z + 0.3 + 0.4 * H(102), 1.0 * wide, 0.5, H(103), 0.7 * ink);
+  if (fl(w.get(x, y + 1, z))) out.push(x + 0.3 + 0.4 * H(101), y + 0.55, z + 0.3 + 0.4 * H(102), 1.0 * wide, 0.45, H(103), 0.7 * ink, 0);
 }
 // ------------------------------------------------------------ extintor
 function sprayExtinguisher(p) {
