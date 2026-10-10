@@ -107,7 +107,7 @@ function rleDecode(b64, len, wide) {
 
 // ---------------------------------------------------------------- settings
 const DEFAULT_KEYS = {
-  forward: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD', jump: 'Space', sneak: 'ShiftLeft', sprint: 'ControlLeft',
+  forward: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD', jump: 'Space', sneak: 'ShiftLeft', sprint: 'KeyR',
   inventory: 'KeyE', drop: 'KeyQ', chat: 'KeyT', command: 'Slash', perspective: 'F5', hideHud: 'F1', debug: 'F3',
   attack: 'Mouse0', use: 'Mouse2', pick: 'Mouse1', playerlist: 'Tab'
 };
@@ -117,6 +117,9 @@ const SETTINGS = Object.assign({
   clouds: true, particles: 2, brightness: 0.5, dynres: true, resScale: 1, gpuPref: 'high-performance', fpsCap: 0, threads: 0
 }, (() => { try { return JSON.parse(localStorage.getItem('mc2-settings') || '{}'); } catch (e) { return {}; } })());
 SETTINGS.keys = Object.assign({}, DEFAULT_KEYS, SETTINGS.keys || {});
+// Ctrl+W (Ctrl + avanzar) cierra la pestaña en el navegador y no se puede bloquear fuera de pantalla completa:
+// las acciones de movimiento ya no usan Ctrl por defecto (correr = R o doble toque de W)
+if (!SETTINGS.keysV2) { for (const k of ['sprint', 'sneak']) if (/^Control/.test(SETTINGS.keys[k] || '')) SETTINGS.keys[k] = DEFAULT_KEYS[k]; SETTINGS.keysV2 = true; try { localStorage.setItem('mc2-settings', JSON.stringify(SETTINGS)); } catch (e) { } }
 function saveSettings() { try { localStorage.setItem('mc2-settings', JSON.stringify(SETTINGS)); } catch (e) { } }
 function keyLabel(code) {
   if (!code) return '-';

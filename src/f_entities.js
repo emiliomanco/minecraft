@@ -232,19 +232,31 @@ function fireFX(world, x, y, z, dt) {
   if (Math.random() < 3 * dt * k) P_({ x: x + 0.2 + Math.random() * 0.6, y: y + 0.3 + Math.random() * 0.6, z: z + 0.2 + Math.random() * 0.6, vx: (Math.random() - 0.5) * 1.2, vy: 1.5 + Math.random() * 2.5, vz: (Math.random() - 0.5) * 1.2, life: 0.8 + Math.random() * 1.2, size: 0.035 + Math.random() * 0.03, add: true, emis: 10, r: 1, g: 0.55 + Math.random() * 0.3, b: 0.15, layer: TEX.ember, grav: -0.8, drag: 0.6, collide: true });
 }
 // instancias de llama para un bloque de fuego: [x, y, z, ancho, alto, semilla, intensidad] por llama.
-// Las llamas suben por las caras de los bloques inflamables vecinos, así el fuego "abraza" lo que quema.
+// Las llamas se pegan a las caras de lo que se está quemando (suelo, paredes, techo) y crecen cuando hay
+// más fuego alrededor; con calidad alta se suman en un búfer de densidad, así un grupo de fuegos se ve
+// como un solo incendio en vez de muchos fueguitos.
 function fireFlames(w, x, y, z, out) {
-  const hs = (((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) >>> 0) % 1000 / 1000;
-  const below = w.get(x, y - 1, z); const bd = below > 0 ? REG[below] : null;
-  const fuel = bd && (bd.flammable || bd.infiniteFire) ? 1 : 0.8;
-  out.push(x + 0.5, y, z + 0.5, 1.15 * fuel, 1.75 * fuel, hs, 1);
-  out.push(x + 0.28 + hs * 0.1, y, z + 0.66, 0.7, 1.05 * fuel, hs + 0.37, 0.85);
-  out.push(x + 0.72, y, z + 0.32 - hs * 0.1, 0.7, 1.2 * fuel, hs + 0.71, 0.85);
-  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-    const n = w.get(x + dx, y, z + dz); if (!(n > 0 && REG[n].flammable)) continue;
-    for (let k = -1; k <= 1; k += 2) out.push(x + 0.5 + dx * 0.4 + dz * k * 0.24, y, z + 0.5 + dz * 0.4 + dx * k * 0.24, 0.65, 1.55, hs + 0.13 * (k + 3) + dx * 0.3 + dz * 0.5, 0.9);
+  const H = k => { let h = (x * 374761393 + y * 668265263 + z * 2147483647 + k * 1274126177) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+  let n = 0; for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) if ((dx || dy || dz) && w.get(x + dx, y + dy, z + dz) === ID.fire) n++;
+  const grow = Math.min(2.4, 1 + 0.16 * n), wide = Math.min(1.5, 1 + 0.05 * n), ink = 1 / (1 + 0.07 * n);
+  const fl = id => id > 0 && (REG[id].flammable || REG[id].infiniteFire);
+  const below = w.get(x, y - 1, z), floorFuel = fl(below);
+  // suelo: llamas repartidas por toda la cara superior del bloque que arde, no en el centro de la celda
+  const nf = floorFuel ? 3 : 2;
+  for (let k = 0; k < nf; k++) {
+    const u = 0.15 + 0.7 * H(k * 3 + 1), v = 0.15 + 0.7 * H(k * 3 + 2);
+    out.push(x + u, y, z + v, (0.75 + 0.35 * H(k + 20)) * wide, (floorFuel ? 1.1 : 0.7) * (0.7 + 0.6 * H(k * 3 + 3)) * grow, H(k + 40), (floorFuel ? 1 : 0.75) * ink);
   }
-  const up = w.get(x, y + 1, z); if (up > 0 && REG[up].flammable) out.push(x + 0.5, y + 0.55, z + 0.5, 1.0, 0.7, hs + 0.9, 0.7);
+  // paredes inflamables: una lámina de llamas pegada a la cara
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    if (!fl(w.get(x + dx, y, z + dz))) continue;
+    for (let k = 0; k < 2; k++) {
+      const a = (k ? 0.27 : -0.27) + (H(dx * 7 + dz * 13 + k + 60) - 0.5) * 0.2;
+      out.push(x + 0.5 + dx * 0.44 + dz * a, y, z + 0.5 + dz * 0.44 + dx * a, 0.7 * wide, 1.5 * (0.8 + 0.4 * H(dx * 5 + dz * 3 + k + 80)) * grow, H(dx * 11 + dz * 17 + k + 90), 0.95 * ink);
+    }
+  }
+  // techo inflamable: llamas que lamen la cara inferior
+  if (fl(w.get(x, y + 1, z))) out.push(x + 0.3 + 0.4 * H(101), y + 0.55, z + 0.3 + 0.4 * H(102), 1.0 * wide, 0.5, H(103), 0.7 * ink);
 }
 // ------------------------------------------------------------ extintor
 function sprayExtinguisher(p) {
@@ -252,10 +264,12 @@ function sprayExtinguisher(p) {
   const dir = lookDir(p); const rx = Math.cos(p.yaw), rz = -Math.sin(p.yaw);
   const ox = p.x + dir[0] * 0.6 + rx * 0.25, oy = p.eye - 0.35 + dir[1] * 0.6, oz = p.z + dir[2] * 0.6 + rz * 0.25;
   const n = Math.max(1, Math.round(dt * [30, 50, 70][SETTINGS.particles ?? 2]));
+  // CO2 (1,98 kg/m³) es más denso que el aire (1,29 kg/m³): flotabilidad negativa g·(1,98−1,29)/1,98 ≈ 3,4 m/s² si fuera puro;
+  // al mezclarse con el aire baja, y con el arrastre del chorro cae despacio (~0,7 m/s) y se extiende por el suelo
   for (let i = 0; i < n; i++) {
     const sp = 11 + Math.random() * 5, j = 0.13;
     const vx = (dir[0] + (Math.random() - 0.5) * j * 2) * sp, vy = (dir[1] + (Math.random() - 0.5) * j * 2) * sp, vz = (dir[2] + (Math.random() - 0.5) * j * 2) * sp;
-    const q = P_({ x: ox, y: oy, z: oz, vx, vy, vz, life: 1.8 + Math.random() * 1.2, size: 0.35 + Math.random() * 0.25, grow: 3.2 + Math.random() * 1.2, r: 0.97, g: 0.98, b: 1.0, a: 0.62, drag: 2.2, grav: -0.15, collide: true, soft: 1.0, layer: TEX['smoke_' + ((Math.random() * 4) | 0)], rot: Math.random() * 6, vrot: (Math.random() - 0.5) * 1.5 });
+    const q = P_({ x: ox, y: oy, z: oz, vx, vy, vz, life: 1.8 + Math.random() * 1.2, size: 0.35 + Math.random() * 0.25, grow: 3.2 + Math.random() * 1.2, r: 0.97, g: 0.98, b: 1.0, a: 0.62, drag: 2.2, grav: 1.6, collide: true, soft: 1.0, layer: TEX['smoke_' + ((Math.random() * 4) | 0)], rot: Math.random() * 6, vrot: (Math.random() - 0.5) * 1.5 });
     if (q) { q.ext = true; q.dim = p.dim; }
   }
   if (Math.random() < dt * 4) playSound('fizz', ox, oy, oz, 0.25);

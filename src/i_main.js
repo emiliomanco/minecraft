@@ -485,6 +485,7 @@ let waitingKey = null;
 function buildControls() {
   const box = $('keyList'); box.innerHTML = '';
   for (const a in KEY_NAMES) { const r = document.createElement('div'); r.className = 'krow'; const l = document.createElement('span'); l.textContent = KEY_NAMES[a]; const b = document.createElement('button'); b.className = 'btn'; b.textContent = keyLabel(SETTINGS.keys[a]); b.onclick = e => { e.stopPropagation(); if (waitingKey) waitingKey.b.classList.remove('wait'); waitingKey = { a, b }; b.textContent = '> ? <'; b.classList.add('wait'); }; r.append(l, b); box.appendChild(r); }
+  if (['forward', 'back', 'left', 'right', 'jump', 'sneak', 'sprint'].some(a => /^(Control|Meta)/.test(SETTINGS.keys[a] || ''))) { const w = document.createElement('div'); w.className = 'krow'; w.style.color = '#ff6'; w.textContent = 'Aviso: Ctrl + W cierra la pestaña del navegador (no se puede bloquear). En pantalla completa (F11) sí se bloquea.'; box.appendChild(w); }
 }
 function bindKey(code) { if (!waitingKey) return false; if (code !== 'Escape') SETTINGS.keys[waitingKey.a] = code; saveSettings(); waitingKey = null; buildControls(); return true; }
 function setupMenus() {
