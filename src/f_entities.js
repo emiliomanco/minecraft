@@ -42,18 +42,17 @@ function moveEntity(world, e, dx, dy, dz) {
   if (dx !== odx) e.vx = 0; if (dz !== odz) e.vz = 0; if (dy !== ody) e.vy = 0;
 }
 function blockAt(world, x, y, z) { return world.get(Math.floor(x), Math.floor(y), Math.floor(z)); }
-function liquidAt(world, x, y, z) { const b = blockAt(world, x, y, z); if (b <= 0) return 0; const d = REG[b]; return d.liquid || (d.inWater ? 1 : 0); }
+function liquidAt(world, x, y, z) { const b = blockAt(world, x, y, z); if (b <= 0) return 0; const d = REG[b]; const l = d.liquid || (d.inWater ? 1 : 0); if (!l) return 0; return (y - Math.floor(y)) < liquidSurface(world, Math.floor(x), Math.floor(y), Math.floor(z)) ? l : 0; } // con volumen parcial solo cuenta por debajo de la superficie
 function entityInBlock(world, e, pred) {
   const hw = e.w / 2 - 0.001;
   for (let x = Math.floor(e.x - hw); x <= Math.floor(e.x + hw); x++) for (let z = Math.floor(e.z - hw); z <= Math.floor(e.z + hw); z++) for (let y = Math.floor(e.y); y <= Math.floor(e.y + e.h - 0.01); y++) { const b = world.get(x, y, z); if (b > 0 && pred(REG[b], x, y, z)) return { x, y, z, b }; }
   return null;
 }
-function flowVec(world, x, y, z) {
-  const b = world.get(x, y, z); if (b !== ID.water && b !== ID.lava) return [0, 0];
-  const lv = j => { if (j <= 0) return -1; return j; };
-  const m0 = world.getMeta(x, y, z) & 7; let fx = 0, fz = 0;
-  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nb = world.get(x + dx, y, z + dz); if (nb === b) { const m = world.getMeta(x + dx, y, z + dz) & 7; fx += dx * (m - m0); fz += dz * (m - m0); } else if (nb === 0 || (nb > 0 && !REG[nb].solid)) { if (world.get(x + dx, y - 1, z + dz) === b) { fx += dx * 2; fz += dz * 2; } } }
-  const l = Math.hypot(fx, fz); return l ? [fx / l, fz / l] : [0, 0];
+function flowVec(world, x, y, z) { // corriente: del lado con más volumen hacia el que tiene menos (o hacia una caída)
+  const b = world.get(x, y, z); if (b !== ID.water && b !== ID.lava) return [0, 0]; const liq = REG[b].liquid;
+  const m0 = world.getMeta(x, y, z); if (m0 & LIQ_OCEAN) return [0, 0]; const a = liqAmt(m0); let fx = 0, fz = 0;
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const v = cellVol(world, x + dx, y, z + dz, liq); if (v < 0) continue; let d = a - v; if (v === 0 && cellVol(world, x + dx, y - 1, z + dz, liq) >= 0) d += 4; fx += dx * d; fz += dz * d; }
+  const l = Math.hypot(fx, fz); return l > 0.5 ? [fx / l, fz / l] : [0, 0];
 }
 
 // ------------------------------------------------------------ Entidad base
@@ -381,7 +380,9 @@ function updatePlayerPhysics(p, dt, input) {
   const creative = G.gameMode === 'creative', spectator = G.gameMode === 'spectator';
   const feet = blockAt(w, p.x, p.y + 0.1, p.z), mid = blockAt(w, p.x, p.y + 0.9, p.z), eyeB = blockAt(w, p.x, p.eye, p.z);
   const liq = b => b > 0 ? (REG[b].liquid || (REG[b].inWater ? 1 : 0)) : 0;
-  p.inWater = liq(feet) === 1 || liq(mid) === 1; p.inLava = liq(feet) === 2 || liq(mid) === 2; p.eyeInWater = liq(eyeB) === 1; p.eyeInLava = liq(eyeB) === 2;
+  // con volumen parcial solo cuenta lo que está por debajo de la superficie (un charco de 1/8 no hace nadar)
+  const lf = liquidAt(w, p.x, p.y + 0.1, p.z), lm = liquidAt(w, p.x, p.y + 0.9, p.z), le = liquidAt(w, p.x, p.eye, p.z);
+  p.inWater = lf === 1 || lm === 1; p.inLava = lf === 2 || lm === 2; p.eyeInWater = le === 1; p.eyeInLava = le === 2;
   const climb = entityInBlock(w, p, d => d.climb);
   const web = entityInBlock(w, p, d => d.slow);
   const below = blockAt(w, p.x, p.y - 0.05, p.z); const bd = below > 0 ? REG[below] : null;

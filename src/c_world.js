@@ -46,6 +46,7 @@ BI.basalt_deltas = defBiome('basalt_deltas');
 BI.the_end = defBiome('the_end');
 BI.end_highlands = defBiome('end_highlands');
 BI.small_end_islands = defBiome('small_end_islands');
+const OCEAN_BIOMES = new Set([BI.ocean, BI.deep_ocean, BI.frozen_ocean, BI.warm_ocean, BI.beach, BI.snowy_beach]);
 
 // ======================================================================= Chunk
 class Chunk {
@@ -76,7 +77,7 @@ class World {
   adopt(c) {
     const k = ckey(c.cx, c.cz); const ex = this.chunks.get(k); if (ex) return ex;
     const sv = this.saved[k];
-    if (sv) { c.blocks = rleDecode(sv.b, 256 * this.H, true); c.meta = rleDecode(sv.m, 256 * this.H); c.modified = true; c.loot = sv.loot || {}; c.spawners = sv.sp || c.spawners; delete this.saved[k]; c.calcTop(); }
+    if (sv) { c.blocks = rleDecode(sv.b, 256 * this.H, true); c.meta = rleDecode(sv.m, 256 * this.H); c.modified = true; c.loot = sv.loot || {}; c.spawners = sv.sp || c.spawners; delete this.saved[k]; if (sv.fv !== 2 && typeof migrateFluidChunk === 'function') migrateFluidChunk(this, c); c.calcTop(); }
     this.chunks.set(k, c);
     if (typeof onChunkGenerated === 'function') onChunkGenerated(this, c);
     return c;
@@ -208,12 +209,14 @@ class Generator {
       const ci = cols[x | z << 4]; const h = ci.h; const bio = BIOMES[ci.biome]; const wx = x0 + x, wz = z0 + z;
       const dsl = DEEP + Math.round(this.nDS.n2(wx * 0.1, wz * 0.1) * 3);
       const waterTop = ci.lake ? ci.lake : SEA;
+      // agua de océano (reserva infinita con olas): el mar abierto y sus orillas; lagos, ríos y pantanos son agua finita
+      const oceanCol = !ci.lake && !ci.river && h < SEA && OCEAN_BIOMES.has(ci.biome);
       const fillDepth = bio.top === ID.sand && ci.biome === BI.desert ? 5 : 3 + ((hash2(this.seed, wx, wz) * 2) | 0);
       const cliff = ci.mountain > 20 && Math.abs(this.col(wx + 1, wz).h - h) + Math.abs(this.col(wx, wz + 1).h - h) > 4;
       for (let y = 0; y <= Math.max(h, waterTop); y++) {
         const i = x | z << 4 | y << 8; let id;
         if (y <= 4 && (y === 0 || hash3(this.seed, wx, y, wz) < 0.8 - y * 0.18)) { B[i] = ID.bedrock; continue; }
-        if (y > h) { if (y <= waterTop) { id = ID.water; if (y === waterTop && bio.snow && (ci.biome === BI.frozen_ocean || ci.biome === BI.frozen_river || ci.biome === BI.snowy_plains || ci.biome === BI.snowy_taiga) && this.nS.n2(wx * 0.05, wz * 0.05) > -0.3) id = ID.ice; B[i] = id; } continue; }
+        if (y > h) { if (y <= waterTop) { id = ID.water; if (y === waterTop && bio.snow && (ci.biome === BI.frozen_ocean || ci.biome === BI.frozen_river || ci.biome === BI.snowy_plains || ci.biome === BI.snowy_taiga) && this.nS.n2(wx * 0.05, wz * 0.05) > -0.3) id = ID.ice; B[i] = id; if (id === ID.water && oceanCol) M[i] = LIQ_OCEAN; } continue; }
         if (y === h) id = (h < waterTop) ? (ci.river || ci.lake ? (hash2(this.seed + 5, wx, wz) < 0.3 ? ID.gravel : hash2(this.seed + 6, wx, wz) < 0.12 ? ID.clay : ID.sand) : (ci.biome === BI.mangrove_swamp ? ID.mud : bio.top === ID.grass_block || bio.top === ID.snowy_grass ? (h > SEA - 6 ? ID.sand : ID.gravel) : bio.top)) : bio.top;
         else if (y > h - fillDepth) id = (h < waterTop && bio.fill === ID.dirt) ? ID.sand : bio.fill;
         else id = y < dsl ? ID.deepslate : ID.stone;

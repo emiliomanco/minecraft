@@ -80,7 +80,7 @@ const DB = {
 };
 function serializeWorld() {
   const dims = {};
-  for (const d in G.worlds) { const w = G.worlds[d]; const out = {}; for (const c of w.chunks.values()) if (c.modified) out[ckey(c.cx, c.cz)] = { b: rleEncode(c.blocks), m: rleEncode(c.meta), loot: c.loot, sp: c.spawners }; for (const k in w.saved) if (!out[k]) out[k] = w.saved[k]; dims[d] = out; }
+  for (const d in G.worlds) { const w = G.worlds[d]; const out = {}; for (const c of w.chunks.values()) if (c.modified) out[ckey(c.cx, c.cz)] = { b: rleEncode(c.blocks), m: rleEncode(c.meta), fv: 2, loot: c.loot, sp: c.spawners }; for (const k in w.saved) if (!out[k]) out[k] = w.saved[k]; dims[d] = out; }
   const players = Object.assign({}, G.playerStates || {}); players.__local = playerState(G.player); players.__local.name = G.player.name;
   if (G.net && G.net.role === 'host') for (const c of G.net.conns.values()) if (c.ent && c.ent.state) players[c.ent.name] = c.ent.state;
   const ents = []; for (const e of G.entities.values()) { if (e.proxy || e.remotePlayer || e.removed || e.dead) continue; if (e instanceof Mob && (e.persist || !e.def.hostile)) ents.push({ k: 'mob', ty: e.type, d: e.dim, x: e.x, y: e.y, z: e.z, hp: e.hp, c: e.color, p: e.persist, n: e.name }); else if (e.type === 'item') ents.push({ k: 'item', d: e.dim, x: e.x, y: e.y, z: e.z, s: e.stack }); }
@@ -141,7 +141,7 @@ function finishLoading() {
   G.mode = 'game'; hideScreens(); $('hud').style.display = 'block'; $('hotbar').innerHTML = ''; updateHUD(); applyGui();
   $('debugL').style.display = $('debugR').style.display = F3 ? 'block' : 'none';
   if (p.dim === 'end' && (!G.net || G.net.role === 'host')) initEnd();
-  if (R.software) chatMsg('⚠ ' + gpuHelpText(), '#f88');
+  G.startedAt = performance.now(); if (R.software) chatMsg('⚠ ' + gpuHelpText(), '#f88');
   chatMsg('Bienvenido a Minecraft 2. Pulsa E para el inventario, T para chatear, F3 para depurar. Escribe /help para comandos.', '#aaa');
   lockPointer(); AU.music = 20 * 30;
 }
@@ -207,7 +207,7 @@ function manageChunks(w, x, z, budget) {
       const ww = G.worlds[d]; const pls = [G.player, ...[...G.entities.values()].filter(e => e.remotePlayer)].filter(p => p.dim === ww.dim);
       for (const [k, c] of ww.chunks) {
         let near = false; for (const p of pls) if (Math.abs(c.cx - (Math.floor(p.x) >> 4)) <= (p === G.player ? keep : 4) && Math.abs(c.cz - (Math.floor(p.z) >> 4)) <= (p === G.player ? keep : 4)) near = true;
-        if (!near) { freeMesh(c); if (c.modified) ww.saved[k] = { b: rleEncode(c.blocks), m: rleEncode(c.meta), loot: c.loot, sp: c.spawners }; ww.chunks.delete(k); }
+        if (!near) { freeMesh(c); if (c.modified) ww.saved[k] = { b: rleEncode(c.blocks), m: rleEncode(c.meta), fv: 2, loot: c.loot, sp: c.spawners }; ww.chunks.delete(k); }
         else if (ww !== w && c.mesh) freeMesh(c);
         else if (c.mesh && (Math.abs(c.cx - pcx) > rd + 1 || Math.abs(c.cz - pcz) > rd + 1)) { freeMesh(c); c.dirty = true; c.meshPending = false; }
       }
@@ -221,14 +221,28 @@ let lastT = performance.now(), acc = 0, fpsN = 0, fpsT = 0, FPS = 0, dbgT = 0;
 const MENU = { world: null, yaw: 0 };
 function frame(now) {
   requestAnimationFrame(frame);
+  // si la GPU todavía no terminó el cuadro anterior, saltar este (como mucho 2 seguidos) en vez de encolar cuadros:
+  // así el giro de cámara con el ratón aparece en pantalla antes (menos retraso)
+  const gl = R.gl; if (gl && R.fence) { if (gl.getSyncParameter(R.fence, gl.SYNC_STATUS) !== gl.SIGNALED && (R.fskip || 0) < 2) { R.fskip = (R.fskip || 0) + 1; return; } gl.deleteSync(R.fence); R.fence = null; } R.fskip = 0;
+  const tJs = performance.now();
   if (SETTINGS.fpsCap > 0 && now - lastT < 1000 / SETTINGS.fpsCap - 1) return;
   let dt = (now - lastT) / 1000; lastT = now; if (dt > 0.1) dt = 0.1; if (dt <= 0) dt = 0.001;
   fpsN++; fpsT += dt; if (fpsT >= 1) { FPS = Math.round(fpsN / fpsT); fpsN = 0; fpsT = 0; CHUNK_STATS.updates = CHUNK_STATS.acc; CHUNK_STATS.acc = 0; dynResTick(); }
   try {
-    if (G.mode === 'menu') return menuFrame(dt);
-    if (G.mode === 'loading') return loadingFrame(dt);
-    if (G.mode === 'game') return gameFrame(dt);
+    if (G.mode === 'menu') menuFrame(dt);
+    else if (G.mode === 'loading') loadingFrame(dt);
+    else if (G.mode === 'game') gameFrame(dt);
+    if (gl && !R.lost) R.fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    // tiempo de CPU del cuadro (lógica + envío de órdenes a la GPU) y tiempo total entre cuadros, para F3
+    R.cpuMs = lerp(R.cpuMs || 0, performance.now() - tJs, 0.1); R.frameMs = lerp(R.frameMs || 16, dt * 1000, 0.1);
+    gpuWarnTick();
   } catch (e) { console.error(e); if (!frame.errShown) { frame.errShown = true; chatMsg('Error: ' + e.message, '#f66'); } }
+}
+// aviso fijo si el navegador no usa la GPU (se oculta tras 25 s en partida; siempre visible en el menú)
+function gpuWarnTick() {
+  const el = $('gpuWarn'); if (!el) return; const show = R.software && (G.mode !== 'game' || (performance.now() - (G.startedAt || 0)) < 25000 || G.paused);
+  if (show && !el.textContent) el.textContent = '⚠ Tu navegador NO está usando la tarjeta gráfica: el juego se dibuja con la CPU y va lento. Para arreglarlo: chrome://settings/system → activa «Usar la aceleración gráfica cuando esté disponible» y reinicia Chrome; si sigue igual, abre chrome://gpu y mira si dice «Software only». (Modo CPU activado mientras tanto.)';
+  const d = show ? 'block' : 'none'; if (el.style.display !== d) el.style.display = d;
 }
 // resolución dinámica: baja la resolución interna si los FPS caen, la sube si sobran
 let dynT = 0;
@@ -296,7 +310,7 @@ function gameFrame(dt) {
   const pausedSP = G.paused && !G.net;
   if (!pausedSP) { acc += dt * 1000; let n = 0; while (acc >= 50 && n < 4) { gameTick(); acc -= 50; n++; } if (n >= 4) acc = 0; }
   const typing = $('chatIn').classList.contains('on');
-  const input = (UI.open || typing || G.paused || p.dead) ? {} : { f: held('forward'), b: held('back'), l: held('left'), r: held('right'), jump: held('jump'), sneak: held('sneak'), sprint: held('sprint') || INPUT.sprintToggle, useHeld: p.eatT > 0 || p.bowT > 0 };
+  const input = (UI.open || typing || G.paused || p.dead) ? {} : { f: held('forward'), b: held('back'), l: held('left'), r: held('right'), jump: held('jump'), sneak: held('sneak'), sprint: held('sprint'), useHeld: p.eatT > 0 || p.bowT > 0 };
   if (!pausedSP && !p.dead && !p.ragdoll) { p.savePrev(); const steps = dt > 0.034 ? 2 : 1; for (let i = 0; i < steps; i++) updatePlayerPhysics(p, dt / steps, input); }
   if (!pausedSP && p.ragdoll && input.jump && p.ragdoll.alive && p.ragdoll.t > 0.5) p.ragdoll.dur = 0; // saltar = levantarse
   if (!pausedSP && typeof ragUpdate === 'function') ragUpdate(dt);
@@ -313,7 +327,7 @@ function gameFrame(dt) {
   let roll = ragRoll; if (G.shake > 0) { G.shake = Math.max(0, G.shake - dt * 2.5); roll = (Math.random() - 0.5) * G.shake * 0.08; pitch += (Math.random() - 0.5) * G.shake * 0.05; yaw += (Math.random() - 0.5) * G.shake * 0.05; }
   if (p.hurtTime > 0) roll += Math.sin(p.hurtTime / 10 * Math.PI) * 0.06;
   { const cl = w.dim === 'overworld' ? Math.min(1, w.light(Math.floor(eye[0]), Math.floor(eye[1]), Math.floor(eye[2]))[0] / 12) : 1; R.camSky = lerp(R.camSky ?? 1, cl, Math.min(1, dt * 3)); }
-  const camB = blockAt(w, eye[0], eye[1], eye[2]); const under = camB > 0 && (REG[camB].liquid === 1 || REG[camB].inWater);
+  const camB = blockAt(w, eye[0], eye[1], eye[2]); const under = liquidAt(w, eye[0], eye[1], eye[2]) === 1;
   // zoom (mantener la tecla; la rueda cambia el aumento entre 2x y 12x)
   const zoomOn = held('zoom') && !UI.open && !G.paused && !$('chatIn').classList.contains('on'); G.zoomCur = lerp(G.zoomCur || 1, zoomOn ? (G.zoomMag || 4) : 1, Math.min(1, dt * 12));
   const tfov = SETTINGS.fov * (p.sprinting && !zoomOn ? 1.12 : 1) * (p.spy ? 0.14 : 1) * (p.bowT > 0 ? 1 - Math.min(1, p.bowT) * 0.15 : 1) * (p.gliding ? 1.1 : 1) / G.zoomCur;

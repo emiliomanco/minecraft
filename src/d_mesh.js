@@ -152,7 +152,7 @@ function liquidHeight(ri, liq) {
   if (!isL) return -1;
   const up = regB[ri + LRR]; const du = REG[up]; if (du && (du.liquid === liq || (liq === 1 && du.inWater))) return 1;
   if (d.inWater) return 0.89;
-  const m = regM[ri]; if (m & 8) return 0.89; return (8 - (m & 7)) / 9;
+  const m = regM[ri]; if (m & LIQ_FALL) return 0.9; return liqAmt(m) / 8 * 0.9; // volumen en octavos
 }
 function buildMesh(world, ch) { buildRegion(world, ch); return meshRegion(world, ch); }
 function meshRegion(world, ch) {
@@ -272,7 +272,7 @@ function emitLiquid(B, x, y, z, ri, liq, ch, meta) {
   };
   const h00 = corner(0, 0), h10 = corner(1, 0), h11 = corner(1, 1), h01 = corner(0, 1);
   const layer = liq === 1 ? TEX.water : TEX.lava; const flags = liq === 1 ? F_WATER : (F_LAVA | F_EMIS);
-  const tint = liq === 1 ? 1 + ch.biomes[x | z << 4] : 0;
+  const tint = liq === 1 ? ((meta & LIQ_OCEAN) ? 1 + ch.biomes[x | z << 4] : 200) : 0; // 200 = agua finita (sin olas de mar)
   const isSame = j => { const b = regB[j]; const d = REG[b]; return d && (d.liquid === liq || (liq === 1 && d.inWater)); };
   const up = ri + LRR;
   B.grow();

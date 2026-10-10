@@ -250,8 +250,8 @@ function vfxTick(w, dt) {
   if (SMK.solidT <= 0) { smokeSolids(w); SMK.solidT = 1.5; }
   // viento suave que cambia despacio
   const t = performance.now() / 60000; SMK.wind = [Math.cos(t * 2.1) * 0.7, Math.sin(t * 1.3) * 0.7];
-  if (!SMK.pend.length && SMK.total <= 0 && !SMK.uploadAll) return;
-  smokeStep(w); smokeUpload();
+  if (!SMK.pend.length && SMK.total <= 0) return; // sin humo: ni simular ni subir nada
+  const was = SMK.total; smokeStep(w); if (was <= 0) SMK.uploadAll = true; smokeUpload();
 }
 function drawSmokeVolume() {
   if (!smokeOn() || !SMK.d || SMK.total <= 0.01 || SMK.world !== G.world) return;

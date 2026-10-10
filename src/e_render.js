@@ -83,7 +83,7 @@ void main(){
   if((fl&32u)!=0u){ p.x+=sin(u_time*2.1+w.x*0.4+w.z*0.3)*0.09*(1.0+u_rain); p.z+=cos(u_time*1.7+w.z*0.5)*0.07*(1.0+u_rain); }
   uint tc=uint(a_lit.w*255.0+0.5);
   if((fl&64u)!=0u && (fl&7u)==2u){
-    float amp = (tc==1u||tc==2u||tc==4u) ? 0.16 : 0.05;
+    float amp = tc>=200u ? 0.0 : (tc==1u||tc==2u||tc==4u) ? 0.16 : 0.05; // el agua finita (lagos, charcos) no tiene olas de mar
     p.y+=(sin(u_time*1.3+w.x*0.55+w.z*0.25)*0.6+sin(u_time*1.9-w.z*0.8+w.x*0.3)*0.4)*amp - amp - 0.06;
   }
   if((fl&2048u)!=0u){ }
@@ -449,7 +449,7 @@ function gpuKind(name) {
   return '';
 }
 function initGL() {
-  const cv = $('gl'); const attrs = { antialias: false, alpha: false, depth: true, stencil: false, powerPreference: SETTINGS.gpuPref || 'high-performance', preserveDrawingBuffer: false };
+  const cv = $('gl'); const attrs = { antialias: false, alpha: false, depth: true, stencil: false, powerPreference: SETTINGS.gpuPref || 'high-performance', preserveDrawingBuffer: false, desynchronized: true }; // desynchronized: menos latencia entre el ratón y la imagen
   // 1º pedir un contexto SIN "penalización grave de rendimiento": el navegador lo niega si fuera a dibujar por software (CPU).
   // Así se sabe con certeza si la GPU no se está usando, aunque el nombre del renderer no lo diga.
   let gl = cv.getContext('webgl2', Object.assign({ failIfMajorPerformanceCaveat: true }, attrs)); R.caveat = !gl;
@@ -563,10 +563,14 @@ function mkTarget(w, h, hdr, depth) {
   gl.bindFramebuffer(gl.FRAMEBUFFER, null); return t;
 }
 function freeTarget(t) { if (!t) return; const gl = R.gl; gl.deleteFramebuffer(t.fb); gl.deleteTexture(t.tex); if (t.depth) gl.deleteTexture(t.depth); }
+// tamaño del lienzo en CSS, cacheado: leer clientWidth cada cuadro obliga al navegador a recalcular el diseño
+// de la página (con el HUD cambiando) y gasta CPU; solo se vuelve a leer al cambiar el tamaño de la ventana
+const CVSZ = { w: 0, h: 0, dirty: true };
+window.addEventListener('resize', () => { CVSZ.dirty = true; });
 function resize() {
-  const cv = $('gl'); const scale = (R.q === 0 ? Math.min(window.devicePixelRatio || 1, 1) * 0.8 : Math.min(window.devicePixelRatio || 1, R.q >= 3 ? 1.5 : 1)) * (SETTINGS.dynres === false ? 1 : R.dyn) * (SETTINGS.resScale || 1);
-  const w = Math.max(1, Math.floor(cv.clientWidth * scale)), h = Math.max(1, Math.floor(cv.clientHeight * scale));
-  if (w === R.w && h === R.h) return; R.w = w; R.h = h; cv.width = w; cv.height = h; cv.style.imageRendering = w < cv.clientWidth * (window.devicePixelRatio || 1) - 1 ? 'pixelated' : 'auto';
+  const cv = $('gl'); if (CVSZ.dirty) { CVSZ.w = cv.clientWidth; CVSZ.h = cv.clientHeight; CVSZ.dirty = false; } const scale = (R.q === 0 ? Math.min(window.devicePixelRatio || 1, 1) * 0.8 : Math.min(window.devicePixelRatio || 1, R.q >= 3 ? 1.5 : 1)) * (SETTINGS.dynres === false ? 1 : R.dyn) * (SETTINGS.resScale || 1);
+  const w = Math.max(1, Math.floor(CVSZ.w * scale)), h = Math.max(1, Math.floor(CVSZ.h * scale));
+  if (w === R.w && h === R.h) return; R.w = w; R.h = h; cv.width = w; cv.height = h; cv.style.imageRendering = w < CVSZ.w * (window.devicePixelRatio || 1) - 1 ? 'pixelated' : 'auto';
   for (const k of ['scene', 'copy', 'b1', 'b2', 'fl']) { freeTarget(R.fbo[k]); R.fbo[k] = null; }
   if (R.q >= 1 && R.cfb && !R.fbo.lum) { R.fbo.lum = mkTarget(128, 128, true, false); const gl = R.gl; gl.bindTexture(gl.TEXTURE_2D, R.fbo.lum.tex); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_NEAREST); R.fbo.ad = [mkTarget(1, 1, true, false), mkTarget(1, 1, true, false)]; R.adI = 0; }
   if (R.q >= 1) {

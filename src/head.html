@@ -50,6 +50,7 @@ input.tf:focus{border-color:#fff}
 .krow .btn.wait{color:#ff0}
 /* HUD */
 #hud{position:fixed;inset:0;pointer-events:none;z-index:10;display:none}
+#gpuWarn{position:fixed;left:50%;top:6px;transform:translateX(-50%);max-width:92vw;z-index:60;display:none;background:rgba(120,0,0,.82);color:#fff;font-size:14px;line-height:1.35;padding:6px 12px;border:2px solid #f66;text-align:center;pointer-events:none;white-space:normal}
 #crosshair{position:absolute;left:50%;top:50%;width:20px;height:20px;transform:translate(-50%,-50%);mix-blend-mode:difference}
 #crosshair:before,#crosshair:after{content:'';position:absolute;background:#ddd}
 #crosshair:before{left:9px;top:0;width:2px;height:20px}#crosshair:after{top:9px;left:0;height:2px;width:20px}
@@ -169,6 +170,7 @@ img.glint{filter:drop-shadow(0 0 2px #b46bff) saturate(1.3);animation:glint 2s i
   <button class="btn" data-go="realms" title="Próximamente">Reinos de Minecraft 2</button>
   <div class="row" style="margin-top:12px"><button class="btn small" data-go="options">Opciones...</button><button class="btn small" data-go="quit">Salir del juego</button></div>
 </div>
+<div id="gpuWarn"></div>
 <div class="footer l" id="footL">Minecraft 2 v2.0 (HTML5 / WebGL2)</div>
 <div class="footer r" id="footR">Juego fan no oficial · No afiliado a Mojang ni Microsoft</div>
 
