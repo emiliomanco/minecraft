@@ -107,16 +107,21 @@ function rleDecode(b64, len, wide) {
 
 // ---------------------------------------------------------------- settings
 const DEFAULT_KEYS = {
-  forward: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD', jump: 'Space', sneak: 'ShiftLeft', sprint: 'ControlLeft',
+  forward: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD', jump: 'Space', sneak: 'KeyC', sprint: 'ShiftLeft',
   inventory: 'KeyE', drop: 'KeyQ', chat: 'KeyT', command: 'Slash', perspective: 'F5', hideHud: 'F1', debug: 'F3',
-  attack: 'Mouse0', use: 'Mouse2', pick: 'Mouse1', playerlist: 'Tab'
+  attack: 'Mouse0', use: 'Mouse2', pick: 'Mouse1', playerlist: 'Tab', zoom: 'KeyZ', ragdoll: 'KeyG'
 };
-const KEY_NAMES = { forward: 'Avanzar', back: 'Retroceder', left: 'Izquierda', right: 'Derecha', jump: 'Saltar', sneak: 'Agacharse', sprint: 'Correr', inventory: 'Inventario', drop: 'Soltar objeto', chat: 'Abrir chat', command: 'Abrir comando', perspective: 'Cambiar perspectiva', hideHud: 'Ocultar HUD', debug: 'Menú de depuración (F3)', attack: 'Atacar / Destruir', use: 'Usar objeto / Colocar', pick: 'Elegir bloque', playerlist: 'Lista de jugadores' };
+const KEY_NAMES = { forward: 'Avanzar', back: 'Retroceder', left: 'Izquierda', right: 'Derecha', jump: 'Saltar', sneak: 'Agacharse', sprint: 'Correr', inventory: 'Inventario', drop: 'Soltar objeto', chat: 'Abrir chat', command: 'Abrir comando', perspective: 'Cambiar perspectiva', hideHud: 'Ocultar HUD', debug: 'Menú de depuración (F3)', attack: 'Atacar / Destruir', use: 'Usar objeto / Colocar', pick: 'Elegir bloque', playerlist: 'Lista de jugadores', zoom: 'Zoom (mantener; rueda = acercar)', ragdoll: 'Ragdoll (dejarse caer)' };
 const SETTINGS = Object.assign({
   fov: 70, rd: 6, sens: 0.5, vol: 0.7, quality: 2, gui: 2, bob: true, invertY: false, name: 'Jugador' + Math.floor(Math.random() * 900 + 100),
   clouds: true, particles: 2, brightness: 0.5, dynres: true, resScale: 1, gpuPref: 'high-performance', fpsCap: 0, threads: 0
 }, (() => { try { return JSON.parse(localStorage.getItem('mc2-settings') || '{}'); } catch (e) { return {}; } })());
 SETTINGS.keys = Object.assign({}, DEFAULT_KEYS, SETTINGS.keys || {});
+// Ctrl+W (Ctrl + avanzar) cierra la pestaña en el navegador y no se puede bloquear fuera de pantalla completa:
+// las acciones de movimiento ya no usan Ctrl por defecto (correr = R o doble toque de W)
+// v3: correr = Shift, agacharse = C, zoom = Z (si seguían con los valores por defecto anteriores)
+if (!SETTINGS.keysV3) { const K = SETTINGS.keys; if (['KeyR', 'ControlLeft', 'ControlRight'].includes(K.sprint)) K.sprint = 'ShiftLeft'; if (K.sneak === 'ShiftLeft' || /^Control/.test(K.sneak || '')) K.sneak = 'KeyC'; if (K.zoom === 'KeyC' || !K.zoom) K.zoom = 'KeyZ'; SETTINGS.keysV3 = true; SETTINGS.keysV2 = true; try { localStorage.setItem('mc2-settings', JSON.stringify(SETTINGS)); } catch (e) { } }
+if (!SETTINGS.keysV2) { for (const k of ['sprint', 'sneak']) if (/^Control/.test(SETTINGS.keys[k] || '')) SETTINGS.keys[k] = DEFAULT_KEYS[k]; SETTINGS.keysV2 = true; try { localStorage.setItem('mc2-settings', JSON.stringify(SETTINGS)); } catch (e) { } }
 function saveSettings() { try { localStorage.setItem('mc2-settings', JSON.stringify(SETTINGS)); } catch (e) { } }
 function keyLabel(code) {
   if (!code) return '-';

@@ -320,6 +320,13 @@ for (const m in ARMORMAT) ARMORPART.forEach(([p, dn, du], slot) => {
 });
 // (añadir objetos nuevos siempre al final para no cambiar los IDs guardados)
 defI('fire_extinguisher', 'Extintor', { stack: 1, dur: 400, extinguisher: true });
+// ---- codificación del meta de líquidos (agua/lava), compartida por simulación (k_fluids), mallado y render:
+//  bits 0-2: volumen en octavos (0 = bloque lleno 8/8, 1..7 = n/8)
+//  bit 3 (8): cayendo (columna vertical / chorro)
+//  bit 7 (128): agua de océano (reserva infinita con olas; solo agua)
+const LIQ_FALL = 8, LIQ_OCEAN = 128;
+function liqAmt(m) { const a = m & 7; return a === 0 ? 8 : a; }
+function liqMeta(amt, fall, ocean) { return (amt >= 8 ? 0 : Math.max(1, amt | 0)) | (fall ? LIQ_FALL : 0) | (ocean ? LIQ_OCEAN : 0); }
 // fuel de bloques
 for (const d of REG) if (d && d.isBlock && (d.planks || d.log)) d.fuel = 300;
 REG[ID.coal_block].fuel = 16000; REG[ID.crafting_table].fuel = 300; REG[ID.bookshelf].fuel = 300; REG[ID.chest].fuel = 300;

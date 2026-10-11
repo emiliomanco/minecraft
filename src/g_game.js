@@ -135,7 +135,7 @@ function raycast(w, ox, oy, oz, dx, dy, dz, maxD, liquids) {
     const b = w.get(x, y, z);
     if (b > 0) {
       const d = REG[b];
-      if (d.liquid ? (liquids && w.getMeta(x, y, z) === 0) : (d.render !== 'none' && d.render !== 'fire')) {
+      if (d.liquid ? liquids : (d.render !== 'none' && d.render !== 'fire')) {
         if (d.shape) { let best = null; for (const bb of shapeBoxes(d, w.getMeta(x, y, z), (dx, dz) => w.get(x + dx, y, z + dz))) { const hit = rayBox(ox, oy, oz, dx, dy, dz, x + bb[0] / 16, y + bb[1] / 16, z + bb[2] / 16, x + bb[3] / 16, y + bb[4] / 16, z + bb[5] / 16); if (hit && (!best || hit.t < best.t)) best = hit; } if (best && best.t <= maxD) return { x, y, z, id: b, n: best.n, t: best.t }; }
         else if (d.box || d.render === 'snow') { const bb = d.render === 'snow' ? [0, 0, 0, 16, Math.max(1, w.getMeta(x, y, z)) * 2, 16] : d.box; const hit = rayBox(ox, oy, oz, dx, dy, dz, x + bb[0] / 16, y + bb[1] / 16, z + bb[2] / 16, x + bb[3] / 16, y + Math.min(16, bb[4]) / 16, z + bb[5] / 16); if (hit && hit.t <= maxD) return { x, y, z, id: b, n: hit.n, t: hit.t }; }
         else return { x, y, z, id: b, n: face, t };
@@ -223,7 +223,7 @@ function onBlockSet(w, x, y, z, old, id, meta) {
   // fluidos y bloques dependientes
   for (const [dx, dy, dz] of [[0, 0, 0], [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) {
     const b = w.get(x + dx, y + dy, z + dz); if (b <= 0) continue; const d = REG[b];
-    if (d.liquid) w.scheduleTick(x + dx, y + dy, z + dz, d.liquid === 1 ? 5 : (w.dim === 'nether' ? 10 : 30), 0);
+    if (d.liquid) w.scheduleTick(x + dx, y + dy, z + dz, fluidDelay(w, d.liquid, dy === 1), 0);
     if (d.gravity) w.scheduleTick(x + dx, y + dy, z + dz, 2, 1);
     if (dy === 1 && needsSupport(d)) w.scheduleTick(x, y + 1, z, 1, 2);
     if (dy !== 0 || dx !== 0 || dz !== 0) if (b === ID.torch || b === ID.soul_torch || b === ID.redstone_torch || b === ID.ladder || b === ID.vine || b === ID.cave_vines || b === ID.weeping_vines || b === ID.pointed_dripstone) w.scheduleTick(x + dx, y + dy, z + dz, 1, 2);
@@ -278,51 +278,8 @@ function gravityTick(w, x, y, z) {
   const b = w.get(x, y, z); if (b <= 0 || !REG[b].gravity) return; const below = w.get(x, y - 1, z);
   if (below === 0 || (below > 0 && (REG[below].replace || REG[below].liquid))) { w.set(x, y, z, 0); const e = new Projectile('falling_block', w.dim, x + 0.5, y, z + 0.5, 0, 0, 0); e.block = b; e.w = 0.98; e.h = 0.98; e.grav = 25; G.entities.set(e.id, e); }
 }
-function canFlow(b, liq) { if (b === 0) return true; if (b < 0) return false; const d = REG[b]; if (d.liquid) return d.liquid === liq; return d.replace && !d.inWater; }
-function fluidTick(w, x, y, z) {
-  const id = w.get(x, y, z); if (id <= 0) return; const d = REG[id]; if (!d.liquid) return;
-  const liq = d.liquid; const drop = liq === 1 ? 1 : (w.dim === 'nether' ? 1 : 2); const delay = liq === 1 ? 5 : (w.dim === 'nether' ? 10 : 30);
-  const other = liq === 1 ? ID.lava : ID.water;
-  let meta = w.getMeta(x, y, z); const isSource = meta === 0;
-  // interacción lava/agua
-  if (liq === 2) { for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, -1]]) { const nb = w.get(x + dx, y + dy, z + dz); if (nb === ID.water || (nb > 0 && REG[nb].inWater)) { w.set(x, y, z, isSource ? ID.obsidian : ID.cobblestone); fizz(w, x, y, z); return; } } }
-  if (w.dim === 'nether' && liq === 1) { w.set(x, y, z, 0); fizz(w, x, y, z); return; }
-  if (!isSource) {
-    let newLevel = 99; let src = 0; const above = w.get(x, y + 1, z); let falling = false;
-    if (above === id || (liq === 1 && above > 0 && REG[above].inWater)) { falling = true; newLevel = 0; }
-    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nb = w.get(x + dx, y, z + dz); if (nb === id) { const nm = w.getMeta(x + dx, y, z + dz); const nl = (nm & 8) ? 0 : (nm & 7); if (nm === 0) src++; newLevel = Math.min(newLevel, nl + drop); } }
-    if (liq === 1 && src >= 2) { const below = w.get(x, y - 1, z); if ((below > 0 && REG[below].solid) || (below === id && w.getMeta(x, y - 1, z) === 0)) { newLevel = 0; falling = false; } }
-    let nm; if (falling) nm = 8; else if (newLevel >= 8) nm = -1; else nm = newLevel === 0 && src >= 2 ? 0 : Math.max(1, newLevel);
-    if (nm < 0) { w.set(x, y, z, 0); return; }
-    if (nm !== meta) { w.set(x, y, z, id, nm); w.scheduleTick(x, y, z, delay, 0); return; }
-  }
-  // fluir hacia abajo
-  const below = w.get(x, y - 1, z);
-  if (below === other || (liq === 2 && below > 0 && REG[below].inWater)) { if (liq === 2) { w.set(x, y - 1, z, ID.stone); fizz(w, x, y - 1, z); } else { w.scheduleTick(x, y - 1, z, 1, 0); } return; }
-  if (canFlow(below, liq)) { if (below !== id || w.getMeta(x, y - 1, z) !== 8 && w.getMeta(x, y - 1, z) !== 0) { if (below > 0 && below !== id) dropBlockItems(w, x, y - 1, z, below, null, true); w.set(x, y - 1, z, id, 8); } if (!isSource) return; }
-  const level = (meta & 8) ? 0 : (meta & 7); if (level + drop >= 8) return;
-  if (!isSource && !(below !== 0 && (below < 0 || REG[below].solid || (below === id && w.getMeta(x, y - 1, z) === 0)))) { if (!(meta & 8)) return; }
-  // buscar dirección hacia la caída más cercana
-  const range = liq === 1 ? 4 : 2; let best = 99; const dirs = [];
-  const costTo = (sx, sz, from, depth) => {
-    if (depth > range) return 99; const b2 = w.get(sx, y, sz); if (!canFlow(b2, liq) || (b2 === id && w.getMeta(sx, y, sz) === 0)) return 99;
-    const bb = w.get(sx, y - 1, sz); if (canFlow(bb, liq)) return depth;
-    let m = 99; for (const [dx, dz, f] of [[1, 0, 0], [-1, 0, 1], [0, 1, 2], [0, -1, 3]]) { if (f === (from ^ 1)) continue; m = Math.min(m, costTo(sx + dx, sz + dz, f, depth + 1)); } return m;
-  };
-  const D4 = [[1, 0, 0], [-1, 0, 1], [0, 1, 2], [0, -1, 3]];
-  for (const [dx, dz, f] of D4) { const c = costTo(x + dx, z + dz, f, 1); if (c < best) { best = c; dirs.length = 0; dirs.push([dx, dz]); } else if (c === best && c < 99) dirs.push([dx, dz]); }
-  if (!dirs.length) for (const [dx, dz] of D4) dirs.push([dx, dz]);
-  const nl = level + drop;
-  for (const [dx, dz] of dirs) {
-    const nx = x + dx, nz = z + dz; const nb = w.get(nx, y, nz);
-    if (nb === other) { w.scheduleTick(nx, y, nz, 1, 0); if (liq === 2 && w.getMeta(nx, y, nz) !== 0) { w.set(nx, y, nz, ID.cobblestone); fizz(w, nx, y, nz); } continue; }
-    if (!canFlow(nb, liq)) continue;
-    if (nb === id) { const m = w.getMeta(nx, y, nz); if (m === 0 || (m & 8) || (m & 7) <= nl) continue; }
-    if (nb > 0 && nb !== id) dropBlockItems(w, nx, y, nz, nb, null, true);
-    w.set(nx, y, nz, id, nl);
-  }
-}
-function fizz(w, x, y, z) { playSound('fizz', x, y, z, 0.5); for (let i = 0; i < 6; i++) smoke(x + Math.random(), y + 1, z + Math.random(), { r: 0.7, g: 0.7, b: 0.7, a: 0.5, size: 0.4, life: 1.2 }); }
+// (el flujo de líquidos está en k_fluids.js)
+function fizz(w, x, y, z) { playSound('fizz', x, y, z, 0.5); if (typeof vfxSmokeEmit === 'function') vfxSmokeEmit(x + 0.5, y + 1, z + 0.5, 1.0, 0.6, 2); for (let i = 0; i < 6; i++) smoke(x + Math.random(), y + 1, z + Math.random(), { r: 0.7, g: 0.7, b: 0.7, a: 0.5, size: 0.4, life: 1.2 }); }
 function fireTick(w, x, y, z) {
   if (w.get(x, y, z) !== ID.fire) return; const below = w.get(x, y - 1, z);
   if (below > 0 && REG[below].infiniteFire) { return; }

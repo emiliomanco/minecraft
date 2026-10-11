@@ -15,7 +15,20 @@ function buildTables() {
 }
 const LP = 14, LR = 16 + LP * 2 + 2, LRR = LR * LR;
 let regB = null, regM = null, regS = null, regL = null, regH = 0, lq = new Int32Array(1 << 21);
+// compactación de la nieve: por columna, 8x8 subceldas con la profundidad pisada en 1/64 de bloque (Uint8Array(64))
+// regSC = región 18x18 columnas (el chunk y un borde de 1) × 64, o null si no hay nada pisado cerca
+let regSC = null;
+function buildSnowRegion(world, ch) {
+  let any = false; for (let dz = -1; dz <= 1 && !any; dz++) for (let dx = -1; dx <= 1 && !any; dx++) { const c = world.chunk(ch.cx + dx, ch.cz + dz); if (c && c.snowC && c.snowC.size) any = true; }
+  if (!any) { regSC = null; return; }
+  regSC = new Uint8Array(18 * 18 * 64);
+  for (let lz = 0; lz < 18; lz++) for (let lx = 0; lx < 18; lx++) {
+    const wx = ch.cx * 16 + lx - 1, wz = ch.cz * 16 + lz - 1; const c = world.chunk(wx >> 4, wz >> 4); if (!c || !c.snowC) continue;
+    const a = c.snowC.get((wx & 15) | ((wz & 15) << 4)); if (a) regSC.set(a, (lz * 18 + lx) * 64);
+  }
+}
 function buildRegion(world, ch) {
+  buildSnowRegion(world, ch);
   const H = world.H; const size = LRR * (H + 2);
   if (!regB || regH !== H) { regB = new Uint16Array(size); regM = new Uint8Array(size); regS = new Uint8Array(size); regL = new Uint8Array(size); regH = H; }
   regB.fill(B_PAD); regM.fill(0);
@@ -152,7 +165,7 @@ function liquidHeight(ri, liq) {
   if (!isL) return -1;
   const up = regB[ri + LRR]; const du = REG[up]; if (du && (du.liquid === liq || (liq === 1 && du.inWater))) return 1;
   if (d.inWater) return 0.89;
-  const m = regM[ri]; if (m & 8) return 0.89; return (8 - (m & 7)) / 9;
+  const m = regM[ri]; if (m & LIQ_FALL) return 0.9; return liqAmt(m) / 8 * 0.9; // volumen en octavos
 }
 function buildMesh(world, ch) { buildRegion(world, ch); return meshRegion(world, ch); }
 function meshRegion(world, ch) {
@@ -160,12 +173,13 @@ function meshRegion(world, ch) {
   const O = MB_O, T = MB_T; O.reset(); T.reset(); MB_W.reset();
   const H = world.H; const top = Math.min(H - 1, ch.top + 1);
   const fancy = MESH_QUALITY >= 1;
-  const bxw = ch.cx * 16, bzw = ch.cz * 16; const EM = [];
+  const bxw = ch.cx * 16, bzw = ch.cz * 16; const EM = []; let EMlava = 0;
   for (let y = 0; y <= top; y++) for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
     const ri = ((y + 1) * LR + z + LP + 1) * LR + x + LP + 1; const id = regB[ri]; if (!id) continue;
     const d = REG[id]; if (!d || d.render === 'none') continue;
     const meta = regM[ri];
-    if (d.light >= 10 && EM.length < 400 && (d.render !== 'cube' || d.liquid || id === ID.magma_block) && (!d.liquid || regB[ri + LRR] === 0)) EM.push(bxw + x, y, bzw + z, id);
+    // emisores (fuego, antorchas, lava...): la lava tiene su propio cupo para que un lago subterráneo no deje sin efectos a los fuegos y antorchas del chunk
+    if (d.light >= 10 && EM.length < 4096 && (d.render !== 'cube' || d.liquid || id === ID.magma_block) && (!d.liquid || (regB[ri + LRR] === 0 && (EMlava++ < 96)))) EM.push(bxw + x, y, bzw + z, id);
     if (d.render === 'cube') {
       const B = d.trans === 2 ? T : O; let flags = 0;
       if (d.trans === 1) flags |= F_CUT; if (d.wave === 1 && fancy) flags |= F_LEAF; if (d.leaves || d.wave) flags |= F_FOLI;
@@ -271,7 +285,7 @@ function emitLiquid(B, x, y, z, ri, liq, ch, meta) {
   };
   const h00 = corner(0, 0), h10 = corner(1, 0), h11 = corner(1, 1), h01 = corner(0, 1);
   const layer = liq === 1 ? TEX.water : TEX.lava; const flags = liq === 1 ? F_WATER : (F_LAVA | F_EMIS);
-  const tint = liq === 1 ? 1 + ch.biomes[x | z << 4] : 0;
+  const tint = liq === 1 ? ((meta & LIQ_OCEAN) ? 1 + ch.biomes[x | z << 4] : (meta & LIQ_FALL) ? 201 : 200) : 0; // 200 = agua finita (sin olas de mar), 201 = chorro cayendo
   const isSame = j => { const b = regB[j]; const d = REG[b]; return d && (d.liquid === liq || (liq === 1 && d.inWater)); };
   const up = ri + LRR;
   B.grow();
@@ -298,6 +312,8 @@ function snowCellH(ri) { // altura de la superficie en una celda vecina (-1 = si
   if (T_FULL[b]) return 1.0; const below = regB[ri - LRR];
   if (T_FULL[below] || below === ID.snow) return 0.0; return -0.35;
 }
+// profundidad pisada (bloques) en la subcelda (gx,gz) del chunk, en unidades de 1/8 de bloque (puede salir 1 columna fuera)
+function snowCompAt(gx, gz) { if (!regSC) return 0; const lx = (gx >> 3) + 1, lz = (gz >> 3) + 1; if (lx < 0 || lz < 0 || lx > 17 || lz > 17) return 0; return regSC[(lz * 18 + lx) * 64 + (gz & 7) * 8 + (gx & 7)] / 64; }
 function emitSnow(B, x, y, z, ri, meta, ch, bxw, bzw) {
   const own = Math.max(1, meta) / 8;
   const H = new Float32Array(25); // alturas de las 5x5 celdas alrededor (incluye 2 de margen)
@@ -314,16 +330,32 @@ function emitSnow(B, x, y, z, ri, meta, ch, bxw, bzw) {
     h += (Math.sin(wx * 0.9 + wz * 0.35) * Math.cos(wz * 0.8 - wx * 0.25)) * 0.06 + Math.sin(wx * 2.7 + Math.cos(wz * 2.1)) * 0.015;
     return Math.max(0.015, Math.min(own + 0.25, h));
   };
-  const sub = MESH_QUALITY >= 2 ? 4 : MESH_QUALITY >= 1 ? 3 : 1;
+  // ¿hay pisadas en esta columna o al lado? entonces más subdivisión para que las huellas tengan forma
+  let pressed = false; if (regSC && MESH_QUALITY >= 1) { for (let dz = -1; dz <= 1 && !pressed; dz++) for (let dx = -1; dx <= 1 && !pressed; dx++) { const o = ((z + dz + 1) * 18 + (x + dx + 1)) * 64; for (let k = 0; k < 64; k++) if (regSC[o + k]) { pressed = true; break; } } }
+  const sub = pressed ? (MESH_QUALITY >= 2 ? 8 : 4) : MESH_QUALITY >= 2 ? 4 : MESH_QUALITY >= 1 ? 3 : 1;
   const up = ri + LRR; const sky = Math.max(regS[ri], regS[up]), blk = Math.max(regL[ri], regL[up]); const layer = TEX.snow; const fl = F_SNOW;
-  const N = sub + 1; const hs = new Float32Array(N * N), ns = new Uint8Array(N * N);
+  const N = sub + 1; const hs = new Float32Array(N * N), ns = new Uint8Array(N * N), cs = new Float32Array(N * N);
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
-    const u = i / sub, v = j / sub; const h = field(u, v); hs[j * N + i] = h;
-    const e = 0.18; const gx = (field(u + e, v) - field(u - e, v)) / (2 * e), gz = (field(u, v + e) - field(u, v - e)) / (2 * e);
-    const l = Math.hypot(gx, 1, gz); const nx = -gx / l, nz = -gz / l;
-    ns[j * N + i] = (clamp(Math.round((nx * 0.5 + 0.5) * 15), 0, 15) << 4) | clamp(Math.round((nz * 0.5 + 0.5) * 15), 0, 15);
+    const u = i / sub, v = j / sub; let h = field(u, v);
+    if (pressed) {
+      // hundimiento: media de las 4 subceldas que tocan el vértice; borde: la nieve apartada se levanta un poco alrededor
+      const gx = x * 8 + Math.round(u * 8), gz = z * 8 + Math.round(v * 8);
+      // filtro suave 4x4 (las 4 subceldas del vértice pesan más) para que las huellas sean redondeadas y no en dientes de sierra
+      let c = 0, wsum = 0, ring = 0; for (let b = -2; b <= 1; b++) for (let a = -2; a <= 1; a++) { const inner = a >= -1 && a <= 0 && b >= -1 && b <= 0; const v = snowCompAt(gx + a, gz + b); const wg = inner ? 1 : 0.3; c += v * wg; wsum += wg; if (!inner) ring = Math.max(ring, v); }
+      c /= wsum;
+      const lim = Math.max(0, h - 0.02); h -= Math.min(c, lim); h += Math.max(0, ring * 0.5 - c) * 0.18; cs[j * N + i] = Math.min(1, c / Math.max(0.05, lim)); // borde: la nieve apartada se levanta un poco
+    }
+    hs[j * N + i] = h;
   }
-  const V = (i, j) => { const k = j * N + i; B.v(x + i / sub, y + hs[k], z + j / sub, i / sub, j / sub, layer, fl | 2, sky, blk, 3, ns[k]); };
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { // normales suaves desde la malla de alturas
+    const k = j * N + i; let gx, gz;
+    if (pressed) { const hx0 = hs[j * N + Math.max(0, i - 1)], hx1 = hs[j * N + Math.min(sub, i + 1)], hz0 = hs[Math.max(0, j - 1) * N + i], hz1 = hs[Math.min(sub, j + 1) * N + i]; gx = (hx1 - hx0) / ((Math.min(sub, i + 1) - Math.max(0, i - 1)) / sub); gz = (hz1 - hz0) / ((Math.min(sub, j + 1) - Math.max(0, j - 1)) / sub); }
+    else { const u = i / sub, v = j / sub, e = 0.18; gx = (field(u + e, v) - field(u - e, v)) / (2 * e); gz = (field(u, v + e) - field(u, v - e)) / (2 * e); }
+    const l = Math.hypot(gx, 1, gz); const nx = -gx / l, nz = -gz / l;
+    ns[k] = (clamp(Math.round((nx * 0.5 + 0.5) * 15), 0, 15) << 4) | clamp(Math.round((nz * 0.5 + 0.5) * 15), 0, 15);
+  }
+  // la compactación viaja en el canal de AO (3 = nieve suelta, menor = pisada)
+  const V = (i, j) => { const k = j * N + i; B.v(x + i / sub, y + hs[k], z + j / sub, i / sub, j / sub, layer, fl | 2, sky, blk, 3 - cs[k] * 1.5, ns[k]); };
   for (let j = 0; j < sub; j++) for (let i = 0; i < sub; i++) { B.grow(); V(i, j + 1); V(i + 1, j + 1); V(i + 1, j); V(i, j); B.quad(false); }
   // laterales donde el terreno cae (cubren el hueco bajo el borde redondeado)
   const sides = [[0, 1, [1, 1], [1, 0]], [1, -1, [0, 0], [0, 1]], [4, LR, [0, 1], [1, 1]], [5, -LR, [1, 0], [0, 0]]];

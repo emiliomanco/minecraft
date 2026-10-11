@@ -42,18 +42,17 @@ function moveEntity(world, e, dx, dy, dz) {
   if (dx !== odx) e.vx = 0; if (dz !== odz) e.vz = 0; if (dy !== ody) e.vy = 0;
 }
 function blockAt(world, x, y, z) { return world.get(Math.floor(x), Math.floor(y), Math.floor(z)); }
-function liquidAt(world, x, y, z) { const b = blockAt(world, x, y, z); if (b <= 0) return 0; const d = REG[b]; return d.liquid || (d.inWater ? 1 : 0); }
+function liquidAt(world, x, y, z) { const b = blockAt(world, x, y, z); if (b <= 0) return 0; const d = REG[b]; const l = d.liquid || (d.inWater ? 1 : 0); if (!l) return 0; return (y - Math.floor(y)) < liquidSurface(world, Math.floor(x), Math.floor(y), Math.floor(z)) ? l : 0; } // con volumen parcial solo cuenta por debajo de la superficie
 function entityInBlock(world, e, pred) {
   const hw = e.w / 2 - 0.001;
   for (let x = Math.floor(e.x - hw); x <= Math.floor(e.x + hw); x++) for (let z = Math.floor(e.z - hw); z <= Math.floor(e.z + hw); z++) for (let y = Math.floor(e.y); y <= Math.floor(e.y + e.h - 0.01); y++) { const b = world.get(x, y, z); if (b > 0 && pred(REG[b], x, y, z)) return { x, y, z, b }; }
   return null;
 }
-function flowVec(world, x, y, z) {
-  const b = world.get(x, y, z); if (b !== ID.water && b !== ID.lava) return [0, 0];
-  const lv = j => { if (j <= 0) return -1; return j; };
-  const m0 = world.getMeta(x, y, z) & 7; let fx = 0, fz = 0;
-  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nb = world.get(x + dx, y, z + dz); if (nb === b) { const m = world.getMeta(x + dx, y, z + dz) & 7; fx += dx * (m - m0); fz += dz * (m - m0); } else if (nb === 0 || (nb > 0 && !REG[nb].solid)) { if (world.get(x + dx, y - 1, z + dz) === b) { fx += dx * 2; fz += dz * 2; } } }
-  const l = Math.hypot(fx, fz); return l ? [fx / l, fz / l] : [0, 0];
+function flowVec(world, x, y, z) { // corriente: del lado con más volumen hacia el que tiene menos (o hacia una caída)
+  const b = world.get(x, y, z); if (b !== ID.water && b !== ID.lava) return [0, 0]; const liq = REG[b].liquid;
+  const m0 = world.getMeta(x, y, z); if (m0 & LIQ_OCEAN) return [0, 0]; const a = liqAmt(m0); let fx = 0, fz = 0;
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const v = cellVol(world, x + dx, y, z + dz, liq); if (v < 0) continue; let d = a - v; if (v === 0 && cellVol(world, x + dx, y - 1, z + dz, liq) >= 0) d += 4; fx += dx * d; fz += dz * d; }
+  const l = Math.hypot(fx, fz); return l > 0.5 ? [fx / l, fz / l] : [0, 0];
 }
 
 // ------------------------------------------------------------ Entidad base
@@ -176,10 +175,17 @@ function explode(world, x, y, z, power, fire, source) {
       }
     }
   }
-  let debris = 0; const q = SETTINGS.particles ?? 2;
-  for (const [bx, by, bz, b] of broken.values()) {
-    if (b === ID.tnt) { world.set(bx, by, bz, 0); const t = new Projectile('tnt', world.dim, bx + 0.5, by, bz + 0.5, (Math.random() - 0.5) * 2, 2, (Math.random() - 0.5) * 2); t.fuse = 10 + Math.random() * 20; t.grav = 20; t.w = 0.98; t.h = 0.98; G.entities.set(t.id, t); continue; }
+  let debris = 0, flung = 0; const q = SETTINGS.particles ?? 2;
+  // los bloques más cercanos al centro salen volando primero
+  const order = [...broken.values()].sort((A, B) => ((A[0] - x) ** 2 + (A[1] - y) ** 2 + (A[2] - z) ** 2) - ((B[0] - x) ** 2 + (B[1] - y) ** 2 + (B[2] - z) ** 2));
+  for (const [bx, by, bz, b] of order) {
+    if (b === ID.tnt) { // la TNT sale despedida encendida (reacciones en cadena)
+      world.set(bx, by, bz, 0); let dx = bx + 0.5 - x, dy = by + 0.5 - y, dz = bz + 0.5 - z; const l = Math.hypot(dx, dy, dz) || 1; const sp = clamp(power * 5 / (0.5 + l * 0.5), 3, 16);
+      const t = new Projectile('tnt', world.dim, bx + 0.5, by, bz + 0.5, dx / l * sp, Math.max(dy / l, 0.3) * sp + 3, dz / l * sp); t.fuse = 12 + Math.random() * 25; t.grav = 20; t.w = 0.98; t.h = 0.98; G.entities.set(t.id, t); continue;
+    }
+    if (typeof debrisFromExplosion === 'function' && debrisFromExplosion(world, bx, by, bz, b, x, y, z, power, flung)) { flung++; world.set(bx, by, bz, 0); continue; }
     world.set(bx, by, bz, 0);
+    if (REG[b] && REG[b].trans === 2) { blockParticles(world, bx, by, bz, b, 18, 6); playSound('glass', bx, by, bz, 0.6); continue; } // cristal/hielo: esquirlas
     if (Math.random() < 1 / power) dropBlockItems(world, bx, by, bz, b, null, true);
     if (debris < [8, 25, 60][q] && Math.random() < 0.6) {
       debris++; const d = REG[b]; const dir = [bx + 0.5 - x, by + 0.5 - y + 0.8, bz + 0.5 - z]; const l = Math.hypot(...dir) || 1; const sp = 6 + Math.random() * 10;
@@ -201,6 +207,7 @@ function explode(world, x, y, z, power, fire, source) {
   }
   explosionFX(world.dim, x, y, z, power);
   if (G.net && G.net.role === 'host') netBroadcast({ t: 'fx', k: 'boom', d: world.dim, x, y, z, p: power });
+  if (typeof debrisNetFlush === 'function') debrisNetFlush(world.dim);
 }
 function explosionFX(dim, x, y, z, power) {
   playSound('explode', x, y, z, 1);
@@ -208,14 +215,17 @@ function explosionFX(dim, x, y, z, power) {
   const q = SETTINGS.particles ?? 2; const m = [0.35, 0.7, 1][q];
   const d = Math.hypot(G.player.x - x, G.player.y - y, G.player.z - z); G.shake = Math.max(G.shake, clamp(power * 2.5 / (d + 1), 0, 1.5));
   R.plights.push({ x, y: y + 1, z, r: power * 5, c: [3.5, 1.7, 0.6], life: 0.6, max: 0.6, kind: 'flash' });
-  // bola de fuego central
-  for (let i = 0; i < 70 * m * power / 4; i++) {
+  const vol = typeof boomVolumetric === 'function' && boomVolumetric(); if (vol) boomAdd(dim, x, y, z, power); // bola de fuego volumétrica
+  const smk = typeof smokeOn === 'function' && smokeOn();
+  if (smk) { for (let i = 0; i < 14; i++) { const a = Math.random() * 6.28, r = Math.random() * power * 0.5; vfxSmokeEmit(x + Math.cos(a) * r, y + 0.5 + Math.random() * power * 0.5, z + Math.sin(a) * r, power * 0.9, 1.2, 0); } }
+  // bola de fuego central (partículas; con la volumétrica solo unas lenguas sueltas)
+  for (let i = 0; i < 70 * m * power / 4 * (vol ? 0.15 : 1); i++) {
     const a = Math.random() * 6.28, b = Math.acos(Math.random() * 2 - 1), s = (1 + Math.random() * 3.5) * power / 4;
     const p = P_({ x: x + (Math.random() - 0.5), y: y + 0.5 + (Math.random() - 0.5), z: z + (Math.random() - 0.5), vx: Math.cos(a) * Math.sin(b) * s * 2, vy: Math.abs(Math.cos(b)) * s * 2 + 1.5, vz: Math.sin(a) * Math.sin(b) * s * 2, life: 0.7 + Math.random() * 0.8, size: (0.8 + Math.random() * 1.4) * power / 4 * 1.5, grow: 1.6 * power / 4, add: false, emis: 3.2, r: 1, g: 0.45 + Math.random() * 0.3, b: 0.12, a: 0.95, layer: TEX['smoke_' + ((Math.random() * 4) | 0)], rot: Math.random() * 6, vrot: (Math.random() - 0.5) * 2, drag: 2.2, soft: 1 });
     if (p) { p.cool = true; p.r0 = 1; p.g0 = p.g; p.b0 = 0.12; p.cr = 0.09; p.cg = 0.08; p.cb = 0.07; }
   }
-  // columna de humo oscuro y espeso
-  for (let i = 0; i < 55 * m * power / 4; i++) {
+  // columna de humo oscuro y espeso (con el humo volumétrico, muchas menos partículas)
+  for (let i = 0; i < 55 * m * power / 4 * (smk ? 0.25 : 1); i++) {
     const a = Math.random() * 6.28, r = Math.random() * power * 0.6;
     smoke(x + Math.cos(a) * r, y + Math.random() * power * 0.6, z + Math.sin(a) * r, { vx: Math.cos(a) * (1 + Math.random() * 3), vy: 1.5 + Math.random() * 3.5, vz: Math.sin(a) * (1 + Math.random() * 3), life: 3.5 + Math.random() * 4, size: (1.2 + Math.random() * 1.6) * power / 4 * 1.4, grow: 1.1, r: 0.11, g: 0.1, b: 0.095, a: 0.75, drag: 1.1, wind: true, soft: 1.5 });
   }
@@ -226,25 +236,36 @@ function explosionFX(dim, x, y, z, power) {
 }
 function fireFX(world, x, y, z, dt) {
   // las llamas en sí son volumétricas (drawFlames); aquí solo chispas, lenguas sueltas y humo
-  const q = SETTINGS.particles ?? 2; const k = [0.3, 0.7, 1][q];
-  if (Math.random() < 1.2 * dt * k) flame(x + 0.25 + Math.random() * 0.5, y + 0.5 + Math.random() * 0.5, z + 0.25 + Math.random() * 0.5, { size: 0.18 + Math.random() * 0.15, vy: 1.6 + Math.random(), life: 0.35, emis: 3 });
-  if (Math.random() < 2.2 * dt * k) smoke(x + 0.3 + Math.random() * 0.4, y + 1.3, z + 0.3 + Math.random() * 0.4, { r: 0.07, g: 0.065, b: 0.06, a: 0.5, size: 0.5 + Math.random() * 0.5, grow: 0.9, life: 3 + Math.random() * 3, vy: 1.4 + Math.random(), wind: true });
+  const q = SETTINGS.particles ?? 2; const k = [0.3, 0.7, 1][q]; const vol = typeof vfxVolumetric === 'function' && vfxVolumetric();
+  if (!vol && Math.random() < 1.2 * dt * k) flame(x + 0.25 + Math.random() * 0.5, y + 0.5 + Math.random() * 0.5, z + 0.25 + Math.random() * 0.5, { size: 0.18 + Math.random() * 0.15, vy: 1.6 + Math.random(), life: 0.35, emis: 3 });
+  if (!(typeof smokeOn === 'function' && smokeOn()) && Math.random() < 2.2 * dt * k) smoke(x + 0.3 + Math.random() * 0.4, y + 1.3, z + 0.3 + Math.random() * 0.4, { r: 0.07, g: 0.065, b: 0.06, a: 0.5, size: 0.5 + Math.random() * 0.5, grow: 0.9, life: 3 + Math.random() * 3, vy: 1.4 + Math.random(), wind: true });
   if (Math.random() < 3 * dt * k) P_({ x: x + 0.2 + Math.random() * 0.6, y: y + 0.3 + Math.random() * 0.6, z: z + 0.2 + Math.random() * 0.6, vx: (Math.random() - 0.5) * 1.2, vy: 1.5 + Math.random() * 2.5, vz: (Math.random() - 0.5) * 1.2, life: 0.8 + Math.random() * 1.2, size: 0.035 + Math.random() * 0.03, add: true, emis: 10, r: 1, g: 0.55 + Math.random() * 0.3, b: 0.15, layer: TEX.ember, grav: -0.8, drag: 0.6, collide: true });
 }
 // instancias de llama para un bloque de fuego: [x, y, z, ancho, alto, semilla, intensidad] por llama.
-// Las llamas suben por las caras de los bloques inflamables vecinos, así el fuego "abraza" lo que quema.
+// Las llamas se pegan a las caras de lo que se está quemando (suelo, paredes, techo) y crecen cuando hay
+// más fuego alrededor; con calidad alta se suman en un búfer de densidad, así un grupo de fuegos se ve
+// como un solo incendio en vez de muchos fueguitos.
+// llamas planas (calidad Rápida/Normal): [x, y, z, ancho, alto, semilla, intensidad, orientación] por llama.
+// En el suelo miran a la cámara; en las paredes que arden son planos pegados a la cara del bloque (no flotan).
 function fireFlames(w, x, y, z, out) {
-  const hs = (((x * 73856093) ^ (y * 19349663) ^ (z * 83492791)) >>> 0) % 1000 / 1000;
-  const below = w.get(x, y - 1, z); const bd = below > 0 ? REG[below] : null;
-  const fuel = bd && (bd.flammable || bd.infiniteFire) ? 1 : 0.8;
-  out.push(x + 0.5, y, z + 0.5, 1.15 * fuel, 1.75 * fuel, hs, 1);
-  out.push(x + 0.28 + hs * 0.1, y, z + 0.66, 0.7, 1.05 * fuel, hs + 0.37, 0.85);
-  out.push(x + 0.72, y, z + 0.32 - hs * 0.1, 0.7, 1.2 * fuel, hs + 0.71, 0.85);
-  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-    const n = w.get(x + dx, y, z + dz); if (!(n > 0 && REG[n].flammable)) continue;
-    for (let k = -1; k <= 1; k += 2) out.push(x + 0.5 + dx * 0.4 + dz * k * 0.24, y, z + 0.5 + dz * 0.4 + dx * k * 0.24, 0.65, 1.55, hs + 0.13 * (k + 3) + dx * 0.3 + dz * 0.5, 0.9);
+  const H = k => { let h = (x * 374761393 + y * 668265263 + z * 2147483647 + k * 1274126177) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+  let n = 0; for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) if ((dx || dy || dz) && w.get(x + dx, y + dy, z + dz) === ID.fire) n++;
+  const grow = Math.min(2.4, 1 + 0.16 * n), wide = Math.min(1.5, 1 + 0.05 * n), ink = 1 / (1 + 0.07 * n);
+  const fl = id => id > 0 && (REG[id].flammable || REG[id].infiniteFire);
+  const below = w.get(x, y - 1, z), floorFuel = fl(below);
+  const nf = floorFuel ? 3 : 2;
+  for (let k = 0; k < nf; k++) {
+    const u = 0.22 + 0.56 * H(k * 3 + 1), v = 0.22 + 0.56 * H(k * 3 + 2);
+    out.push(x + u, y - 0.02, z + v, (0.75 + 0.35 * H(k + 20)) * wide, (floorFuel ? 1.1 : 0.7) * (0.7 + 0.6 * H(k * 3 + 3)) * grow, H(k + 40), (floorFuel ? 1 : 0.75) * ink, 0);
   }
-  const up = w.get(x, y + 1, z); if (up > 0 && REG[up].flammable) out.push(x + 0.5, y + 0.55, z + 0.5, 1.0, 0.7, hs + 0.9, 0.7);
+  // paredes que arden: lámina de llamas sobre la propia cara (a 1 cm), a lo ancho de toda la celda
+  const sides = [[1, 0, 1], [-1, 0, 2], [0, 1, 3], [0, -1, 4]];
+  for (const [dx, dz, ori] of sides) {
+    if (!fl(w.get(x + dx, y, z + dz))) continue;
+    const fx = x + 0.5 + dx * 0.49, fz = z + 0.5 + dz * 0.49;
+    for (let k = 0; k < 2; k++) { const a = (k ? 0.24 : -0.24) + (H(ori * 7 + k + 60) - 0.5) * 0.12; out.push(fx + (dz ? a : 0), y - 0.02, fz + (dx ? a : 0), 0.62 * wide, 1.45 * (0.8 + 0.4 * H(ori * 5 + k + 80)) * grow, H(ori * 11 + k + 90), 0.95 * ink, ori); }
+  }
+  if (fl(w.get(x, y + 1, z))) out.push(x + 0.3 + 0.4 * H(101), y + 0.55, z + 0.3 + 0.4 * H(102), 1.0 * wide, 0.45, H(103), 0.7 * ink, 0);
 }
 // ------------------------------------------------------------ extintor
 function sprayExtinguisher(p) {
@@ -252,10 +273,12 @@ function sprayExtinguisher(p) {
   const dir = lookDir(p); const rx = Math.cos(p.yaw), rz = -Math.sin(p.yaw);
   const ox = p.x + dir[0] * 0.6 + rx * 0.25, oy = p.eye - 0.35 + dir[1] * 0.6, oz = p.z + dir[2] * 0.6 + rz * 0.25;
   const n = Math.max(1, Math.round(dt * [30, 50, 70][SETTINGS.particles ?? 2]));
+  // CO2 (1,98 kg/m³) es más denso que el aire (1,29 kg/m³): flotabilidad negativa g·(1,98−1,29)/1,98 ≈ 3,4 m/s² si fuera puro;
+  // al mezclarse con el aire baja, y con el arrastre del chorro cae despacio (~0,7 m/s) y se extiende por el suelo
   for (let i = 0; i < n; i++) {
     const sp = 11 + Math.random() * 5, j = 0.13;
     const vx = (dir[0] + (Math.random() - 0.5) * j * 2) * sp, vy = (dir[1] + (Math.random() - 0.5) * j * 2) * sp, vz = (dir[2] + (Math.random() - 0.5) * j * 2) * sp;
-    const q = P_({ x: ox, y: oy, z: oz, vx, vy, vz, life: 1.8 + Math.random() * 1.2, size: 0.35 + Math.random() * 0.25, grow: 3.2 + Math.random() * 1.2, r: 0.97, g: 0.98, b: 1.0, a: 0.62, drag: 2.2, grav: -0.15, collide: true, soft: 1.0, layer: TEX['smoke_' + ((Math.random() * 4) | 0)], rot: Math.random() * 6, vrot: (Math.random() - 0.5) * 1.5 });
+    const q = P_({ x: ox, y: oy, z: oz, vx, vy, vz, life: 1.8 + Math.random() * 1.2, size: 0.35 + Math.random() * 0.25, grow: 3.2 + Math.random() * 1.2, r: 0.97, g: 0.98, b: 1.0, a: 0.62, drag: 2.2, grav: 1.6, collide: true, soft: 1.0, layer: TEX['smoke_' + ((Math.random() * 4) | 0)], rot: Math.random() * 6, vrot: (Math.random() - 0.5) * 1.5 });
     if (q) { q.ext = true; q.dim = p.dim; }
   }
   if (Math.random() < dt * 4) playSound('fizz', ox, oy, oz, 0.25);
@@ -268,7 +291,7 @@ function extinguishAt(world, q) {
   for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
     const bx = Math.floor(q.x + dx * r), by = Math.floor(q.y + dy * r), bz = Math.floor(q.z + dz * r);
     const b = world.get(bx, by, bz);
-    if (b === ID.fire) { setBlockNet(world, bx, by, bz, 0); playSound('fizz', bx + 0.5, by + 0.5, bz + 0.5, 0.5); for (let i = 0; i < 3; i++) smoke(bx + Math.random(), by + 0.5, bz + Math.random(), { r: 0.85, g: 0.85, b: 0.85, a: 0.45, size: 0.6, life: 1.5 }); }
+    if (b === ID.fire) { setBlockNet(world, bx, by, bz, 0); playSound('fizz', bx + 0.5, by + 0.5, bz + 0.5, 0.5); if (typeof vfxSmokeEmit === 'function') vfxSmokeEmit(bx + 0.5, by + 0.6, bz + 0.5, 1.2, 0.4, 2); for (let i = 0; i < 3; i++) smoke(bx + Math.random(), by + 0.5, bz + Math.random(), { r: 0.85, g: 0.85, b: 0.85, a: 0.45, size: 0.6, life: 1.5 }); }
     else if (b === ID.campfire) { /* la fogata es un bloque, se queda */ }
   }
   if (Math.random() < 0.2) for (const e of G.entities.values()) if (e.fire > 0 && e.dim === q.dim && Math.abs(e.x - q.x) < r + 0.6 && Math.abs(e.z - q.z) < r + 0.6 && q.y > e.y - 0.5 && q.y < e.y + (e.h || 1.8) + 0.5) e.fire = 0;
@@ -284,6 +307,7 @@ function hurtEntity(e, amount, attacker, kx = 0, ky = 0, kz = 0, cause) {
   if (e.type === 'ender_dragon' && cause === 'explosion') amount *= 0.25;
   e.hp -= amount; e.hurtTime = 10; e.invul = 10;
   e.vx += kx; e.vy += ky; e.vz += kz;
+  if (typeof ragKnock === 'function' && e.hp > 0) ragKnock(e, kx, ky, kz);
   if (e.def) {
     if (e.def.ai === 'passive') e.panic = 60;
     if (attacker && (e.def.ai === 'neutral' || e.def.ai === 'enderman' || e.def.ai === 'golem' || e.def.ai === 'piglin' || e.def.hostile)) { e.target = attacker; e.angry = 600; }
@@ -336,6 +360,7 @@ class Player extends Entity {
     if (G.difficulty === 0 && attacker && attacker.def) return false;
     if (this.effects.resistance) amount *= 0.6;
     this.hp -= amount; this.invul = 10; this.hurtTime = 10; this.vx += kx; this.vy += ky; this.vz += kz; this.lastHurt = performance.now();
+    if (typeof ragKnock === 'function' && this.hp > 0) ragKnock(this, kx, ky, kz);
     this.exh += 0.1; playSound('hurt', this.x, this.y, this.z, 1); flashHurt();
     if (this.hp <= 0) {
       const tot = this.offhand && this.offhand.id === ID.totem ? 'off' : (this.held() && this.held().id === ID.totem ? 'main' : null);
@@ -346,6 +371,7 @@ class Player extends Entity {
   }
   die(cause, attacker) {
     this.dead = true; this.hp = 0;
+    if (typeof startRagdoll === 'function') { if (this.ragdoll) { this.ragdoll.alive = false; this.ragdoll.dur = 1e9; } else startRagdoll(this, null, false, 1e9); } // el cuerpo cae como muñeco hasta reaparecer
     const msgs = { fall: 'cayó desde muy alto', lava: 'intentó nadar en lava', fire: 'ardió hasta morir', drown: 'se ahogó', starve: 'murió de hambre', explosion: 'voló por los aires', void: 'cayó al vacío', cactus: 'murió pinchado' };
     const msg = this.name + ' ' + (msgs[cause] || (attacker && attacker.type ? 'fue asesinado por ' + mobName(attacker.type) : 'murió'));
     if (G.gameMode === 'survival' && !G.keepInventory) { for (const arr of [this.inv, this.armor]) for (let i = 0; i < arr.length; i++) if (arr[i]) { dropItem(this.dim, this.x, this.y + 1, this.z, arr[i], (Math.random() - 0.5) * 4, 3, (Math.random() - 0.5) * 4, 40); arr[i] = null; } }
@@ -364,7 +390,9 @@ function updatePlayerPhysics(p, dt, input) {
   const creative = G.gameMode === 'creative', spectator = G.gameMode === 'spectator';
   const feet = blockAt(w, p.x, p.y + 0.1, p.z), mid = blockAt(w, p.x, p.y + 0.9, p.z), eyeB = blockAt(w, p.x, p.eye, p.z);
   const liq = b => b > 0 ? (REG[b].liquid || (REG[b].inWater ? 1 : 0)) : 0;
-  p.inWater = liq(feet) === 1 || liq(mid) === 1; p.inLava = liq(feet) === 2 || liq(mid) === 2; p.eyeInWater = liq(eyeB) === 1; p.eyeInLava = liq(eyeB) === 2;
+  // con volumen parcial solo cuenta lo que está por debajo de la superficie (un charco de 1/8 no hace nadar)
+  const lf = liquidAt(w, p.x, p.y + 0.1, p.z), lm = liquidAt(w, p.x, p.y + 0.9, p.z), le = liquidAt(w, p.x, p.eye, p.z);
+  p.inWater = lf === 1 || lm === 1; p.inLava = lf === 2 || lm === 2; p.eyeInWater = le === 1; p.eyeInLava = le === 2;
   const climb = entityInBlock(w, p, d => d.climb);
   const web = entityInBlock(w, p, d => d.slow);
   const below = blockAt(w, p.x, p.y - 0.05, p.z); const bd = below > 0 ? REG[below] : null;
@@ -426,6 +454,7 @@ function updatePlayerPhysics(p, dt, input) {
     const vyBefore = p.vy; const wasGround = p.onGround;
     moveEntity(w, p, mx, p.vy * dt, mz);
     if (p.vy < 0 || vyBefore < 0) p.fallDist += Math.max(0, -vyBefore * dt);
+    if (vyBefore < -12 && typeof ragFallCheck === 'function' && G.gameMode !== 'creative' && G.gameMode !== 'spectator') ragFallCheck(p, vyBefore);
     if (p.onGround) {
       const land = blockAt(w, p.x, p.y - 0.05, p.z); const ld = land > 0 ? REG[land] : null;
       if (ld && ld.bouncy && !p.sneaking && vyBefore < -3) { p.vy = -vyBefore * 0.8; p.onGround = false; p.fallDist = 0; }
@@ -436,11 +465,7 @@ function updatePlayerPhysics(p, dt, input) {
   }
   // distancia caminada para animación / sonidos
   const hd = Math.hypot(p.x - p.px, p.z - p.pz); p.walk += hd; p.walkAmt = lerp(p.walkAmt, Math.min(1, hd / dt / 4.3), Math.min(1, dt * 10));
-  if (p.onGround && hd > 0 && G.gameMode !== 'spectator') { // huellas en la nieve: cada paso hunde la capa y deja un surco
-    p.snowAcc = (p.snowAcc || 0) + hd; const sx = Math.floor(p.x), sy = Math.floor(p.y - 0.05), sz = Math.floor(p.z);
-    if (p.snowAcc > 0.7 && w.get(sx, sy, sz) === ID.snow) { p.snowAcc = 0; const m = Math.max(1, w.getMeta(sx, sy, sz)); if (m > 2 && !p.flying) setBlockNet(w, sx, sy, sz, ID.snow, Math.max(2, m - (p.sneaking ? 1 : 2)));
-      for (let i = 0; i < 5; i++) P_({ x: p.x + (Math.random() - 0.5) * 0.5, y: p.y + 0.05, z: p.z + (Math.random() - 0.5) * 0.5, vx: (Math.random() - 0.5) * 1.5 - p.vx * 0.1, vy: 0.8 + Math.random(), vz: (Math.random() - 0.5) * 1.5 - p.vz * 0.1, life: 0.9, size: 0.18 + Math.random() * 0.12, grow: 0.3, layer: TEX.soft, r: 0.95, g: 0.97, b: 1, a: 0.6, grav: 4, drag: 2, soft: 0.3 }); }
-  }
+  // (las huellas en la nieve las deja snowStampTick para todas las entidades)
   if (p.onGround && hd > 0) { p.stepAcc = (p.stepAcc || 0) + hd; if (p.stepAcc > 1.8) { p.stepAcc = 0; playSound('step', p.x, p.y, p.z, 0.25, below); if (p.sprinting) p.exh += 0.1 * 1.8; } }
   if (p.y < -64) p.damage(4, 'void');
 }
@@ -480,6 +505,7 @@ function lineOfSight(w, x0, y0, z0, x1, y1, z1) {
 }
 function faceTo(e, tx, tz, rate = 0.3) { const ty = Math.atan2(-(tx - e.x), -(tz - e.z)); let d = ty - e.yaw; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; e.yaw += d * rate; }
 function walkTo(e, tx, tz, speed, dt) {
+  if (typeof navWalk === 'function' && navWalk(e, tx, tz, speed, dt)) return;
   const dx = tx - e.x, dz = tz - e.z; const l = Math.hypot(dx, dz); if (l < 0.3) { e.vx *= 0.5; e.vz *= 0.5; return; }
   faceTo(e, tx, tz); e.vx = lerp(e.vx, dx / l * speed, 0.3); e.vz = lerp(e.vz, dz / l * speed, 0.3);
 }
@@ -493,6 +519,8 @@ function entityTick(e, dt) {
   if (!(e instanceof Mob)) return;
   const d = e.def;
   if (e.hurtTime > 0) e.hurtTime--; if (e.invul > 0) e.invul--;
+  if (e.dead && e.deathTime === 0 && typeof startRagdoll === 'function' && !e.ragdoll) startRagdoll(e, null, false);
+  if (e.ragdoll && !e.dead) { if (e.fire > 0) { e.fire--; if (e.age % 20 === 0 && !d.fireImmune) hurtEntity(e, 1, null, 0, 0, 0, 'fire'); } return; } // en ragdoll: sin IA ni física propia
   if (e.dead) { e.deathTime++; if (e.deathTime === 1) mobDie(e); if (e.deathTime > (e.type === 'ender_dragon' ? 100 : 20)) e.removed = true; if (e.type === 'ender_dragon') { e.y += 0.1; if (e.deathTime % 3 === 0) explosionFX(e.dim, e.x + (Math.random() - 0.5) * 8, e.y + Math.random() * 4, e.z + (Math.random() - 0.5) * 8, 2); } return; }
   // medio
   const feet = liquidAt(w, e.x, e.y + 0.2, e.z); e.inWater = feet === 1; e.inLava = feet === 2;
@@ -512,7 +540,8 @@ function entityTick(e, dt) {
     if (!tgt && d.hostile && ai !== 'piglin') { tgt = nearestPlayer(e, ai === 'ghast' ? 64 : ai === 'warden' ? 24 : 18); if (tgt && ai !== 'ghast' && ai !== 'guardian' && !lineOfSight(w, e.x, e.y + e.h * 0.85, e.z, tgt.x, tgt.y + 1.5, tgt.z) && Math.random() < 0.8) tgt = null; e.target = tgt; }
   }
   if (ai === 'piglin') { if (!tgt) { const p = nearestPlayer(e, 12); if (p && !(p.armor ? p.armor.some(a => a && REG[a.id].armor && REG[a.id].armor.mat === 'golden') : false)) { e.target = p; tgt = p; e.angry = 400; } } }
-  if (ai === 'golem') { if (!tgt || tgt.type === 'player') { let best = null, bd = 256; for (const o of G.entities.values()) if (o instanceof Mob && o.def.hostile && !o.dead && o.dim === e.dim) { const dd = (o.x - e.x) ** 2 + (o.z - e.z) ** 2; if (dd < bd) { bd = dd; best = o; } } if (best) tgt = best; } }
+  if (ai === 'golem') { const pt = e.target; if (!tgt && pt && pt instanceof Mob && pt.def.hostile && !pt.dead && !pt.removed && pt.dim === e.dim && (pt.x - e.x) ** 2 + (pt.z - e.z) ** 2 < 900) tgt = pt; // sigue a su presa aunque rodee un muro
+    if (!tgt || tgt.type === 'player') { let best = null, bd = 256; for (const o of G.entities.values()) if (o instanceof Mob && o.def.hostile && !o.dead && o.dim === e.dim) { const dd = (o.x - e.x) ** 2 + (o.z - e.z) ** 2; if (dd < bd) { bd = dd; best = o; } } if (best) tgt = best; } if (tgt && tgt.type !== 'player') e.target = tgt; }
   if (ai === 'enderman') {
     if (!tgt) { for (const p of allPlayers()) { if (p.dim !== e.dim) continue; const dx = e.x - p.x, dy = e.y + 2.6 - (p.eye || p.y + 1.6), dz = e.z - p.z; const l = Math.hypot(dx, dy, dz); if (l > 40) continue; const lx = -Math.sin(p.yaw) * Math.cos(p.pitch), ly = Math.sin(p.pitch), lz = -Math.cos(p.yaw) * Math.cos(p.pitch); if ((dx * lx + dy * ly + dz * lz) / l > 0.985 && lineOfSight(w, p.x, p.y + 1.6, p.z, e.x, e.y + 2.6, e.z)) { e.target = p; e.angry = 600; tgt = p; playSound('enderman', e.x, e.y, e.z, 1); } } }
     if (e.inWater || ((G.rainLevel || 0) > 0.5 && w.dim === 'overworld')) { if (e.age % 10 === 0) { hurtEntity(e, 1, null); endermanTeleport(e); } }
@@ -572,8 +601,10 @@ function entityTick(e, dt) {
       const v = 22; const a = shoot('arrow', e.dim, e.x + dx / l * 0.6, e.y + 1.5, e.z + dz / l * 0.6, dx / l * v + (Math.random() - 0.5) * 1.5, dyy / l * v + l * 0.55 + (Math.random() - 0.5), dz / l * v + (Math.random() - 0.5) * 1.5, e); if (a) a.dmg = d.dmg; playSound('bow', e.x, e.y, e.z, 0.8);
     }
   } else {
-    // vagar
-    if (e.panic > 0) { e.panic--; if (!e.wander || e.age % 20 === 0) e.wander = [e.x + (Math.random() - 0.5) * 16, e.z + (Math.random() - 0.5) * 16]; walkTo(e, e.wander[0], e.wander[1], sp * 1.6, dt); moving = true; }
+    // vagar (o un objetivo: huir, ir a la cama, seguir la comida)
+    const pg = (ai === 'passive' && e.panic <= 0 && typeof passiveGoal === 'function') ? passiveGoal(e, w) : null;
+    if (pg) { const l = Math.hypot(pg.x - e.x, pg.z - e.z); if (l > pg.stop) { walkTo(e, pg.x, pg.z, sp * pg.sp, dt); moving = true; } else { e.vx *= 0.5; e.vz *= 0.5; if (pg.look) faceTo(e, pg.look.x, pg.look.z, 0.15); } e.wander = null; }
+    else if (e.panic > 0) { e.panic--; if (!e.wander || e.age % 20 === 0) e.wander = [e.x + (Math.random() - 0.5) * 16, e.z + (Math.random() - 0.5) * 16]; walkTo(e, e.wander[0], e.wander[1], sp * 1.6, dt); moving = true; }
     else {
       if (!e.wander && Math.random() < (ai === 'passive' ? 0.01 : 0.02)) e.wander = [e.x + (Math.random() - 0.5) * 14, e.z + (Math.random() - 0.5) * 14];
       if (e.wander) { walkTo(e, e.wander[0], e.wander[1], sp * 0.5, dt); moving = true; if (Math.hypot(e.wander[0] - e.x, e.wander[1] - e.z) < 0.6 || e.age % 200 === 0) e.wander = null; }
@@ -589,11 +620,12 @@ function entityTick(e, dt) {
     e.vx *= 0.8; e.vz *= 0.8;
     const fv = flowVec(w, Math.floor(e.x), Math.floor(e.y + 0.2), Math.floor(e.z)); e.vx += fv[0] * 0.3; e.vz += fv[1] * 0.3;
   } else if (!d.noGrav) e.vy -= 32 * dt;
-  if (moving && e.hc && e.onGround) e.vy = 8.5;
+  if (moving && e.hc && e.onGround && e.navT !== e.age) e.vy = 10; // salto de ~1,3 bloques con el paso de 0,05 s (8,5 no superaba un bloque)
   if (e.onGround) { e.vx *= 0.82; e.vz *= 0.82; }
   e.vy = Math.max(e.vy, -60);
   const vyB = e.vy; moveEntity(w, e, e.vx * dt, e.vy * dt, e.vz * dt);
   if (vyB < 0 && !e.onGround) e.fallDist += -vyB * dt;
+  if (vyB < -12 && typeof ragFallCheck === 'function' && !d.climb && !d.noGrav) ragFallCheck(e, vyB);
   if (e.onGround) { if (e.fallDist > 3.5 && !d.climb && e.type !== 'chicken' && e.type !== 'cat') hurtEntity(e, Math.floor(e.fallDist - 3), null, 0, 0, 0, 'fall'); e.fallDist = 0; }
   if (e.type === 'chicken' && !e.onGround && e.vy < -2) e.vy = -2;
   const hd = Math.hypot(e.x - e.px, e.z - e.pz); e.walk += hd * 1.5; e.walkAmt = lerp(e.walkAmt, Math.min(1, hd / dt / 3), 0.3);
@@ -703,4 +735,78 @@ function initEnd() {
   if (G.endInit) return; G.endInit = true;
   const w = G.worlds.end; for (const p of endPillars(w.seed)) { const c = spawnMob('end_crystal', 'end', p.x + 0.5, p.h + 2, p.z + 0.5); }
   if (!G.dragonKilled) { const d = spawnMob('ender_dragon', 'end', 0, 90, 40); }
+}
+
+// ------------------------------------------------------------ NIEVE: huellas y rastros (compactación por subceldas)
+// Cada columna con nieve pisada guarda 8x8 subceldas con la profundidad hundida (1/64 de bloque). Las entidades
+// que caminan dejan huellas con forma (botas alternando izquierda/derecha, patas, surcos), más hondas al caer.
+const SNOWST = { dirty: new Map(), decayT: 0 };
+const BIPED_MODELS = new Set(['steve', 'zombie', 'drowned', 'skeleton', 'villager', 'illager', 'piglin', 'enderman', 'golem', 'warden']);
+function snowCfg() { const o = SETTINGS.physics && SETTINGS.physics.snow; return Object.assign({ prints: true, depth: 1 }, o || {}); }
+// bloque de nieve donde pisa una entidad (null si no pisa nieve)
+function snowUnder(w, x, y, z) { const bx = Math.floor(x), bz = Math.floor(z); for (const yy of [Math.floor(y - 0.02), Math.floor(y - 0.2)]) if (w.get(bx, yy, bz) === ID.snow) return yy; return null; }
+// hunde una elipse (centro cx,cz; dirección a; largo/ancho en bloques; profundidad en bloques)
+function snowStamp(w, cx, cz, a, len, wid, depth) {
+  const fx = -Math.sin(a), fz = -Math.cos(a); const R = Math.max(len, wid) + 0.13; len += 0.04; wid += 0.04; // margen de media subcelda
+  const g0x = Math.floor((cx - R) * 8), g1x = Math.floor((cx + R) * 8), g0z = Math.floor((cz - R) * 8), g1z = Math.floor((cz + R) * 8);
+  for (let gz = g0z; gz <= g1z; gz++) for (let gx = g0x; gx <= g1x; gx++) {
+    const px = (gx + 0.5) / 8 - cx, pz = (gz + 0.5) / 8 - cz; const al = px * fx + pz * fz, sd = px * fz - pz * fx;
+    const ww = wid * (al > 0 ? 1 : 0.82); const r2 = (al / len) ** 2 + (sd / ww) ** 2; if (r2 > 1) continue; // talón algo más estrecho que la punta
+    const bx = gx >> 3, bz = gz >> 3; const c = w.chunk(bx >> 4, bz >> 4); if (!c) continue;
+    let y = -1; for (let yy = Math.min(w.H - 2, c.top + 1); yy > 0; yy--) { const b = c.blocks[(bx & 15) | ((bz & 15) << 4) | (yy << 8)]; if (b === ID.snow) { y = yy; break; } if (b && b !== ID.snow && REG[b] && REG[b].solid) break; }
+    if (y < 0) continue;
+    const hgt = Math.max(1, c.meta[(bx & 15) | ((bz & 15) << 4) | (y << 8)]) / 8; const maxD = hgt * 0.9 * 64;
+    const v = Math.min(maxD, depth * Math.sqrt(1 - r2 * 0.92) * 64) | 0; if (v <= 0) continue; // fondo plano y paredes redondeadas
+    if (!c.snowC) c.snowC = new Map(); const col = (bx & 15) | ((bz & 15) << 4); let arr = c.snowC.get(col); if (!arr) { arr = new Uint8Array(64); c.snowC.set(col, arr); }
+    const k = (gz & 7) * 8 + (gx & 7); if (arr[k] < v) { arr[k] = v; snowMarkDirty(w, c, bx & 15, bz & 15); }
+  }
+}
+function snowMarkDirty(w, c, lx, lz) {
+  SNOWST.dirty.set(c, w);
+  if (lx === 0) { const n = w.chunk(c.cx - 1, c.cz); if (n) SNOWST.dirty.set(n, w); } if (lx === 15) { const n = w.chunk(c.cx + 1, c.cz); if (n) SNOWST.dirty.set(n, w); }
+  if (lz === 0) { const n = w.chunk(c.cx, c.cz - 1); if (n) SNOWST.dirty.set(n, w); } if (lz === 15) { const n = w.chunk(c.cx, c.cz + 1); if (n) SNOWST.dirty.set(n, w); }
+}
+function snowPuff(x, y, z, n) { for (let i = 0; i < n; i++) P_({ x: x + (Math.random() - 0.5) * 0.4, y: y + 0.05, z: z + (Math.random() - 0.5) * 0.4, vx: (Math.random() - 0.5) * 1.2, vy: 0.5 + Math.random() * 0.8, vz: (Math.random() - 0.5) * 1.2, life: 0.8, size: 0.14 + Math.random() * 0.1, grow: 0.3, layer: TEX.soft, r: 0.95, g: 0.97, b: 1, a: 0.5, grav: 4, drag: 2, soft: 0.3 }); }
+function snowStepEntity(w, e, isPlayer) {
+  const yy = snowUnder(w, e.x, e.y, e.z); const was = e._snGround; e._snGround = e.onGround;
+  if (yy === null || !e.onGround) { e._snLast = null; e._snVy = e.vy; return; }
+  const dc = snowCfg().depth;
+  // aterrizaje: cráter (más hondo cuanto más rápido caía)
+  if (!was && (e._snVy || 0) < -6) { const k = Math.min(1, (-(e._snVy) - 6) / 14); snowStamp(w, e.x, e.z, e.yaw || 0, 0.32 + k * 0.2, 0.32 + k * 0.2, (0.12 + k * 0.25) * dc); snowPuff(e.x, e.y, e.z, 8); }
+  e._snVy = e.vy;
+  if (!e._snLast) { e._snLast = [e.x, e.z]; e._snFoot = 0; return; }
+  const dx = e.x - e._snLast[0], dz = e.z - e._snLast[1]; const dist = Math.hypot(dx, dz);
+  const d = MOB[e.type]; const model = isPlayer ? 'steve' : d && d.model; const biped = BIPED_MODELS.has(model);
+  const scale = isPlayer ? 1 : ((MODEL_SCALE[model] || 1) * ((d && d.scale) || 1));
+  const stride = (biped ? (e.sprinting ? 0.68 : 0.46) : 0.38) * Math.max(0.6, scale);
+  if (dist < stride) return;
+  if (dist > 6) { e._snLast = [e.x, e.z]; return; } // teletransporte: sin rastro
+  const a = Math.atan2(-dx, -dz); const steps = Math.floor(dist / stride); const sx0 = e._snLast[0], sz0 = e._snLast[1];
+  e._snLast = [sx0 + dx / dist * stride * steps, sz0 + dz / dist * stride * steps];
+  for (let k = 1; k <= steps; k++) snowPrint(w, e, sx0 + dx / dist * stride * k, sz0 + dz / dist * stride * k, a, isPlayer, model, biped, scale, k === steps);
+}
+function snowPrint(w, e, px, pz, a, isPlayer, model, biped, scale, last) {
+  const dc = snowCfg().depth;
+  const weight = isPlayer ? (e.sneaking ? 0.55 : 1) : biped ? (model === 'golem' || model === 'warden' ? 1.6 : 1) : model === 'chicken' || model === 'cat' ? 0.35 : 0.8;
+  const depth = 0.24 * weight * dc; // en nieve suelta el pie se hunde bastante
+  const sx = -Math.cos(a), sz = Math.sin(a); // vector lateral
+  if (biped) { const side = (e._snFoot = (e._snFoot || 0) ^ 1) ? 1 : -1; const o = 0.13 * scale; snowStamp(w, px + sx * o * side, pz + sz * o * side, a, 0.17 * scale, 0.09 * scale, depth); }
+  else if (model === 'slime' || model === 'magma') snowStamp(w, px, pz, a, 0.3 * scale, 0.3 * scale, depth);
+  else { // cuadrúpedos: patas delanteras y traseras alternas
+    const L = 0.28 * scale, o = 0.12 * scale; const fx = -Math.sin(a), fz = -Math.cos(a); const f = (e._snFoot = (e._snFoot || 0) ^ 1) ? 1 : -1;
+    snowStamp(w, px + fx * L + sx * o * f, pz + fz * L + sz * o * f, a, 0.09 * scale, 0.08 * scale, depth); snowStamp(w, px - fx * L - sx * o * f, pz - fz * L - sz * o * f, a, 0.09 * scale, 0.08 * scale, depth);
+  }
+  if (last && (isPlayer || Math.random() < 0.4)) snowPuff(px, e.y, pz, isPlayer ? 3 : 2);
+}
+function snowStampTick(dt) {
+  const w = G.world, p = G.player; if (!w || !p || !snowCfg().prints || R.q === 0) return;
+  if (!p.flying && G.gameMode !== 'spectator' && !p.ragdoll) snowStepEntity(w, p, true);
+  for (const e of G.entities.values()) { if (!(e instanceof Mob) || e.dead || e.dim !== p.dim || e.ragdoll) continue; if (Math.abs(e.x - p.x) > 48 || Math.abs(e.z - p.z) > 48) continue; snowStepEntity(w, e, false); }
+  // ragdolls tirados en la nieve: marca del cuerpo
+  if (typeof RAG !== 'undefined') for (const rd of RAG.list) { if (rd.dim !== p.dim || rd.world !== w) continue; for (const b of rd.bodies) { if (!b.contact) continue; const c = [b.p[0], b.p[1], b.p[2]]; const k = ((c[0] * 4) | 0) + ',' + ((c[2] * 4) | 0); if (b._sk === k) continue; b._sk = k; if (snowUnder(w, c[0], c[1] - 0.15, c[2]) !== null) snowStamp(w, c[0], c[2], 0, Math.max(b.half[0], b.half[2]) + 0.05, Math.max(b.half[0], b.half[2]) + 0.05, 0.12); } }
+  // volver a mallar los chunks pisados como mucho cada 0,3 s
+  const now = performance.now();
+  for (const [c, cw] of SNOWST.dirty) { if (now - (c._snMesh || 0) < 300) continue; c._snMesh = now; c.dirty = true; SNOWST.dirty.delete(c); }
+  // nevando: la nieve nueva va tapando las huellas poco a poco
+  SNOWST.decayT += dt; if (SNOWST.decayT > 1.5) { SNOWST.decayT = 0; if ((G.rainLevel || 0) > 0.3 && w.dim === 'overworld') { const pcx = Math.floor(p.x) >> 4, pcz = Math.floor(p.z) >> 4; for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) { const c = w.chunk(pcx + dx, pcz + dz); if (!c || !c.snowC || !c.snowC.size) continue; for (const [k, arr] of c.snowC) { let any = 0; for (let i = 0; i < 64; i++) { if (arr[i]) { arr[i] = Math.max(0, arr[i] - 1); any |= arr[i]; } } if (!any) c.snowC.delete(k); } SNOWST.dirty.set(c, w); } } }
 }
