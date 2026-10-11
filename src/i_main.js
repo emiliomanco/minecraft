@@ -371,21 +371,21 @@ function updateNametags() {
 // ------------------------------------------------------------ EFECTOS: emisores, clima, luces
 function emitterFX(w, dt) {
   const p = G.player; const pcx = Math.floor(p.x) >> 4, pcz = Math.floor(p.z) >> 4; const R2 = 2;
-  const fires = [], flames = [], cells = []; const vol = typeof vfxVolumetric === 'function' && vfxVolumetric() && vfxCfg().fire.on; const smk = typeof smokeOn === 'function' && smokeOn();
+  const fires = [], flames = [], cells = [], lavas = []; const vol = typeof vfxVolumetric === 'function' && vfxVolumetric() && vfxCfg().fire.on; const smk = typeof smokeOn === 'function' && smokeOn();
   for (let dx = -R2; dx <= R2; dx++) for (let dz = -R2; dz <= R2; dz++) {
     const c = w.chunk(pcx + dx, pcz + dz); if (!c || !c.emitters) continue; const E = c.emitters;
     for (let i = 0; i < E.length; i += 4) {
       const x = E[i], y = E[i + 1], z = E[i + 2], id = E[i + 3];
       if (id === ID.fire) { fireFX(w, x, y, z, dt); if (vol) { if (cells.length < 8 * 1500) vfxFireCell(w, x, y, z, cells); } else if (flames.length < 8 * 600) fireFlames(w, x, y, z, flames); fires.push([x + 0.5, y + 0.6, z + 0.5]); if (smk) vfxSmokeEmit(x + 0.5, y + 1.4, z + 0.5, 0.9 * dt, 0.9 * dt * 4, 0); }
       else if (id === ID.campfire) { if (vol) cells.push(x, y + 0.42, z, 0.85, 1, 0, 0, (x * 0.37 + z * 0.61) % 1); if (smk) vfxSmokeEmit(x + 0.5, y + 1.3, z + 0.5, 0.45 * dt, 2 * dt, 1); flames.push(x + 0.5, y + 0.3, z + 0.5, 0.8, 1.1, (x * 0.37 + z * 0.61) % 1, 0.95, 0, x + 0.35, y + 0.3, z + 0.6, 0.5, 0.75, (x * 0.71 + z * 0.13) % 1, 0.8, 0); if (!smk && Math.random() < 2.5 * dt) smoke(x + 0.5, y + 0.9, z + 0.5, { r: 0.22, g: 0.21, b: 0.2, a: 0.5, size: 0.5, grow: 0.5, life: 7, vy: 2.2, drag: 0.1, wind: true }); fires.push([x + 0.5, y + 0.5, z + 0.5]); }
-      else if (id === ID.lava) { if (Math.random() < dt * 0.15) { P_({ x: x + Math.random(), y: y + 0.95, z: z + Math.random(), vx: (Math.random() - 0.5) * 2, vy: 4 + Math.random() * 3, vz: (Math.random() - 0.5) * 2, life: 1.5, size: 0.07, add: true, emis: 8, r: 1, g: 0.55, b: 0.15, layer: TEX.ember, grav: 16, collide: true }); } if (Math.random() < dt * 0.05) smoke(x + 0.5, y + 1, z + 0.5, { r: 0.12, g: 0.11, b: 0.1, size: 0.4, life: 2, a: 0.35 }); if (Math.random() < 0.02) fires.push([x + 0.5, y + 1, z + 0.5, 1]); }
+      else if (id === ID.lava) { if (Math.random() < dt * 0.15) { P_({ x: x + Math.random(), y: y + 0.95, z: z + Math.random(), vx: (Math.random() - 0.5) * 2, vy: 4 + Math.random() * 3, vz: (Math.random() - 0.5) * 2, life: 1.5, size: 0.07, add: true, emis: 8, r: 1, g: 0.55, b: 0.15, layer: TEX.ember, grav: 16, collide: true }); } if (Math.random() < dt * 0.05) smoke(x + 0.5, y + 1, z + 0.5, { r: 0.12, g: 0.11, b: 0.1, size: 0.4, life: 2, a: 0.35 }); lavas.push([x + 0.5, y + 0.9, z + 0.5]); }
       else if (id === ID.torch || id === ID.soul_torch || id === ID.redstone_torch) { const m = w.getMeta(x, y, z); const o = m >= 1 && m <= 4 ? [[0, 0.32], [-0.32, 0], [0, -0.32], [0.32, 0]][m - 1] : [0, 0]; const ty = y + 0.72 + (m ? 0.2 : 0); if (Math.random() < dt * 4) { const soul = id === ID.soul_torch, red = id === ID.redstone_torch; P_({ x: x + 0.5 + o[0], y: ty, z: z + 0.5 + o[1], vy: 0.25, life: 0.4, size: 0.12, grow: -0.2, add: true, emis: 3, r: soul ? 0.4 : 1, g: soul ? 0.9 : red ? 0.15 : 0.6, b: soul ? 1 : 0.2, layer: TEX['flame_' + (Math.random() * 3 | 0)] }); } if (Math.random() < dt * 0.8) smoke(x + 0.5 + o[0], ty + 0.1, z + 0.5 + o[1], { size: 0.12, grow: 0.15, life: 1.5, a: 0.3, vy: 0.5, r: 0.2, g: 0.2, b: 0.2 }); }
       else if (id === ID.end_rod && Math.random() < dt) P_({ x: x + 0.5, y: y + 0.5 + Math.random() * 0.5, z: z + 0.5, vx: (Math.random() - 0.5) * 0.4, vy: (Math.random() - 0.5) * 0.4, vz: (Math.random() - 0.5) * 0.4, life: 2, size: 0.08, add: true, emis: 3, layer: TEX.spark, r: 1, g: 1, b: 1 });
       else if (id === ID.nether_portal && Math.random() < dt * 0.5) P_({ x: x + Math.random(), y: y + Math.random(), z: z + Math.random(), vx: (Math.random() - 0.5), vy: (Math.random() - 0.5), vz: (Math.random() - 0.5), life: 1.5, size: 0.08, add: true, emis: 3, layer: TEX.portal_p, r: 0.6, g: 0.2, b: 1 });
       else if (id === ID.cave_vines && Math.random() < dt * 0.05) P_({ x: x + 0.5, y: y, z: z + 0.5, vy: -1, life: 1, size: 0.05, add: true, emis: 2, layer: TEX.spark, r: 1, g: 0.8, b: 0.3, grav: 4 });
     }
   }
-  G._fires = fires; G._flames = flames; G._fireCells = cells;
+  G._fires = fires; G._flames = flames; G._fireCells = cells; G._lavas = lavas;
 }
 function weatherFX(w, dt) {
   const p = G.player; const rl = G.rainLevel || 0; if (AU.rain) AU.rain.gain.value = w.dim === 'overworld' ? rl * 0.12 * SETTINGS.vol : 0;
@@ -410,6 +410,9 @@ function updateLights(dt) {
   // llamas parpadeantes cercanas
   const fires = (G._fires || []).sort((a, b) => ((a[0] - p.x) ** 2 + (a[2] - p.z) ** 2) - ((b[0] - p.x) ** 2 + (b[2] - p.z) ** 2)).slice(0, 4);
   for (const f of fires) { const fl = 0.75 + Math.sin(t * 13 + f[0]) * 0.12 + Math.sin(t * 23 + f[2]) * 0.1; L.push({ x: f[0], y: f[1], z: f[2], r: 9, c: [2.2 * fl, 1.0 * fl, 0.35 * fl] }); }
+  // resplandor de la lava: las 3 superficies más cercanas, siempre las mismas (sin parpadeo aleatorio), con un pulso lento
+  const lv = (G._lavas || []); if (lv.length) { const d2 = a => (a[0] - p.x) ** 2 + (a[1] - p.y) ** 2 + (a[2] - p.z) ** 2; const near = lv.slice().sort((a, b) => d2(a) - d2(b)); const used = [];
+    for (const a of near) { if (used.length >= 3) break; if (d2(a) > 26 * 26) break; if (used.some(u => (u[0] - a[0]) ** 2 + (u[2] - a[2]) ** 2 < 9)) continue; used.push(a); const k = 0.9 + 0.1 * Math.sin(t * 1.7 + a[0] * 1.3 + a[2] * 0.7); L.push({ x: a[0], y: a[1] + 0.6, z: a[2], r: 8, c: [2.0 * k, 0.72 * k, 0.18 * k] }); } }
 }
 // ------------------------------------------------------------ superposiciones y mano
 function drawOverlays(trans) {

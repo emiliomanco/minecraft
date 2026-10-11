@@ -60,7 +60,9 @@ vec3 dynLights(vec3 p){ vec3 s=vec3(0); for(int i=0;i<8;i++){ if(i>=u_nl) break;
 uniform float u_camSky;
 vec3 applyFog(vec3 col, vec3 p, float sv){
   float d=length(p);
-  if(u_under>0.5){ float f=1.0-exp(-d*0.09); return mix(col,u_fogCol,clamp(f,0.0,1.0)); }
+  if(u_under>0.5){ // bajo el agua: el rojo se apaga primero; la luz dispersada viene del sol y del cielo y se oscurece con la profundidad
+    vec3 sT=vec3(0.47,0.105,0.09); vec3 Tr=exp(-sT*d*0.85); vec3 Lw=(u_sunCol*0.45+u_amb*1.2)*vec3(0.106,0.62,0.74)*0.8*(0.15+0.85*u_camSky*u_camSky);
+    return col*Tr+Lw*(1.0-Tr); }
   float f=smoothstep(u_fog.x,u_fog.y,d);
   // la niebla solo toma el color del cielo (y el brillo del sol) donde hay cielo visible
   float vis=min(sv,u_camSky);
@@ -177,7 +179,7 @@ void main(){
     // polvo: relieve esponjoso en dos escalas (grumos y cristales); la compactada queda lisa
     vec3 wp=v_world*vec3(6.5,6.5,6.5); float f0=vnoise(wp.xz+wp.y), fx=vnoise(wp.xz+wp.y+vec2(0.17,0.0)), fz=vnoise(wp.xz+wp.y+vec2(0.0,0.17));
     vec3 wq=v_world*19.0; float g0=vnoise(wq.xz+wq.y), gx2=vnoise(wq.xz+wq.y+vec2(0.17,0.0)), gz2=vnoise(wq.xz+wq.y+vec2(0.0,0.17));
-    N=normalize(N+(vec3(f0-fx,0.0,f0-fz)*1.3+vec3(g0-gx2,0.0,g0-gz2)*0.5)*(1.0-snowComp*0.85));
+    N=normalize(N+(vec3(f0-fx,0.0,f0-fz)*1.3+vec3(g0-gx2,0.0,g0-gz2)*0.5)*(1.0-snowComp*0.85)*(1.0-smoothstep(0.02,0.15,length(fwidth(v_world))))); // lejos: liso (sin ruido de sal)
   }
   float sky=v_lit.x, blk=v_lit.y, ao=v_lit.z; ao=mix(0.32,1.0,ao); ao*=ao; if(snowS && surf) ao=mix(1.0,0.85,snowComp)*mix(0.75,1.0,v_lit.z>0.6?1.0:v_lit.z/0.6);
   vec3 V=normalize(v_pos);
@@ -197,14 +199,19 @@ void main(){
   amb+=vec3(0.008+0.03*u_bright);
   vec3 torch=vec3(1.0,0.6,0.3)*pow(blk,2.3)*1.7 + dynLights(v_pos);
   col=alb*(u_sunCol*direct+(amb+torch)*ao);
-  if(snowS){ // nieve: dispersión subsuperficial (sombras azuladas), compactación y destellos de cristales
-    col=mix(col,col*vec3(0.78,0.88,1.12),clamp(1.0-direct*1.4,0.0,1.0));
-    col*=mix(1.0,0.8,snowComp); // compactada: más densa y algo más gris
+  if(snowS){ // nieve: dispersión subsuperficial, compactación y destellos de cristales
+    // la luz que entra cerca del terminador pierde el rojo dentro de la nieve (azulado); a pleno sol es blanca.
+    // En sombra solo llega la luz del cielo (u_amb), que ya es azul con cielo despejado y gris si está nublado
+    float NdLs=dot(N,u_sunDir); vec3 term=mix(vec3(0.72,0.86,1.0),vec3(1.0),smoothstep(0.0,0.45,NdLs));
+    col=alb*(u_sunCol*direct*term+(amb+torch)*ao);
+    col*=mix(vec3(1.0),vec3(0.8,0.89,1.0),snowComp*0.6); // los huecos de las pisadas brillan algo azulados
     vec3 R=reflect(V,N);
-    col+=u_sunCol*direct*pow(max(dot(R,u_sunDir),0.0),30.0)*(0.06+0.2*snowComp); // la compactada brilla más, como hielo
-    // destellos: cada cristal tiene su propia orientación; solo brilla el que refleja el sol hacia el ojo (cambian al moverse)
-    vec3 cell=floor(v_world*36.0); float hh=hash13(cell);
-    if(hh>0.93){ vec3 rn=normalize(N+(vec3(hash13(cell+1.7),hash13(cell+4.1),hash13(cell+8.3))-0.5)*0.9); float g=pow(max(dot(reflect(V,rn),u_sunDir),0.0),400.0); col+=u_sunCol*direct*g*9.0*(1.0-snowComp)*(1.0-smoothstep(12.0,32.0,length(v_pos))); }
+    col+=u_sunCol*direct*pow(max(dot(R,u_sunDir),0.0),30.0)*(0.05+0.2*snowComp); // la compactada brilla más, como hielo
+    // destellos: cristales sueltos que solo brillan cuando reflejan el sol hacia el ojo (cambian al moverse, no con el tiempo)
+    float fpS=length(fwidth(v_world)); float cs=exp2(ceil(log2(max(fpS*4.0,0.03))));
+    vec3 cc=floor(v_world/cs), cf=fract(v_world/cs); vec3 rr=vec3(hash13(cc),hash13(cc+17.17),hash13(cc+41.3));
+    if(rr.x<0.06){ vec3 fn=normalize(N+(rr-0.5)*0.8); vec3 Hs=normalize(u_sunDir-V); float g=pow(max(dot(fn,Hs),0.0),800.0)*(1.0-smoothstep(0.1,0.35,length(cf-0.25-0.5*rr.yzx)));
+      col+=u_sunCol*direct*g*25.0*(1.0-snowComp)*(1.0-smoothstep(0.08,0.5,fpS)); }
   }
   if((fl&256u)!=0u && (fl&128u)==0u) col=alb*2.4+col*0.3;
   if((fl&128u)!=0u){
@@ -219,7 +226,7 @@ void main(){
 #if Q==0
   col=aces(col*u_expo); col=pow(col,vec3(1.0/2.2));
 #endif
-  o=vec4(col,u_pass>0.5?alpha:1.0);
+  o=vec4(col,u_pass>0.5?alpha:((fl&128u)!=0u && (fl&32768u)!=0u ? 2.0 : 1.0));
 }`;
 const FS_WATER = `#version 300 es
 ${'##COMMON##'}
@@ -262,8 +269,8 @@ void main(){
     vec2 flw=v_flow*1.6; float spd=length(flw); agit=clamp(spd*0.7,0.0,1.0);
     float f0=fract(t*0.22), f1=fract(t*0.22+0.5); float w0=1.0-abs(1.0-2.0*f0);
     vec2 g=mix(wgrad(p-flw*f1*2.0+0.37,t,fpw),wgrad(p-flw*f0*2.0,t,fpw),w0);
-    g*=ocean?1.5:mix(0.35,2.0,agit); // un lago tranquilo es casi un espejo; un río o una caída se agita
-    if(ocean){ vec3 ow=oceanWave(p); g+=ow.yz*0.85; float A=0.16+u_rain*0.55; crest=smoothstep(0.55,1.0,ow.x/(A*1.6)); }
+    g*=ocean?(0.55+1.1*vnoise(p*0.045+vec2(t*0.01,0.0))):mix(0.35,2.0,agit); // un lago tranquilo es casi un espejo; un río o una caída se agita; el mar cambia por zonas
+    if(ocean){ vec3 ow=oceanWave(p); g+=ow.yz*0.6*clamp(2.0-fpw*0.6,0.3,1.0); float A=0.16+u_rain*0.55; crest=smoothstep(0.55,1.0,ow.x/(A*1.6)); }
     // ondas de interacción: lo que se mueve en el agua deja estela y anillos (simulación en GPU)
     if(u_ripRect.w>0.5){ vec2 ru=(p-u_ripRect.xy)*u_ripRect.z; if(ru.x>0.004&&ru.x<0.996&&ru.y>0.004&&ru.y<0.996){ float e=1.0/256.0; float h0=texture(u_ripple,ru).r; float hx=texture(u_ripple,ru+vec2(e,0.0)).r; float hz=texture(u_ripple,ru+vec2(0.0,e)).r; g+=vec2(hx-h0,hz-h0)*10.0; rip=abs(h0); agit=max(agit,clamp(rip*1.5,0.0,1.0)); } }
     if(u_rain>0.05) g+=rainRip(p,t)*u_rain*smoothstep(0.75,0.95,sky)*clamp(2.0-fpw*20.0,0.0,1.0);
@@ -280,8 +287,8 @@ void main(){
   float NdV=clamp(dot(-V,N),0.0,1.0);
   float vis=smoothstep(0.5,0.93,sky); float sh=u_dim==0?getShadow(v_pos,vec3(0,1,0))*vis:0.0;
   // agua de mar: azul y clara; agua dulce: algo más verdosa y turbia (absorción y dispersión por bloque)
-  vec3 sA=ocean?vec3(0.45,0.07,0.03):vec3(0.45,0.10,0.08);
-  vec3 sS=ocean?vec3(0.02,0.035,0.06):vec3(0.05,0.07,0.07);
+  vec3 sA=ocean?vec3(0.45,0.075,0.035):vec3(0.60,0.16,0.19);
+  vec3 sS=ocean?vec3(0.015,0.03,0.048):vec3(0.014,0.024,0.017);
   vec3 sT=sA+sS;
   vec3 lightIn=u_amb*0.9*(0.2+0.8*sky*sky)+u_sunCol*sh*0.8+vec3(1.0,0.6,0.3)*pow(v_lit.y,2.3)*0.35+dynLights(v_pos)*0.3;
   vec3 R=reflect(V,N); if(!under && R.y<0.02) R.y=0.02+abs(R.y)*0.2; R=normalize(R);
@@ -308,7 +315,7 @@ void main(){
     if(sh>0.0){ vec3 Ts=refract(-u_sunDir,vec3(0.0,1.0,0.0),0.75); vec2 cp=fp.xz+Ts.xz/max(-Ts.y,0.3)*vDepth; float cau=caustic(cp*0.23); float foc=exp(-vDepth*0.25)*smoothstep(0.0,0.3,vDepth); behind*=1.0+(cau*2.2-0.5)*foc*sh*clamp(2.0-fpw*6.0,0.0,1.0); }
   }
   vec3 Tv=exp(-sT*rayLen);
-  vec3 ins=lightIn*(sS/sT)*exp(-sT*0.5*vDepth)*(1.0-Tv)*1.6;
+  vec3 ins=lightIn*(sS/sT)*exp(-sT*0.5*vDepth)*(1.0-Tv)*1.15;
   refr=behind*Tv+ins;
   edge=smoothstep(0.0,0.045,vDepth); // línea de contacto suave en la orilla (no un borde de cristal)
   // reflejos de pantalla (lo que hay sobre el agua se refleja de verdad)
@@ -590,6 +597,9 @@ void main(){
   if(u_under>0.5) uv+=vec2(sin(uv.y*20.0+u_time*2.0),cos(uv.x*20.0+u_time*1.7))*0.0025;
   if(u_nether>0.5) uv+=vec2(sin(uv.y*12.0+u_time*3.0),0.0)*0.0008;
   if(u_shock.w>0.0){ vec2 d=uv-u_shock.xy; d.x*=1.6; float r=length(d); float ring=exp(-pow((r-u_shock.z)/0.03,2.0)); uv-=d/max(r,1e-3)*ring*u_shock.w*vec2(1.0/1.6,1.0); } // onda expansiva
+  // calor sobre la lava: el aire tiembla justo encima (la lava deja una marca en el alfa de la escena)
+  if(u_q>=2.0){ float heat=0.0; for(int i=1;i<=6;i++){ float a=texture(u_scene,uv-vec2(0.0,float(i)*0.011)).a; heat+=step(1.5,a)*(1.0-float(i)/7.0); }
+    if(heat>0.0){ vec2 q=uv*vec2(38.0,22.0); uv+=vec2(sin(q.y+u_time*5.0)+sin(q.x*0.7-u_time*3.1),cos(q.x*1.3+u_time*4.2))*0.0011*min(heat,2.0); } }
   vec3 c=texture(u_scene,uv).rgb;
   if(u_q>=1.0) c+=texture(u_bloom,uv).rgb*0.14;
   if(u_q>=2.0 && u_sunVis>0.001){
@@ -1002,15 +1012,15 @@ function drawParticles(list) {
   for (const p of list) { if (p.add) addL.push(p); else { p._d = (p.x - cam[0]) ** 2 + (p.y - cam[1]) ** 2 + (p.z - cam[2]) ** 2; alphaL.push(p); } }
   alphaL.sort((a, b) => b._d - a._d);
   const fill = arr => { const D = R.partData; let n = 0; for (const p of arr) { if (n >= 8192) break; const o = n * 16; const lf = p.light ? 0.3 + p.light[0] / 15 * 0.7 : 1; D[o] = p.x - cam[0]; D[o + 1] = p.y - cam[1]; D[o + 2] = p.z - cam[2]; D[o + 3] = p.size; D[o + 4] = p.r * lf; D[o + 5] = p.g * lf; D[o + 6] = p.b * lf; D[o + 7] = p.aCur ?? p.a; const uv = p.uv; if (uv) { D[o + 8] = uv[0]; D[o + 9] = uv[1]; D[o + 10] = uv[2]; D[o + 11] = uv[3]; } else { D[o + 8] = 0; D[o + 9] = 0; D[o + 10] = 1; D[o + 11] = 1; } D[o + 12] = p.rot || 0; D[o + 13] = p.fluid ? -1 - p.fluid : p.layer; D[o + 14] = p.emis || 0; D[o + 15] = p.soft || (uv ? 0 : 0.01); n++; } gl.bindBuffer(gl.ARRAY_BUFFER, R.partBuf); gl.bufferSubData(gl.ARRAY_BUFFER, 0, D, 0, n * 16); return n; };
-  let n = fill(alphaL); if (n) { gl.uniform1f(P.u.u_add, 0); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n); }
-  n = fill(addL); if (n) { gl.uniform1f(P.u.u_add, 1); gl.blendFunc(gl.ONE, gl.ONE); gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n); }
+  let n = fill(alphaL); if (n) { gl.uniform1f(P.u.u_add, 0); gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE); gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n); }
+  n = fill(addL); if (n) { gl.uniform1f(P.u.u_add, 1); gl.blendFuncSeparate(gl.ONE, gl.ONE, gl.ZERO, gl.ONE); gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n); }
   gl.depthMask(true); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 }
 function drawFlames(F) {
   const gl = R.gl; const P = R.progs.flame; if (!P) return; gl.useProgram(P.p); setCommon(P);
   gl.uniformMatrix4fv(P.u.u_vp, false, R.vp); const v = R.view; gl.uniform3f(P.u.u_camFwd, -v[2], -v[6], -v[10]);
   if (R.q >= 2 && R.fbo.copy) { gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, R.fbo.copy.depth); gl.uniform1i(P.u.u_depthCopy, 3); gl.uniform2f(P.u.u_res, R.w, R.h); gl.uniform1f(P.u.u_near, R.near); gl.uniform1f(P.u.u_far, R.far); gl.uniform1f(P.u.u_soft, 1); } else if (P.u.u_soft) gl.uniform1f(P.u.u_soft, 0);
-  gl.bindVertexArray(R.partVAO); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE); gl.depthMask(false); gl.disable(gl.CULL_FACE);
+  gl.bindVertexArray(R.partVAO); gl.enable(gl.BLEND); gl.blendFuncSeparate(gl.ONE, gl.ONE, gl.ZERO, gl.ONE); gl.depthMask(false); gl.disable(gl.CULL_FACE);
   const D = R.partData, cam = R.cam; let n = 0;
   for (let i = 0; i + 7 < F.length && n < 8192; i += 8) { const o = n * 16; D[o] = F[i] - cam[0]; D[o + 1] = F[i + 1] - cam[1]; D[o + 2] = F[i + 2] - cam[2]; D[o + 3] = F[i + 3]; D[o + 4] = F[i + 4]; D[o + 5] = F[i + 5]; D[o + 6] = F[i + 6]; D[o + 7] = F[i + 7]; n++; }
   if (!n) { gl.depthMask(true); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); return; }

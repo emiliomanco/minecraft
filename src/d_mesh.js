@@ -188,6 +188,7 @@ function meshRegion(world, ch) {
         const F = FACE[f]; const nri = ri + F.n[0] + F.n[1] * LRR + F.n[2] * LR; const nb = regB[nri];
         if (T_FULL[nb]) continue;
         if (nb === id && (d.cullSelf || (!fancy && d.leaves))) continue;
+        if (f === 2 && nb === ID.snow && !d.trans) continue;
         const nd = REG[nb]; if (nd && d.trans === 2 && nd.trans === 2 && d.cullSelf && nd.cullSelf && nb !== id && d.portal) continue;
         const layer = faceLayer(d, f, meta); emitFace(B, f, x, y, z, ri, nri, layer, flags, tintFor(d, f, ch, x, z), d.log && meta ? 1 : 0, 0, 1, null);
       }
@@ -315,11 +316,13 @@ function surfContrib(j, kind) {
     const u = j + LRR; return isLiqB(regB[u], kind) && !liqFall(u) ? 1 + liqLevelUp(u, kind) : NaN;
   }
   const sl = snowLevel(j); if (sl > -9) return sl;
-  if (airLike(b)) { const dn = j - LRR, sd = snowLevel(dn); if (sd > -9) return sd - 1; const dd = REG[regB[dn]]; return dd && dd.solid ? SURF_SHORE[SK_SNOW] : 0; }
+  if (airLike(b)) { const dn = j - LRR, sd = snowLevel(dn); if (sd > -9) return sd - 1; const dd = REG[regB[dn]]; return dd && dd.solid ? SURF_SHORE[SK_SNOW] : 0.05; }
   const su = snowLevel(j + LRR); return su > -9 ? 1 + su : NaN;
 }
-function surfCorner(kind, ri, dx, dz) { let s = 0, n = 0; for (let b = dz - 1; b <= dz; b++) for (let a = dx - 1; a <= dx; a++) { const v = surfContrib(ri + a + b * LR, kind); if (v === v) { s += v; n++; } } return n ? s / n : 0; }
-function surfEdge(kind, ri, off) { const v0 = surfContrib(ri, kind), v1 = surfContrib(ri + off, kind); return v1 === v1 ? (v0 + v1) * 0.5 : v0; }
+// orilla seca (aire sobre suelo, al nivel de la celda): en el agua manda, la superficie llega al suelo (menisco fino)
+function dryShore(j, kind) { if (kind !== SK_WATER) return false; const b = regB[j]; if (!airLike(b)) return false; const dn = REG[regB[j - LRR]]; return !!dn && dn.solid; }
+function surfCorner(kind, ri, dx, dz) { let s = 0, n = 0, dry = false; for (let b = dz - 1; b <= dz; b++) for (let a = dx - 1; a <= dx; a++) { const j = ri + a + b * LR; if (dryShore(j, kind)) dry = true; const v = surfContrib(j, kind); if (v === v) { s += v; n++; } } return dry ? SURF_SHORE[kind] + 0.01 : n ? s / n : 0; }
+function surfEdge(kind, ri, off) { if (dryShore(ri + off, kind)) return SURF_SHORE[kind] + 0.01; const v0 = surfContrib(ri, kind), v1 = surfContrib(ri + off, kind); return v1 === v1 ? (v0 + v1) * 0.5 : v0; }
 const _SP = new Float32Array(9), _SO = new Float32Array(3);
 // rejilla de control 3x3: [fila z][columna x]
 function surfCtrl(kind, ri) { const P = _SP; P[0] = surfCorner(kind, ri, 0, 0); P[1] = surfEdge(kind, ri, -LR); P[2] = surfCorner(kind, ri, 1, 0); P[3] = surfEdge(kind, ri, -1); P[4] = surfContrib(ri, kind); P[5] = surfEdge(kind, ri, 1); P[6] = surfCorner(kind, ri, 0, 1); P[7] = surfEdge(kind, ri, LR); P[8] = surfCorner(kind, ri, 1, 1); return P; }
@@ -336,7 +339,7 @@ const surfFlow = (fx, fz) => (clamp(Math.round(fx), -63, 63) + 64) | ((clamp(Mat
 // ondulación suave de la nieve (en coordenadas de mundo, continua entre celdas)
 function vnoise2(x, z, sd) { const ix = Math.floor(x), iz = Math.floor(z); let fx = x - ix, fz = z - iz; fx = fx * fx * (3 - 2 * fx); fz = fz * fz * (3 - 2 * fz);
   const a = hash2(sd, ix, iz), b = hash2(sd, ix + 1, iz), c = hash2(sd, ix, iz + 1), d = hash2(sd, ix + 1, iz + 1); return a + (b - a) * fx + (c - a) * fz + (a - b - c + d) * fx * fz; }
-function snowUndul(wx, wz) { return (vnoise2(wx / 2.3 + wz * 0.12, wz / 2.3, 71) - 0.5) * 0.07 + (vnoise2(wx / 0.9, wz / 0.9, 73) - 0.5) * 0.025; } // dunas suaves algo estiradas por el viento
+function snowUndul(wx, wz) { return vnoise2(wx / 2.3 + wz * 0.12, wz / 2.3, 71) * 0.06 + vnoise2(wx / 0.9, wz / 0.9, 73) * 0.022; } // dunas suaves algo estiradas por el viento
 // luz por vértice: interpolación bilineal entre los centros de las 4 celdas vecinas (sin cuadros de luz en superficies lisas)
 const _SL = new Float32Array(2);
 function surfLight(ri, u, v) {
@@ -347,7 +350,14 @@ function surfLight(ri, u, v) {
   return _SL;
 }
 // escalón tapado por nieve (bloque sólido con nieve encima): su borde no debe asomar por la rampa de nieve
-function snowStepTop(c) { if (snowLevel(c) > -9) return -9; const d = REG[regB[c]]; if (!d || !d.solid) return -9; return snowLevel(c + LRR) > -9 ? 1 : -9; }
+// escalón tapado por la nieve junto a un vértice: arriba del bloque de este nivel (1) o del de abajo (0). Mirar los dos niveles hace que
+// dos celdas a distinta altura que comparten un vértice pidan la misma altura absoluta (sin grietas en las terrazas)
+function snowStepTop(c) {
+  const sl = snowLevel(c);
+  if (sl <= -9) { const d = REG[regB[c]]; if (d && d.solid && snowLevel(c + LRR) > -9) return 1; }
+  if (sl > -9) { const d = REG[regB[c - LRR]]; if (d && d.solid && snowLevel(c - LRR) <= -9) return 0; }
+  return -9;
+}
 // celda de agua o lava: superficie suave, chorro cayendo (tubo) o nada (si está cubierta)
 function emitLiquidCell(B, kind, x, y, z, ri, ch, bxw, bzw) {
   if (liqFall(ri)) { emitFall(B, kind, x, y, z, ri, ch); return; }
@@ -358,6 +368,8 @@ function liqTint(kind, ri, ch, x, z) { if (kind !== SK_WATER) return 0; const m 
 // superficie de una celda (agua, lava o nieve)
 function emitSurface(B, kind, x, y, z, ri, ch, bxw, bzw) {
   const P = surfCtrl(kind, ri);
+  // agua bajo una capa de hielo: plana, pegada al hielo (sin promediar con el agua abierta de al lado, que la haría subir dentro del bloque)
+  if (kind === SK_WATER) { const ub = regB[ri + LRR]; if (ub === ID.ice || ub === ID.packed_ice) P.fill(0.995); }
   let mn = P[0], mx = P[0]; for (let k = 1; k < 9; k++) { if (P[k] < mn) mn = P[k]; if (P[k] > mx) mx = P[k]; }
   const flat = mx - mn < 0.012;
   const snow = kind === SK_SNOW;
@@ -470,16 +482,24 @@ function emitFall(B, kind, x, y, z, ri, ch) {
   let ox = 0, oz = 0; if (!isLiqB(regB[up], kind)) { for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const j = ri + dx + dz * LR; if (isLiqB(regB[j], kind) && !liqFall(j)) { ox += dx * 0.32; oz += dz * 0.32; } } }
   const upFall = isLiqB(regB[up], kind) && liqFall(up); const topR = upFall ? r : r * 0.85;
   const sky = Math.max(regS[ri], regS[up]), blk = regL[ri]; const fl = F_SURF | 0 | (kind === SK_WATER ? F_WATER : (F_LAVA | F_EMIS)); const tint = kind === SK_WATER ? 201 : 0;
-  const Rw = 3; B.ensure((S + 1) * (Rw + 1), S * Rw * 6); const base = B.nv;
-  for (let k = 0; k <= S; k++) {
-    const a = k / S * Math.PI * 2; const ca = Math.cos(a), sa = Math.sin(a);
+  // chorros contiguos (una orilla larga que se vacía): la sección se estira hacia el vecino y se convierte en una cortina continua
+  const st = [liqFall(ri + 1), liqFall(ri - 1), liqFall(ri + LR), liqFall(ri - LR)];
+  const curtX = st[0] || st[1], curtZ = st[2] || st[3]; const S2 = (curtX || curtZ) && MESH_QUALITY >= 1 ? S + 4 : S;
+  const Rw = 3; B.ensure((S2 + 1) * (Rw + 1), S2 * Rw * 6); const base = B.nv;
+  for (let k = 0; k <= S2; k++) {
+    const a = k / S2 * Math.PI * 2; const ca = Math.cos(a), sa = Math.sin(a);
     for (let rr = 0; rr <= Rw; rr++) {
       const f = rr / Rw; const yy = y0 + (y1 - y0) * f; const tf = f * f; const cx = 0.5 + ox * tf, cz = 0.5 + oz * tf; const rad = r + (topR - r) * f;
-      B.v(x + cx + ca * rad, y + yy, z + cz + sa * rad, ca * 0.5 + 0.5, sa * 0.5 + 0.5, surfFlow(0, 0), fl, sky, blk, Math.min(15, drop + f) / 5, tint);
+      // semiejes por cuadrante: hasta el borde de la celda si hay chorro al lado (cortina), más fina en perpendicular
+      const hx = ca > 0 ? (st[0] ? 0.53 : rad) : (st[1] ? 0.53 : rad), hz = sa > 0 ? (st[2] ? 0.53 : rad) : (st[3] ? 0.53 : rad);
+      const thin = (curtX && !curtZ) ? [1, 0.7] : (curtZ && !curtX) ? [0.7, 1] : [1, 1];
+      const ex = hx * (curtZ && !st[ca > 0 ? 0 : 1] ? thin[0] : 1), ez = hz * (curtX && !st[sa > 0 ? 2 : 3] ? thin[1] : 1);
+      const nl = Math.hypot(ca / Math.max(ex, 0.05), sa / Math.max(ez, 0.05)) || 1; const nx = ca / Math.max(ex, 0.05) / nl, nz = sa / Math.max(ez, 0.05) / nl;
+      B.v(x + cx + ca * ex, y + yy, z + cz + sa * ez, nx * 0.5 + 0.5, nz * 0.5 + 0.5, surfFlow(0, 0), fl, sky, blk, Math.min(15, drop + f) / 5, tint);
     }
   }
   const I = B.idx; let q = B.ni;
-  for (let k = 0; k < S; k++) for (let rr = 0; rr < Rw; rr++) { const a = base + k * (Rw + 1) + rr, b = a + 1, c = a + Rw + 2, d = a + Rw + 1; I[q++] = a; I[q++] = b; I[q++] = c; I[q++] = a; I[q++] = c; I[q++] = d; }
+  for (let k = 0; k < S2; k++) for (let rr = 0; rr < Rw; rr++) { const a = base + k * (Rw + 1) + rr, b = a + 1, c = a + Rw + 2, d = a + Rw + 1; I[q++] = a; I[q++] = b; I[q++] = c; I[q++] = a; I[q++] = c; I[q++] = d; }
   B.ni = q;
 }
 // profundidad pisada (bloques) en la subcelda (gx,gz) del chunk, en unidades de 1/8 de bloque (puede salir 1 columna fuera)
