@@ -7612,7 +7612,7 @@ function setupInput() {
     let mx = e.movementX, my = e.movementY; const now = performance.now();
     // Chrome a veces envía un salto enorme al bloquear el puntero o al cruzar el borde de la ventana: se descarta
     if (now - (INPUT.lockT || 0) < 120 || Math.abs(mx) > 700 || Math.abs(my) > 700) return;
-    const mag = Math.hypot(mx, my), avg = INPUT.mAvg || 0; if (mag > 250 && mag > avg * 6 + 200) { INPUT.mAvg = avg * 0.9 + 20; return; } INPUT.mAvg = avg * 0.8 + mag * 0.2;
+    const mag = Math.hypot(mx, my), avg = INPUT.mAvg || 0; if (mag > 450 && mag > avg * 8 + 350) { INPUT.mAvg = avg * 0.9 + 30; return; } // solo saltos absurdos: los giros rápidos pasan INPUT.mAvg = avg * 0.8 + mag * 0.2;
     p.yaw -= mx * s; p.pitch -= my * s * (SETTINGS.invertY ? -1 : 1); p.pitch = clamp(p.pitch, -1.5705, 1.5705);
   });
   window.addEventListener('wheel', e => { if (G.mode !== 'game' || UI.open || G.paused) return; if (held('zoom')) { G.zoomMag = clamp((G.zoomMag || 4) * (e.deltaY > 0 ? 0.85 : 1.18), 2, 12); return; } const p = G.player; p.sel = (p.sel + (e.deltaY > 0 ? 1 : 8)) % 9; updateHUD(); showItemName(); }, { passive: true });
