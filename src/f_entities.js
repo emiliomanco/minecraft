@@ -505,6 +505,7 @@ function lineOfSight(w, x0, y0, z0, x1, y1, z1) {
 }
 function faceTo(e, tx, tz, rate = 0.3) { const ty = Math.atan2(-(tx - e.x), -(tz - e.z)); let d = ty - e.yaw; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; e.yaw += d * rate; }
 function walkTo(e, tx, tz, speed, dt) {
+  if (typeof navWalk === 'function' && navWalk(e, tx, tz, speed, dt)) return;
   const dx = tx - e.x, dz = tz - e.z; const l = Math.hypot(dx, dz); if (l < 0.3) { e.vx *= 0.5; e.vz *= 0.5; return; }
   faceTo(e, tx, tz); e.vx = lerp(e.vx, dx / l * speed, 0.3); e.vz = lerp(e.vz, dz / l * speed, 0.3);
 }
@@ -539,7 +540,8 @@ function entityTick(e, dt) {
     if (!tgt && d.hostile && ai !== 'piglin') { tgt = nearestPlayer(e, ai === 'ghast' ? 64 : ai === 'warden' ? 24 : 18); if (tgt && ai !== 'ghast' && ai !== 'guardian' && !lineOfSight(w, e.x, e.y + e.h * 0.85, e.z, tgt.x, tgt.y + 1.5, tgt.z) && Math.random() < 0.8) tgt = null; e.target = tgt; }
   }
   if (ai === 'piglin') { if (!tgt) { const p = nearestPlayer(e, 12); if (p && !(p.armor ? p.armor.some(a => a && REG[a.id].armor && REG[a.id].armor.mat === 'golden') : false)) { e.target = p; tgt = p; e.angry = 400; } } }
-  if (ai === 'golem') { if (!tgt || tgt.type === 'player') { let best = null, bd = 256; for (const o of G.entities.values()) if (o instanceof Mob && o.def.hostile && !o.dead && o.dim === e.dim) { const dd = (o.x - e.x) ** 2 + (o.z - e.z) ** 2; if (dd < bd) { bd = dd; best = o; } } if (best) tgt = best; } }
+  if (ai === 'golem') { const pt = e.target; if (!tgt && pt && pt instanceof Mob && pt.def.hostile && !pt.dead && !pt.removed && pt.dim === e.dim && (pt.x - e.x) ** 2 + (pt.z - e.z) ** 2 < 900) tgt = pt; // sigue a su presa aunque rodee un muro
+    if (!tgt || tgt.type === 'player') { let best = null, bd = 256; for (const o of G.entities.values()) if (o instanceof Mob && o.def.hostile && !o.dead && o.dim === e.dim) { const dd = (o.x - e.x) ** 2 + (o.z - e.z) ** 2; if (dd < bd) { bd = dd; best = o; } } if (best) tgt = best; } if (tgt && tgt.type !== 'player') e.target = tgt; }
   if (ai === 'enderman') {
     if (!tgt) { for (const p of allPlayers()) { if (p.dim !== e.dim) continue; const dx = e.x - p.x, dy = e.y + 2.6 - (p.eye || p.y + 1.6), dz = e.z - p.z; const l = Math.hypot(dx, dy, dz); if (l > 40) continue; const lx = -Math.sin(p.yaw) * Math.cos(p.pitch), ly = Math.sin(p.pitch), lz = -Math.cos(p.yaw) * Math.cos(p.pitch); if ((dx * lx + dy * ly + dz * lz) / l > 0.985 && lineOfSight(w, p.x, p.y + 1.6, p.z, e.x, e.y + 2.6, e.z)) { e.target = p; e.angry = 600; tgt = p; playSound('enderman', e.x, e.y, e.z, 1); } } }
     if (e.inWater || ((G.rainLevel || 0) > 0.5 && w.dim === 'overworld')) { if (e.age % 10 === 0) { hurtEntity(e, 1, null); endermanTeleport(e); } }
@@ -599,8 +601,10 @@ function entityTick(e, dt) {
       const v = 22; const a = shoot('arrow', e.dim, e.x + dx / l * 0.6, e.y + 1.5, e.z + dz / l * 0.6, dx / l * v + (Math.random() - 0.5) * 1.5, dyy / l * v + l * 0.55 + (Math.random() - 0.5), dz / l * v + (Math.random() - 0.5) * 1.5, e); if (a) a.dmg = d.dmg; playSound('bow', e.x, e.y, e.z, 0.8);
     }
   } else {
-    // vagar
-    if (e.panic > 0) { e.panic--; if (!e.wander || e.age % 20 === 0) e.wander = [e.x + (Math.random() - 0.5) * 16, e.z + (Math.random() - 0.5) * 16]; walkTo(e, e.wander[0], e.wander[1], sp * 1.6, dt); moving = true; }
+    // vagar (o un objetivo: huir, ir a la cama, seguir la comida)
+    const pg = (ai === 'passive' && e.panic <= 0 && typeof passiveGoal === 'function') ? passiveGoal(e, w) : null;
+    if (pg) { const l = Math.hypot(pg.x - e.x, pg.z - e.z); if (l > pg.stop) { walkTo(e, pg.x, pg.z, sp * pg.sp, dt); moving = true; } else { e.vx *= 0.5; e.vz *= 0.5; if (pg.look) faceTo(e, pg.look.x, pg.look.z, 0.15); } e.wander = null; }
+    else if (e.panic > 0) { e.panic--; if (!e.wander || e.age % 20 === 0) e.wander = [e.x + (Math.random() - 0.5) * 16, e.z + (Math.random() - 0.5) * 16]; walkTo(e, e.wander[0], e.wander[1], sp * 1.6, dt); moving = true; }
     else {
       if (!e.wander && Math.random() < (ai === 'passive' ? 0.01 : 0.02)) e.wander = [e.x + (Math.random() - 0.5) * 14, e.z + (Math.random() - 0.5) * 14];
       if (e.wander) { walkTo(e, e.wander[0], e.wander[1], sp * 0.5, dt); moving = true; if (Math.hypot(e.wander[0] - e.x, e.wander[1] - e.z) < 0.6 || e.age % 200 === 0) e.wander = null; }
@@ -616,7 +620,7 @@ function entityTick(e, dt) {
     e.vx *= 0.8; e.vz *= 0.8;
     const fv = flowVec(w, Math.floor(e.x), Math.floor(e.y + 0.2), Math.floor(e.z)); e.vx += fv[0] * 0.3; e.vz += fv[1] * 0.3;
   } else if (!d.noGrav) e.vy -= 32 * dt;
-  if (moving && e.hc && e.onGround) e.vy = 8.5;
+  if (moving && e.hc && e.onGround && e.navT !== e.age) e.vy = 10; // salto de ~1,3 bloques con el paso de 0,05 s (8,5 no superaba un bloque)
   if (e.onGround) { e.vx *= 0.82; e.vz *= 0.82; }
   e.vy = Math.max(e.vy, -60);
   const vyB = e.vy; moveEntity(w, e, e.vx * dt, e.vy * dt, e.vz * dt);

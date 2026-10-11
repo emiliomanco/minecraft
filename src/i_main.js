@@ -289,6 +289,7 @@ function gameTick() {
     }
   }
   // entidades
+  if (typeof processPathQueue === 'function') processPathQueue();
   for (const [k, e] of G.entities) { if (e.removed) { G.entities.delete(k); continue; } if (e.proxy || e.remotePlayer) continue; if (client && !(e instanceof Projectile && e.type === 'eye')) continue; try { entityTick(e, 0.05); } catch (err) { console.error(err); e.removed = true; } }
   if (!client) {
     const dims = new Set([p.dim]); for (const e of G.entities.values()) if (e.remotePlayer) dims.add(e.dim);
