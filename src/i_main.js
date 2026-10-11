@@ -32,6 +32,7 @@ function playSound(type, x, y, z, vol = 1, extra) {
     case 'pop': tone(t, 0.08, 900 + Math.random() * 500, 1600, 0.15 * vol); break;
     case 'explode': { const g = noiseHit(t, 2.2, 400, 0.4, 1.2 * vol, 'lowpass'); tone(t, 1.2, 60, 25, 0.9 * vol, 'sine'); noiseHit(t, 2.5, 1200, 0.5, 0.25 * vol, 'lowpass', AU.verb); break; }
     case 'fuse': noiseHit(t, 1.4, 5000, 0.5, 0.25 * vol, 'highpass'); break;
+    case 'splash': noiseHit(t, 0.5, 900, 0.6, 0.45 * vol, 'lowpass'); noiseHit(t + 0.02, 0.35, 3200, 0.9, 0.25 * vol); for (let i = 0; i < 4; i++) noiseHit(t + 0.08 + Math.random() * 0.25, 0.08, 2500 + Math.random() * 2500, 3, 0.08 * vol); break;
     case 'fizz': noiseHit(t, 0.6, 5000, 0.7, 0.3 * vol, 'highpass'); break;
     case 'bow': tone(t, 0.18, 500, 180, 0.3 * vol, 'triangle'); noiseHit(t, 0.1, 2000, 1, 0.2 * vol); break;
     case 'throw': noiseHit(t, 0.25, 1500, 0.6, 0.25 * vol); break;
@@ -336,6 +337,8 @@ function gameFrame(dt) {
   const tfov = SETTINGS.fov * (p.sprinting && !zoomOn ? 1.12 : 1) * (p.spy ? 0.14 : 1) * (p.bowT > 0 ? 1 - Math.min(1, p.bowT) * 0.15 : 1) * (p.gliding ? 1.1 : 1) / G.zoomCur;
   G.fovCur = lerp(G.fovCur || tfov, tfov, Math.min(1, dt * 10));
   R.yawCam = yaw; const alpha = pausedSP ? 1 : acc / 50;
+  // ondas del agua (estelas, salpicaduras, chorros): fuentes y un paso de simulación en GPU antes de dibujar
+  if (typeof ripUpdate === 'function') { if (!pausedSP) ripSources(w, dt); ripUpdate(pausedSP ? 0 : dt); }
   renderWorld(w, eye, yaw, pitch, {
     fov: G.fovCur, under, roll, bob, biome: w.biomeAt(Math.floor(p.x), Math.floor(p.z)),
     drawEntities: () => { drawAllEntities(p.dim, alpha, perspective > 0 && G.gameMode !== 'spectator'); },

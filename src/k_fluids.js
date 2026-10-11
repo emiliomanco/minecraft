@@ -169,7 +169,7 @@ function bucketPour(w, x, y, z, liq) {
 function liquidSurface(world, x, y, z) {
   const b = world.get(x, y, z); if (b <= 0) return 0; const d = REG[b]; if (d.inWater) return 1; if (!d.liquid) return 0;
   const up = world.get(x, y + 1, z); if (up > 0 && REG[up] && REG[up].liquid === d.liquid) return 1;
-  const m = world.getMeta(x, y, z); if (m & LIQ_FALL) return 1; return liqAmt(m) / 8 * 0.9;
+  const m = world.getMeta(x, y, z); if (m & LIQ_FALL) return 1; return liqAmt(m) / 8 * 0.92; // igual que la superficie dibujada (liqTopH)
 }
 // depuración: suma de volumen (en octavos) de un líquido en una caja
 function fluidVolume(w, x0, y0, z0, x1, y1, z1, liq) { let s = 0; for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) { const b = w.get(x, y, z); if (isLiq(b) && REG[b].liquid === liq) s += liqAmt(w.getMeta(x, y, z)); } return s; }

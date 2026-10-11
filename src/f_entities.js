@@ -4,10 +4,11 @@
 const G = { tick: 0, time: 1000, worlds: null, world: null, player: null, entities: new Map(), mode: 'menu', gameMode: 'survival', difficulty: 2, seed: 0, net: null, particles: [], rain: 0, rainLevel: 0, rainTimer: 12000, containers: {}, spawned: new Set(), dragonKilled: false, endInit: false, shake: 0, paused: false };
 let nextEid = 1;
 // ------------------------------------------------------------ colisiones
+const SNOW_FIRM = 0.4; // parte de la capa de nieve que aguanta peso (el resto es polvo que se aparta)
 function blockBoxes(id, meta, x, y, z, out, world) {
   if (id < 0) { out.push([x, y, z, x + 1, y + 1, z + 1]); return; }
   const d = REG[id]; if (!d || !d.solid) return;
-  if (d.render === 'snow') { const h = (Math.max(1, meta) - 1) / 8; if (h > 0) out.push([x, y, z, x + 1, y + h, z + 1]); return; }
+  if (d.render === 'snow') { const h = Math.max(1, meta) / 8 * SNOW_FIRM; if (h > 0.01) out.push([x, y, z, x + 1, y + h, z + 1]); return; } // nieve suelta: los pies se hunden
   if (d.shape) { if (d.shape === 'gate' && (meta & 4)) return; const tall = d.shape === 'fence' || d.shape === 'wall' || d.shape === 'gate'; for (const b of shapeBoxes(d, meta, (dx, dz) => world ? world.get(x + dx, y, z + dz) : 0, true)) out.push([x + b[0] / 16, y + b[1] / 16, z + b[2] / 16, x + b[3] / 16, y + (tall ? 24 : b[4]) / 16, z + b[5] / 16]); return; }
   if (d.box) { const b = d.box; const top = d.fenceH ? d.fenceH : b[4] / 16; out.push([x + b[0] / 16, y + b[1] / 16, z + b[2] / 16, x + b[3] / 16, y + top, z + b[5] / 16]); return; }
   if (d.id === ID.cactus) { out.push([x + 1 / 16, y, z + 1 / 16, x + 15 / 16, y + 1, z + 15 / 16]); return; }
@@ -426,6 +427,7 @@ function updatePlayerPhysics(p, dt, input) {
   let speed = p.sneaking ? 1.31 : p.sprinting ? 5.61 : 4.317; if (p.effects.speed) speed *= 1.4;
   if (input.useHeld) speed *= 0.2;
   if (web) speed *= 0.25; if (bd && bd.slowWalk) speed *= 0.45;
+  if (bd && bd.render === 'snow' && p.onGround) { const sink = Math.max(1, w.getMeta(Math.floor(p.x), Math.floor(p.y - 0.05), Math.floor(p.z))) / 8 * (1 - SNOW_FIRM); speed *= 1 - clamp(sink / 0.55, 0, 1) * 0.42; }
   if (p.inWater || p.inLava) {
     const sw = p.inLava ? 1.0 : (input.sprint && input.f ? 5.6 : 2.2);
     p.vx = lerp(p.vx, wx * sw, Math.min(1, dt * 5)); p.vz = lerp(p.vz, wz * sw, Math.min(1, dt * 5));
@@ -615,13 +617,15 @@ function entityTick(e, dt) {
   }
   // físicas
   if (e.inWater || e.inLava) {
+    e.fallDist = 0; // el agua frena la caída: sin daño al tocar fondo después
     if (d.swim) { if (tgt) e.vy = lerp(e.vy, clamp(tgt.y - e.y, -1, 1) * 2, 0.1); else e.vy *= 0.9; }
+    else if (e.inLava) { e.vy = lerp(e.vy, 0.7, 0.08); } // la lava es densa y viscosa: se flota despacio, hundido a medias
     else { e.vy = lerp(e.vy, 2.5, 0.2); }
-    e.vx *= 0.8; e.vz *= 0.8;
+    const dr = e.inLava ? 0.55 : 0.8; e.vx *= dr; e.vz *= dr;
     const fv = flowVec(w, Math.floor(e.x), Math.floor(e.y + 0.2), Math.floor(e.z)); e.vx += fv[0] * 0.3; e.vz += fv[1] * 0.3;
   } else if (!d.noGrav) e.vy -= 32 * dt;
   if (moving && e.hc && e.onGround && e.navT !== e.age) e.vy = 10; // salto de ~1,3 bloques con el paso de 0,05 s (8,5 no superaba un bloque)
-  if (e.onGround) { e.vx *= 0.82; e.vz *= 0.82; }
+  if (e.onGround) { const fr = w.get(Math.floor(e.x), Math.floor(e.y - 0.05), Math.floor(e.z)) === ID.snow ? 0.7 : 0.82; e.vx *= fr; e.vz *= fr; } // en nieve profunda cuesta avanzar
   e.vy = Math.max(e.vy, -60);
   const vyB = e.vy; moveEntity(w, e, e.vx * dt, e.vy * dt, e.vz * dt);
   if (vyB < 0 && !e.onGround) e.fallDist += -vyB * dt;
@@ -641,7 +645,7 @@ function runTickTimers() { for (let i = TICK_TIMERS.length - 1; i >= 0; i--) if 
 function itemTick(e, dt, w) {
   if (e.pickup > 0) e.pickup--;
   const inW = liquidAt(w, e.x, e.y + 0.1, e.z);
-  if (inW) { e.vy = lerp(e.vy, 1, 0.2); e.vx *= 0.9; e.vz *= 0.9; const fv = flowVec(w, Math.floor(e.x), Math.floor(e.y + 0.1), Math.floor(e.z)); e.vx += fv[0] * 0.5; e.vz += fv[1] * 0.5; if (inW === 2 && !(e.stack.id === ID.netherite_ingot || REG[e.stack.id].name.startsWith('netherite'))) { e.removed = true; smoke(e.x, e.y, e.z, { size: 0.3 }); return; } }
+  if (inW) { const bx = Math.floor(e.x), bz = Math.floor(e.z); let by = Math.floor(e.y + 0.1); while (liquidAt(w, e.x, by + 1.02, e.z) === inW && by < e.y + 4) by++; const sy = by + liquidSurface(w, bx, by, bz); const tgt = clamp((sy - 0.12 - e.y) * (inW === 2 ? 2 : 7), -2.5, 2.5) + Math.sin(e.age * 0.12 + e.id) * 0.15; e.vy = lerp(e.vy, tgt, inW === 2 ? 0.08 : 0.22); e.vx *= inW === 2 ? 0.7 : 0.9; e.vz *= inW === 2 ? 0.7 : 0.9; const fv = flowVec(w, Math.floor(e.x), Math.floor(e.y + 0.1), Math.floor(e.z)); e.vx += fv[0] * 0.5; e.vz += fv[1] * 0.5; if (inW === 2 && !(e.stack.id === ID.netherite_ingot || REG[e.stack.id].name.startsWith('netherite'))) { e.removed = true; smoke(e.x, e.y, e.z, { size: 0.3 }); return; } }
   else e.vy -= 20 * dt;
   if (e.onGround) { e.vx *= 0.6; e.vz *= 0.6; }
   // dentro de un bloque sólido: empujar arriba

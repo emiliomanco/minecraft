@@ -2333,7 +2333,7 @@ function buildRegion(world, ch) {
     for (let lx = 1; lx < LR - 1; lx++) {
       const wx = bx + lx; const c = world.chunk(wx >> 4, ccz); if (!c) continue;
       const base = (wx & 15) | ((wz & 15) << 4); const cb = c.blocks, cm = c.meta;
-      let ri = (LR + lz) * LR + lx; const near = lx >= LP && lx <= LP + 17 && lz >= LP && lz <= LP + 17;
+      let ri = (LR + lz) * LR + lx; const near = lx >= LP - 1 && lx <= LP + 18 && lz >= LP - 1 && lz <= LP + 18; // meta del chunk ±2 columnas (superficies suaves)
       for (let y = 0; y < H; y++, ri += LRR) { const v = cb[base | (y << 8)]; regB[ri] = v; if (near && v) regM[ri] = cm[base | (y << 8)]; }
     }
   }
@@ -2389,6 +2389,10 @@ class MeshBuf {
     const g = (a, n) => { const b = new a.constructor(a.length * 2); b.set(a); return b; };
     if ((this.nv + 64) * 3 > this.pos.length) { this.pos = g(this.pos); this.tex = g(this.tex); this.lit = g(this.lit); }
     if (this.ni + 96 > this.idx.length) this.idx = g(this.idx);
+  }
+  ensure(nv, ni) { // espacio para nv vértices e ni índices más (rejillas de superficie grandes)
+    while ((this.nv + nv) * 3 > this.pos.length) { const g = a => { const b = new a.constructor(a.length * 2); b.set(a); return b; }; this.pos = g(this.pos); this.tex = g(this.tex); this.lit = g(this.lit); }
+    while (this.ni + ni > this.idx.length) { const b = new Uint32Array(this.idx.length * 2); b.set(this.idx); this.idx = b; }
   }
   v(x, y, z, u, v, layer, flags, sky, blk, ao, tint) {
     const n = this.nv++; this.pos[n * 3] = x; this.pos[n * 3 + 1] = y; this.pos[n * 3 + 2] = z;
@@ -2454,14 +2458,6 @@ function faceLayer(d, f, meta) {
   return d.faces[f];
 }
 let MESH_QUALITY = 2;
-function liquidHeight(ri, liq) {
-  const b = regB[ri]; const d = REG[b];
-  const isL = (d && d.liquid === liq) || (liq === 1 && d && d.inWater);
-  if (!isL) return -1;
-  const up = regB[ri + LRR]; const du = REG[up]; if (du && (du.liquid === liq || (liq === 1 && du.inWater))) return 1;
-  if (d.inWater) return 0.89;
-  const m = regM[ri]; if (m & LIQ_FALL) return 0.9; return liqAmt(m) / 8 * 0.9; // volumen en octavos
-}
 function buildMesh(world, ch) { buildRegion(world, ch); return meshRegion(world, ch); }
 function meshRegion(world, ch) {
   computeLight(world, ch);
@@ -2474,8 +2470,12 @@ function meshRegion(world, ch) {
     const d = REG[id]; if (!d || d.render === 'none') continue;
     const meta = regM[ri];
     // emisores (fuego, antorchas, lava...): la lava tiene su propio cupo para que un lago subterráneo no deje sin efectos a los fuegos y antorchas del chunk
+    if (d.liquid === 1 && EM.length < 4096 && liqFall(ri) && isLiqB(regB[ri - LRR], 1) && !liqFall(ri - LRR)) EM.push(bxw + x, y - 1, bzw + z, ID.water); // chorro que cae en una poza
     if (d.light >= 10 && EM.length < 4096 && (d.render !== 'cube' || d.liquid || id === ID.magma_block) && (!d.liquid || (regB[ri + LRR] === 0 && (EMlava++ < 96)))) EM.push(bxw + x, y, bzw + z, id);
-    if (d.render === 'cube') {
+    if (id === ID.snow_block && airLike(regB[ri + LRR])) {
+      emitSurface(O, SK_SNOW, x, y, z, ri, ch, bxw, bzw);
+      const nri = ri - LRR; if (!T_FULL[regB[nri]]) emitFace(O, 3, x, y, z, ri, nri, faceLayer(d, 3, meta), F_SNOW, 0, 0, 0, 1, null);
+    } else if (d.render === 'cube') {
       const B = d.trans === 2 ? T : O; let flags = 0;
       if (d.trans === 1) flags |= F_CUT; if (d.wave === 1 && fancy) flags |= F_LEAF; if (d.leaves || d.wave) flags |= F_FOLI;
       if (d.emissive) flags |= F_EMIS; if (d.portal === 1) flags |= F_PORTAL; if (d.endPortal) flags |= F_ENDP; if (d.trans === 2) flags |= F_GLASS;
@@ -2504,16 +2504,16 @@ function meshRegion(world, ch) {
         B.v(x + a[0] + ox, y + h, z + a[1] + oz, 0, 0, layer, flags | wv, sky, blk, 3, tint);
         B.quad2();
       }
-      if (d.inWater) emitLiquid(MB_W, x, y, z, ri, 1, ch, meta);
+      if (d.inWater) emitLiquidCell(MB_W, SK_WATER, x, y, z, ri, ch, bxw, bzw);
     } else if (d.render === 'box') {
       emitBox(d, x, y, z, ri, meta, ch);
     } else if (d.render === 'shape') {
       const boxes = shapeBoxes(d, meta, (dx, dz) => regB[ri + dx + dz * LR]); const lay = d.shape === 'door' && (meta & 8) ? d.layerTop : undefined;
       for (const b of boxes) emitBox(d, x, y, z, ri, meta, ch, b, lay);
     } else if (d.render === 'liquid') {
-      emitLiquid(d.liquid === 1 ? MB_W : O, x, y, z, ri, d.liquid, ch, meta);
+      emitLiquidCell(d.liquid === 1 ? MB_W : O, d.liquid, x, y, z, ri, ch, bxw, bzw);
     } else if (d.render === 'snow') {
-      emitSnow(O, x, y, z, ri, meta, ch, bxw, bzw);
+      emitSurface(O, SK_SNOW, x, y, z, ri, ch, bxw, bzw);
     }
   }
   ch.emitters = EM;
@@ -2569,99 +2569,216 @@ function emitBox(d, x, y, z, ri, meta, ch, boxOv, layerOv) {
     B.quad(false);
   }
 }
-function emitLiquid(B, x, y, z, ri, liq, ch, meta) {
-  const sky = regS[ri], blk = regL[ri];
-  const own = liquidHeight(ri, liq) < 0 ? 0.89 : liquidHeight(ri, liq);
-  const corner = (dx, dz) => { // dx,dz in {0,1}
-    let s = 0, n = 0; for (let a = -1; a <= 0; a++) for (let b = -1; b <= 0; b++) {
-      const j = ri + (dx + a) + (dz + b) * LR; const h = liquidHeight(j, liq);
-      if (h >= 1) return 1; if (h >= 0) { s += h * (h > 0.85 ? 3 : 1); n += (h > 0.85 ? 3 : 1); } else { const bb = regB[j]; if (!T_FULL[bb]) { n += 0.25; } }
-    } return n ? s / n : own;
-  };
-  const h00 = corner(0, 0), h10 = corner(1, 0), h11 = corner(1, 1), h01 = corner(0, 1);
-  const layer = liq === 1 ? TEX.water : TEX.lava; const flags = liq === 1 ? F_WATER : (F_LAVA | F_EMIS);
-  const tint = liq === 1 ? ((meta & LIQ_OCEAN) ? 1 + ch.biomes[x | z << 4] : (meta & LIQ_FALL) ? 201 : 200) : 0; // 200 = agua finita (sin olas de mar), 201 = chorro cayendo
-  const isSame = j => { const b = regB[j]; const d = REG[b]; return d && (d.liquid === liq || (liq === 1 && d.inWater)); };
-  const up = ri + LRR;
-  B.grow();
-  if (!isSame(up)) { // superficie
-    const sk = Math.max(sky, regS[up]), bl = Math.max(blk, regL[up]);
-    B.v(x, y + h01, z + 1, 0, 1, layer, flags | 2, sk, bl, 3, tint); B.v(x + 1, y + h11, z + 1, 1, 1, layer, flags | 2, sk, bl, 3, tint);
-    B.v(x + 1, y + h10, z, 1, 0, layer, flags | 2, sk, bl, 3, tint); B.v(x, y + h00, z, 0, 0, layer, flags | 2, sk, bl, 3, tint);
-    B.quad(false); if (liq === 1) { B.grow(); B.v(x, y + h00, z, 0, 0, layer, flags | 3, sk, bl, 3, tint); B.v(x + 1, y + h10, z, 1, 0, layer, flags | 3, sk, bl, 3, tint); B.v(x + 1, y + h11, z + 1, 1, 1, layer, flags | 3, sk, bl, 3, tint); B.v(x, y + h01, z + 1, 0, 1, layer, flags | 3, sk, bl, 3, tint); B.quad(false); }
-  }
-  const sides = [[0, 1, h11, h10, [1, 1], [1, 0]], [1, -1, h00, h01, [0, 0], [0, 1]], [4, LR, h01, h11, [0, 1], [1, 1]], [5, -LR, h10, h00, [1, 0], [0, 0]]];
-  for (const [f, off, ha, hb, ca, cb] of sides) {
-    const j = ri + off; if (isSame(j) || T_FULL[regB[j]]) continue;
-    B.grow(); const sk = Math.max(sky, regS[j]), bl = Math.max(blk, regL[j]);
-    B.v(x + ca[0], y, z + ca[1], 0, 1, layer, flags | f, sk, bl, 3, tint); B.v(x + cb[0], y, z + cb[1], 1, 1, layer, flags | f, sk, bl, 3, tint);
-    B.v(x + cb[0], y + hb, z + cb[1], 1, 1 - hb, layer, flags | f, sk, bl, 3, tint); B.v(x + ca[0], y + ha, z + ca[1], 0, 1 - ha, layer, flags | f, sk, bl, 3, tint);
-    B.quad(false);
-  }
-  const dn = ri - LRR; if (!isSame(dn) && !T_FULL[regB[dn]]) { B.grow(); B.v(x, y + 0.001, z, 0, 0, layer, flags | 3, sky, blk, 3, tint); B.v(x + 1, y + 0.001, z, 1, 0, layer, flags | 3, sky, blk, 3, tint); B.v(x + 1, y + 0.001, z + 1, 1, 1, layer, flags | 3, sky, blk, 3, tint); B.v(x, y + 0.001, z + 1, 0, 1, layer, flags | 3, sky, blk, 3, tint); B.quad(false); }
+// ============================================================================
+//  Superficies realistas: agua, lava y nieve (sin escalones ni caras cúbicas)
+//  Cada celda de superficie arma una rejilla de control 3x3 (esquinas, aristas, centro) y dibuja una
+//  superficie de Bézier cuadrática. Las alturas compartidas salen de surfContrib(), que depende solo de la
+//  celda vecina (no de quién pregunta): celdas vecinas generan los mismos vértices en sus bordes, sin grietas,
+//  también entre niveles distintos (rampas en vez de escalones) y entre chunks.
+// ============================================================================
+const F_SURF = 32768; // vértice con normal suave en u,v y flujo en la capa
+const SK_WATER = 1, SK_LAVA = 2, SK_SNOW = 3;
+const SURF_SHORE = [0, 0.0, 0.16, 0.03]; // altura del borde libre: agua = menisco fino, lava = lóbulo viscoso, nieve = borde redondeado
+function isLiqB(b, liq) { const d = REG[b]; return !!d && (d.liquid === liq || (liq === 1 && !!d.inWater)); }
+function airLike(b) { if (b === 0) return true; const d = REG[b]; return !!d && !d.solid && !d.liquid; }
+// chorro que cae: celda «cubierta» (LIQ_FALL = mismo líquido encima) que tiene aire a algún lado; dentro de un lago
+// todas las celdas sumergidas llevan LIQ_FALL y NO son chorros
+function liqFall(j) { const d = REG[regB[j]]; if (!d || d.inWater || !(regM[j] & LIQ_FALL)) return false; return airLike(regB[j + 1]) || airLike(regB[j - 1]) || airLike(regB[j + LR]) || airLike(regB[j - LR]); }
+// volumen «asentado» para dibujar: el simulador deja lagos con un damero de 7/8 y 8/8 (y la lava con escalones de 1-2);
+// si la celda y sus 4 vecinas son el mismo líquido (o roca) y casi iguales, se dibuja el máximo: superficie lisa
+function liqAmtVis(j) {
+  const d = REG[regB[j]]; if (!d) return 8; if (d.inWater) return 8; const liq = d.liquid; const a = liqAmt(regM[j]); if (a >= 8) return 8;
+  let mx = a, mn = a;
+  for (const o of [1, -1, LR, -LR]) { const k = j + o, b = regB[k]; if (isLiqB(b, liq) && !liqFall(k)) { const an = REG[b].inWater ? 8 : liqAmt(regM[k]); if (an > mx) mx = an; if (an < mn) mn = an; } else if (!T_FULL[b]) return a; }
+  return mx - mn <= (liq === 2 ? 2 : 1) ? mx : a;
 }
-// nieve suave: superficie subdividida e interpolada entre vecinos
-// nieve suave: campo de alturas continuo entre bloques, bordes redondeados y normales suaves
-function snowCellH(ri) { // altura de la superficie en una celda vecina (-1 = sin apoyo)
-  const b = regB[ri]; if (b === ID.snow) return Math.max(1, regM[ri]) / 8;
-  if (T_FULL[b]) return 1.0; const below = regB[ri - LRR];
-  if (T_FULL[below] || below === ID.snow) return 0.0; return -0.35;
+// altura de la superficie dentro de su celda: la misma que usa la física (liquidSurface)
+function liqTopH(j) { const u = regB[j + LRR]; if (T_FULL[u]) return 1; if (u === ID.ice || u === ID.packed_ice) return 0.995; return liqAmtVis(j) / 8 * 0.92; }
+// nivel de la columna de líquido que contiene j, relativo a la capa de j (sube por las celdas llenas, no por chorros)
+function liqLevelUp(j, liq) { let n = 0; while (n < 4) { const u = j + LRR; if (!isLiqB(regB[u], liq) || liqFall(u)) break; j = u; n++; } return n + liqTopH(j); }
+// nivel de nieve de una celda (relativo a su capa) o -9 si no es nieve
+function snowLevel(j) { const b = regB[j]; if (b === ID.snow) return Math.max(1, regM[j]) / 8; if (b === ID.snow_block) { const u = regB[j + LRR]; return u === ID.snow ? 1 + Math.max(1, regM[j + LRR]) / 8 : u === ID.snow_block ? 2 : 1; } return -9; }
+// aportación de la celda j a una esquina/arista compartida (NaN = pared, no cuenta)
+function surfContrib(j, kind) {
+  const b = regB[j];
+  if (kind !== SK_SNOW) {
+    if (isLiqB(b, kind) && !liqFall(j)) return liqLevelUp(j, kind);
+    if (airLike(b) || isLiqB(b, kind)) { // aire, plantas o un chorro que cae: la superficie baja hacia el nivel de abajo o hasta el suelo
+      const dn = j - LRR; if (isLiqB(regB[dn], kind) && !liqFall(dn)) return liqTopH(dn) - 1;
+      const dd = REG[regB[dn]]; return dd && dd.solid ? SURF_SHORE[kind] : 0;
+    }
+    const u = j + LRR; return isLiqB(regB[u], kind) && !liqFall(u) ? 1 + liqLevelUp(u, kind) : NaN;
+  }
+  const sl = snowLevel(j); if (sl > -9) return sl;
+  if (airLike(b)) { const dn = j - LRR, sd = snowLevel(dn); if (sd > -9) return sd - 1; const dd = REG[regB[dn]]; return dd && dd.solid ? SURF_SHORE[SK_SNOW] : 0; }
+  const su = snowLevel(j + LRR); return su > -9 ? 1 + su : NaN;
+}
+function surfCorner(kind, ri, dx, dz) { let s = 0, n = 0; for (let b = dz - 1; b <= dz; b++) for (let a = dx - 1; a <= dx; a++) { const v = surfContrib(ri + a + b * LR, kind); if (v === v) { s += v; n++; } } return n ? s / n : 0; }
+function surfEdge(kind, ri, off) { const v0 = surfContrib(ri, kind), v1 = surfContrib(ri + off, kind); return v1 === v1 ? (v0 + v1) * 0.5 : v0; }
+const _SP = new Float32Array(9), _SO = new Float32Array(3);
+// rejilla de control 3x3: [fila z][columna x]
+function surfCtrl(kind, ri) { const P = _SP; P[0] = surfCorner(kind, ri, 0, 0); P[1] = surfEdge(kind, ri, -LR); P[2] = surfCorner(kind, ri, 1, 0); P[3] = surfEdge(kind, ri, -1); P[4] = surfContrib(ri, kind); P[5] = surfEdge(kind, ri, 1); P[6] = surfCorner(kind, ri, 0, 1); P[7] = surfEdge(kind, ri, LR); P[8] = surfCorner(kind, ri, 1, 1); return P; }
+// Bézier cuadrática: o = [altura, dh/du, dh/dv]
+function surfBez(P, u, v, o) {
+  const a0 = (1 - u) * (1 - u), a1 = 2 * u * (1 - u), a2 = u * u, da0 = -2 * (1 - u), da1 = 2 - 4 * u, da2 = 2 * u;
+  const b0 = (1 - v) * (1 - v), b1 = 2 * v * (1 - v), b2 = v * v, db0 = -2 * (1 - v), db1 = 2 - 4 * v, db2 = 2 * v;
+  const r0 = a0 * P[0] + a1 * P[1] + a2 * P[2], r1 = a0 * P[3] + a1 * P[4] + a2 * P[5], r2 = a0 * P[6] + a1 * P[7] + a2 * P[8];
+  const d0 = da0 * P[0] + da1 * P[1] + da2 * P[2], d1 = da0 * P[3] + da1 * P[4] + da2 * P[5], d2 = da0 * P[6] + da1 * P[7] + da2 * P[8];
+  o[0] = b0 * r0 + b1 * r1 + b2 * r2; o[1] = b0 * d0 + b1 * d1 + b2 * d2; o[2] = db0 * r0 + db1 * r1 + db2 * r2;
+}
+// codificación: normal (nx,nz) en u,v (0..1 → -1..1); flujo (fx,fz en -63..63) en la capa
+const surfFlow = (fx, fz) => (clamp(Math.round(fx), -63, 63) + 64) | ((clamp(Math.round(fz), -63, 63) + 64) << 7);
+// ondulación suave de la nieve (en coordenadas de mundo, continua entre celdas)
+function vnoise2(x, z, sd) { const ix = Math.floor(x), iz = Math.floor(z); let fx = x - ix, fz = z - iz; fx = fx * fx * (3 - 2 * fx); fz = fz * fz * (3 - 2 * fz);
+  const a = hash2(sd, ix, iz), b = hash2(sd, ix + 1, iz), c = hash2(sd, ix, iz + 1), d = hash2(sd, ix + 1, iz + 1); return a + (b - a) * fx + (c - a) * fz + (a - b - c + d) * fx * fz; }
+function snowUndul(wx, wz) { return (vnoise2(wx / 2.3 + wz * 0.12, wz / 2.3, 71) - 0.5) * 0.07 + (vnoise2(wx / 0.9, wz / 0.9, 73) - 0.5) * 0.025; } // dunas suaves algo estiradas por el viento
+// luz por vértice: interpolación bilineal entre los centros de las 4 celdas vecinas (sin cuadros de luz en superficies lisas)
+const _SL = new Float32Array(2);
+function surfLight(ri, u, v) {
+  const px = u - 0.5, pz = v - 0.5; const ix = px < 0 ? -1 : 0, iz = pz < 0 ? -1 : 0; const fx = px - ix, fz = pz - iz;
+  let s = 0, b = 0, w = 0;
+  for (let c = 0; c < 4; c++) { const dx = ix + (c & 1), dz = iz + (c >> 1); const wt = ((c & 1) ? fx : 1 - fx) * ((c >> 1) ? fz : 1 - fz); if (wt <= 1e-4) continue; const j = ri + dx + dz * LR; if (T_FULL[regB[j]]) continue; s += Math.max(regS[j], regS[j + LRR]) * wt; b += Math.max(regL[j], regL[j + LRR]) * wt; w += wt; }
+  if (w > 0) { _SL[0] = s / w; _SL[1] = b / w; } else { _SL[0] = Math.max(regS[ri], regS[ri + LRR]); _SL[1] = Math.max(regL[ri], regL[ri + LRR]); }
+  return _SL;
+}
+// escalón tapado por nieve (bloque sólido con nieve encima): su borde no debe asomar por la rampa de nieve
+function snowStepTop(c) { if (snowLevel(c) > -9) return -9; const d = REG[regB[c]]; if (!d || !d.solid) return -9; return snowLevel(c + LRR) > -9 ? 1 : -9; }
+// celda de agua o lava: superficie suave, chorro cayendo (tubo) o nada (si está cubierta)
+function emitLiquidCell(B, kind, x, y, z, ri, ch, bxw, bzw) {
+  if (liqFall(ri)) { emitFall(B, kind, x, y, z, ri, ch); return; }
+  const u = ri + LRR; if ((isLiqB(regB[u], kind) && !liqFall(u)) || T_FULL[regB[u]]) { emitLiquidSides(B, kind, x, y, z, ri, ch, null); return; } // cubierta por más líquido o por un bloque: solo lados contra cristal
+  emitSurface(B, kind, x, y, z, ri, ch, bxw, bzw);
+}
+function liqTint(kind, ri, ch, x, z) { if (kind !== SK_WATER) return 0; const m = regM[ri]; const d = REG[regB[ri]]; return d && !d.inWater && (m & LIQ_OCEAN) ? 1 + ch.biomes[x | z << 4] : 200; }
+// superficie de una celda (agua, lava o nieve)
+function emitSurface(B, kind, x, y, z, ri, ch, bxw, bzw) {
+  const P = surfCtrl(kind, ri);
+  let mn = P[0], mx = P[0]; for (let k = 1; k < 9; k++) { if (P[k] < mn) mn = P[k]; if (P[k] > mx) mx = P[k]; }
+  const flat = mx - mn < 0.012;
+  const snow = kind === SK_SNOW;
+  // ¿pisadas en la nieve de esta columna o al lado? entonces rejilla fina para que las huellas tengan forma
+  let pressed = false; if (snow && regSC && MESH_QUALITY >= 1) { for (let dz = -1; dz <= 1 && !pressed; dz++) for (let dx = -1; dx <= 1 && !pressed; dx++) { const o = ((z + dz + 1) * 18 + (x + dx + 1)) * 64; for (let k = 0; k < 64; k++) if (regSC[o + k]) { pressed = true; break; } } }
+  let N;
+  if (snow) N = pressed ? (MESH_QUALITY >= 2 ? 8 : 4) : MESH_QUALITY >= 2 ? (flat ? 2 : 4) : MESH_QUALITY >= 1 ? 2 : 1;
+  else N = flat ? 1 : MESH_QUALITY >= 2 ? 4 : MESH_QUALITY >= 1 ? 2 : 1;
+  const up = ri + LRR; const sky = Math.max(regS[ri], regS[up]), blk = Math.max(regL[ri], regL[up]);
+  const fl = F_SURF | 2 | (kind === SK_WATER ? F_WATER : kind === SK_LAVA ? (F_LAVA | F_EMIS) : F_SNOW);
+  const tint = liqTint(kind, ri, ch, x, z); const ocean = tint > 0 && tint < 200;
+  const M = N + 1; const hs = new Float32Array(M * M), gx = new Float32Array(M * M), gz = new Float32Array(M * M), cs = snow ? new Float32Array(M * M) : null;
+  const o = _SO;
+  for (let j = 0; j < M; j++) for (let i = 0; i < M; i++) {
+    const uu = i / N, vv = j / N; surfBez(P, uu, vv, o); let h = o[0], dx = o[1], dz = o[2];
+    if (snow) { const wx = bxw + x + uu, wz = bzw + z + vv; const e = 0.05; const n0 = snowUndul(wx, wz); h += n0; dx += (snowUndul(wx + e, wz) - n0) / e; dz += (snowUndul(wx, wz + e) - n0) / e; }
+    if (snow && (i === 0 || i === N || j === 0 || j === N)) { // vértice en el borde: por encima de los escalones que tapa
+      let top = -9; const xs = i === 0 ? [-1, 0] : i === N ? [0, 1] : [0], zs = j === 0 ? [-1, 0] : j === N ? [0, 1] : [0];
+      for (const a of xs) for (const b of zs) { const t2 = snowStepTop(ri + a + b * LR); if (t2 > top) top = t2; }
+      if (top > -9 && h < top + 0.05) h = top + 0.05;
+    }
+    const k = j * M + i; hs[k] = h; gx[k] = dx; gz[k] = dz;
+  }
+  if (pressed) { // hundimiento de las huellas (media de las subceldas que tocan el vértice) y un reborde levantado alrededor
+    for (let j = 0; j < M; j++) for (let i = 0; i < M; i++) {
+      const k = j * M + i; const gx8 = x * 8 + Math.round(i / N * 8), gz8 = z * 8 + Math.round(j / N * 8);
+      let c = 0, wsum = 0, ring = 0; for (let b = -2; b <= 1; b++) for (let a = -2; a <= 1; a++) { const inner = a >= -1 && a <= 0 && b >= -1 && b <= 0; const v = snowCompAt(gx8 + a, gz8 + b); const wg = inner ? 1 : 0.3; c += v * wg; wsum += wg; if (!inner) ring = Math.max(ring, v); }
+      c /= wsum; const lim = Math.max(0, hs[k] - 0.02); hs[k] -= Math.min(c, lim); hs[k] += Math.max(0, ring * 0.5 - c) * 0.18; cs[k] = Math.min(1, c / Math.max(0.05, lim));
+    }
+    for (let j = 0; j < M; j++) for (let i = 0; i < M; i++) { const k = j * M + i; const i0 = Math.max(0, i - 1), i1 = Math.min(N, i + 1), j0 = Math.max(0, j - 1), j1 = Math.min(N, j + 1); gx[k] = (hs[j * M + i1] - hs[j * M + i0]) / ((i1 - i0) / N); gz[k] = (hs[j1 * M + i] - hs[j0 * M + i]) / ((j1 - j0) / N); }
+  }
+  B.ensure(M * M, N * N * 6); const base = B.nv;
+  let depth = 3; if (kind === SK_WATER) { let n = 0, j2 = ri - LRR; while (n < 14 && isLiqB(regB[j2], 1)) { n++; j2 -= LRR; } depth = Math.min(15, n + hs[0]); }
+  for (let j = 0; j < M; j++) for (let i = 0; i < M; i++) {
+    const k = j * M + i; const l = Math.hypot(gx[k], 1, gz[k]); const nx = -gx[k] / l, nz = -gz[k] / l;
+    // flujo: cuesta abajo según la pendiente (agua y lava); el océano no fluye (tiene oleaje)
+    let flow = kind === SK_SNOW || ocean ? surfFlow(0, 0) : surfFlow(-gx[k] * 40, -gz[k] * 40);
+    if (kind === SK_WATER && (i === 0 || i === N) && (j === 0 || j === N)) { // esquina: fracción de celdas de mar alrededor → cuánto oleaje lleva
+      let oc = 0, wn = 0; for (let b = (j ? 0 : -1); b <= (j ? 1 : 0); b++) for (let a = (i ? 0 : -1); a <= (i ? 1 : 0); a++) { const c = ri + a + b * LR; const bb = regB[c]; if (isLiqB(bb, 1)) { wn++; const dd = REG[bb]; if (dd.inWater ? ocean : (regM[c] & LIQ_OCEAN)) oc++; } }
+      if (oc > 0 && oc < wn) flow = 16384 | Math.round(oc / wn * 255); else if (oc > 0) flow = 16384 | 255;
+    } else if (ocean) flow = 16384 | 255;
+    const L = surfLight(ri, i / N, j / N);
+    B.v(x + i / N, y + hs[k], z + j / N, nx * 0.5 + 0.5, nz * 0.5 + 0.5, flow, fl, L[0], L[1], snow ? 3 - cs[k] * 1.5 : kind === SK_WATER ? depth / 5 : 3, tint);
+  }
+  const I = B.idx; let q = B.ni;
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { const a = base + j * M + i, b = a + 1, c = a + M + 1, d = a + M; I[q++] = d; I[q++] = c; I[q++] = b; I[q++] = d; I[q++] = b; I[q++] = a; }
+  B.ni = q;
+  if (snow || kind === SK_LAVA) emitSurfSides(B, kind, x, y, z, ri, P, N, fl, sky, blk, tint);
+  else emitLiquidSides(B, kind, x, y, z, ri, ch, P, N, tint);
+}
+// lados de una superficie de nieve o lava: donde el borde queda en el aire (bajada, borde libre) se baja hasta la base
+// de la celda con un perfil redondeado (la lava además abomba hacia fuera, como un frente de colada)
+const SIDES4 = [[1, 0, 1, 0, 0, 1], [-1, 0, 0, 0, 0, 1], [0, 1, 0, 1, 1, 0], [0, -1, 0, 0, 1, 0]]; // [nx, nz, x0, z0, dx, dz] del borde
+function emitSurfSides(B, kind, x, y, z, ri, P, N, fl, sky, blk, tint) {
+  const o = _SO;
+  for (let s = 0; s < 4; s++) {
+    const [nx, nz, x0, z0, ex, ez] = SIDES4[s]; const j = ri + nx + nz * LR; const b = regB[j];
+    if (T_FULL[b]) continue;
+    if (kind === SK_SNOW) { if (snowLevel(j) > -9) continue; if (airLike(b) && snowLevel(j - LRR) > -9) continue; } // la nieve vecina continúa la superficie
+    else { if (isLiqB(b, kind)) continue; if (airLike(b) && isLiqB(regB[j - LRR], kind)) continue; }
+    const sk = Math.max(sky, regS[j]), bl = Math.max(blk, regL[j]);
+    const bulge = kind === SK_LAVA ? 0.07 : 0.0; const R = 3; // filas: base, medio, borde
+    B.ensure((N + 1) * (R + 1), N * R * 6); const base = B.nv;
+    for (let i = 0; i <= N; i++) {
+      const t = i / N; const uu = x0 + ex * t, vv = z0 + ez * t; surfBez(P, uu, vv, o); const top = Math.max(0.02, o[0]);
+      // normal de la superficie en el borde (para fundir el sombreado del lado con el de arriba)
+      const l = Math.hypot(o[1], 1, o[2]); const snx = -o[1] / l, snz = -o[2] / l;
+      for (let r = 0; r <= R; r++) {
+        const f = r / R; const a = f * Math.PI * 0.5; // perfil de cuarto de elipse: abajo vertical, arriba se curva hacia la superficie
+        // la base entra un poco en el suelo: sin parpadeo con la cara de arriba del bloque
+        const hh = r === 0 ? -0.03 : top * Math.sin(a); const out = bulge * Math.cos(a) * Math.sin(a) * 2 + (kind === SK_SNOW ? 0.015 * Math.cos(a) : 0);
+        const wn = Math.sin(a); let vx = nx * (1 - wn) + snx * wn, vz = nz * (1 - wn) + snz * wn; const vl = Math.hypot(vx, vz); if (vl > 1) { vx /= vl; vz /= vl; }
+        B.v(x + uu + nx * out, y + hh, z + vv + nz * out, clamp(vx * 0.5 + 0.5, 0, 1), clamp(vz * 0.5 + 0.5, 0, 1), surfFlow(0, 0), fl, sk, bl, 3, tint);
+      }
+    }
+    const I = B.idx; let q = B.ni; // orientación hacia fuera (la lava y la nieve se dibujan con culling)
+    for (let i = 0; i < N; i++) for (let r = 0; r < R; r++) { const a = base + i * (R + 1) + r, b2 = a + 1, c = a + R + 2, d = a + R + 1;
+      if (s === 0 || s === 3) { I[q++] = a; I[q++] = c; I[q++] = d; I[q++] = a; I[q++] = b2; I[q++] = c; } else { I[q++] = a; I[q++] = d; I[q++] = c; I[q++] = a; I[q++] = c; I[q++] = b2; } }
+    B.ni = q;
+  }
+}
+// lados del agua: solo contra sólidos transparentes (cristal, vallas...) o en bordes libres (caída), siguiendo la curva de la superficie
+function emitLiquidSides(B, kind, x, y, z, ri, ch, P, N, tint) {
+  const sky = regS[ri], blk = regL[ri]; const fl = (kind === SK_WATER ? F_WATER : (F_LAVA | F_EMIS));
+  if (tint === undefined) tint = liqTint(kind, ri, ch, x, z);
+  const o = _SO; const full = !P;
+  for (let s = 0; s < 4; s++) {
+    const [nx, nz, x0, z0, ex, ez] = SIDES4[s]; const j = ri + nx + nz * LR; const b = regB[j];
+    if (T_FULL[b] || isLiqB(b, kind)) continue;
+    if (full && airLike(b)) continue; // bajo la superficie, junto al aire: el agua de al lado ya cae
+    if (airLike(b) && isLiqB(regB[j - LRR], kind) && !liqFall(j - LRR)) continue; // continúa en el nivel de abajo (rampa)
+    const sk = Math.max(sky, regS[j]), bl = Math.max(blk, regL[j]); const n = full ? 1 : N;
+    B.ensure((n + 1) * 2, n * 6); const base = B.nv; const face = s === 0 ? 0 : s === 1 ? 1 : s === 2 ? 4 : 5;
+    for (let i = 0; i <= n; i++) { const t = i / n; const uu = x0 + ex * t, vv = z0 + ez * t; let top = 1; if (!full) { surfBez(P, uu, vv, o); top = Math.max(0.01, o[0]); }
+      B.v(x + uu, y, z + vv, uu, 1, 0, fl | face, sk, bl, 3, tint); B.v(x + uu, y + top, z + vv, uu, 1 - Math.min(1, top), 0, fl | face, sk, bl, 3, tint); }
+    const I = B.idx; let q = B.ni;
+    for (let i = 0; i < n; i++) { const a = base + i * 2, b2 = a + 1, c = a + 3, d = a + 2; if (s === 0 || s === 3) { I[q++] = a; I[q++] = c; I[q++] = d; I[q++] = a; I[q++] = b2; I[q++] = c; } else { I[q++] = a; I[q++] = d; I[q++] = c; I[q++] = a; I[q++] = c; I[q++] = b2; } }
+    B.ni = q;
+  }
+}
+// chorro que cae: tubo redondeado y continuo (no un cubo), que nace inclinado desde el borde de la fuente y entra en la poza de abajo
+function emitFall(B, kind, x, y, z, ri, ch) {
+  const amt = liqAmt(regM[ri]); let drop = 0; { let j2 = ri + LRR; while (drop < 14 && liqFall(j2)) { drop++; j2 += LRR; } }
+  const r0 = amt <= 3 ? 0.16 : amt <= 6 ? 0.25 : 0.34; const r = r0 * Math.pow(1 + drop * 1.6, -0.25); const S = MESH_QUALITY >= 2 ? 10 : MESH_QUALITY >= 1 ? 6 : 4;
+  const dn = ri - LRR, up = ri + LRR;
+  let y0 = 0, y1 = 1;
+  if (isLiqB(regB[dn], kind) && !liqFall(dn)) y0 = liqTopH(dn) - 1 - 0.06; // entra en la superficie de la poza
+  if (isLiqB(regB[up], kind) && !liqFall(up)) y1 = 1 + liqTopH(up) * 0.6; // nace de una fuente justo encima
+  // desplazar la parte de arriba hacia la fuente lateral (el agua sale por el borde)
+  let ox = 0, oz = 0; if (!isLiqB(regB[up], kind)) { for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const j = ri + dx + dz * LR; if (isLiqB(regB[j], kind) && !liqFall(j)) { ox += dx * 0.32; oz += dz * 0.32; } } }
+  const upFall = isLiqB(regB[up], kind) && liqFall(up); const topR = upFall ? r : r * 0.85;
+  const sky = Math.max(regS[ri], regS[up]), blk = regL[ri]; const fl = F_SURF | 0 | (kind === SK_WATER ? F_WATER : (F_LAVA | F_EMIS)); const tint = kind === SK_WATER ? 201 : 0;
+  const Rw = 3; B.ensure((S + 1) * (Rw + 1), S * Rw * 6); const base = B.nv;
+  for (let k = 0; k <= S; k++) {
+    const a = k / S * Math.PI * 2; const ca = Math.cos(a), sa = Math.sin(a);
+    for (let rr = 0; rr <= Rw; rr++) {
+      const f = rr / Rw; const yy = y0 + (y1 - y0) * f; const tf = f * f; const cx = 0.5 + ox * tf, cz = 0.5 + oz * tf; const rad = r + (topR - r) * f;
+      B.v(x + cx + ca * rad, y + yy, z + cz + sa * rad, ca * 0.5 + 0.5, sa * 0.5 + 0.5, surfFlow(0, 0), fl, sky, blk, Math.min(15, drop + f) / 5, tint);
+    }
+  }
+  const I = B.idx; let q = B.ni;
+  for (let k = 0; k < S; k++) for (let rr = 0; rr < Rw; rr++) { const a = base + k * (Rw + 1) + rr, b = a + 1, c = a + Rw + 2, d = a + Rw + 1; I[q++] = a; I[q++] = b; I[q++] = c; I[q++] = a; I[q++] = c; I[q++] = d; }
+  B.ni = q;
 }
 // profundidad pisada (bloques) en la subcelda (gx,gz) del chunk, en unidades de 1/8 de bloque (puede salir 1 columna fuera)
 function snowCompAt(gx, gz) { if (!regSC) return 0; const lx = (gx >> 3) + 1, lz = (gz >> 3) + 1; if (lx < 0 || lz < 0 || lx > 17 || lz > 17) return 0; return regSC[(lz * 18 + lx) * 64 + (gz & 7) * 8 + (gx & 7)] / 64; }
-function emitSnow(B, x, y, z, ri, meta, ch, bxw, bzw) {
-  const own = Math.max(1, meta) / 8;
-  const H = new Float32Array(25); // alturas de las 5x5 celdas alrededor (incluye 2 de margen)
-  for (let j = -2; j <= 2; j++) for (let i = -2; i <= 2; i++) H[(j + 2) * 5 + i + 2] = (i === 0 && j === 0) ? own : snowCellH(ri + i + j * LR);
-  const field = (u, v) => { // u,v en coordenadas de bloque (0..1 = esta celda)
-    let s = 0, wsum = 0;
-    for (let j = -2; j <= 2; j++) for (let i = -2; i <= 2; i++) {
-      const dx = u - (i + 0.5), dz = v - (j + 0.5); const d2 = dx * dx + dz * dz; if (d2 > 2.2) continue;
-      const wgt = Math.exp(-d2 * 2.6); let h = H[(j + 2) * 5 + i + 2]; if (h >= 1 && (i || j)) h = Math.max(own, 0.7);
-      s += h * wgt; wsum += wgt;
-    }
-    let h = s / wsum;
-    const wx = bxw + x + u, wz = bzw + z + v;
-    h += (Math.sin(wx * 0.9 + wz * 0.35) * Math.cos(wz * 0.8 - wx * 0.25)) * 0.06 + Math.sin(wx * 2.7 + Math.cos(wz * 2.1)) * 0.015;
-    return Math.max(0.015, Math.min(own + 0.25, h));
-  };
-  // ¿hay pisadas en esta columna o al lado? entonces más subdivisión para que las huellas tengan forma
-  let pressed = false; if (regSC && MESH_QUALITY >= 1) { for (let dz = -1; dz <= 1 && !pressed; dz++) for (let dx = -1; dx <= 1 && !pressed; dx++) { const o = ((z + dz + 1) * 18 + (x + dx + 1)) * 64; for (let k = 0; k < 64; k++) if (regSC[o + k]) { pressed = true; break; } } }
-  const sub = pressed ? (MESH_QUALITY >= 2 ? 8 : 4) : MESH_QUALITY >= 2 ? 4 : MESH_QUALITY >= 1 ? 3 : 1;
-  const up = ri + LRR; const sky = Math.max(regS[ri], regS[up]), blk = Math.max(regL[ri], regL[up]); const layer = TEX.snow; const fl = F_SNOW;
-  const N = sub + 1; const hs = new Float32Array(N * N), ns = new Uint8Array(N * N), cs = new Float32Array(N * N);
-  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
-    const u = i / sub, v = j / sub; let h = field(u, v);
-    if (pressed) {
-      // hundimiento: media de las 4 subceldas que tocan el vértice; borde: la nieve apartada se levanta un poco alrededor
-      const gx = x * 8 + Math.round(u * 8), gz = z * 8 + Math.round(v * 8);
-      // filtro suave 4x4 (las 4 subceldas del vértice pesan más) para que las huellas sean redondeadas y no en dientes de sierra
-      let c = 0, wsum = 0, ring = 0; for (let b = -2; b <= 1; b++) for (let a = -2; a <= 1; a++) { const inner = a >= -1 && a <= 0 && b >= -1 && b <= 0; const v = snowCompAt(gx + a, gz + b); const wg = inner ? 1 : 0.3; c += v * wg; wsum += wg; if (!inner) ring = Math.max(ring, v); }
-      c /= wsum;
-      const lim = Math.max(0, h - 0.02); h -= Math.min(c, lim); h += Math.max(0, ring * 0.5 - c) * 0.18; cs[j * N + i] = Math.min(1, c / Math.max(0.05, lim)); // borde: la nieve apartada se levanta un poco
-    }
-    hs[j * N + i] = h;
-  }
-  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { // normales suaves desde la malla de alturas
-    const k = j * N + i; let gx, gz;
-    if (pressed) { const hx0 = hs[j * N + Math.max(0, i - 1)], hx1 = hs[j * N + Math.min(sub, i + 1)], hz0 = hs[Math.max(0, j - 1) * N + i], hz1 = hs[Math.min(sub, j + 1) * N + i]; gx = (hx1 - hx0) / ((Math.min(sub, i + 1) - Math.max(0, i - 1)) / sub); gz = (hz1 - hz0) / ((Math.min(sub, j + 1) - Math.max(0, j - 1)) / sub); }
-    else { const u = i / sub, v = j / sub, e = 0.18; gx = (field(u + e, v) - field(u - e, v)) / (2 * e); gz = (field(u, v + e) - field(u, v - e)) / (2 * e); }
-    const l = Math.hypot(gx, 1, gz); const nx = -gx / l, nz = -gz / l;
-    ns[k] = (clamp(Math.round((nx * 0.5 + 0.5) * 15), 0, 15) << 4) | clamp(Math.round((nz * 0.5 + 0.5) * 15), 0, 15);
-  }
-  // la compactación viaja en el canal de AO (3 = nieve suelta, menor = pisada)
-  const V = (i, j) => { const k = j * N + i; B.v(x + i / sub, y + hs[k], z + j / sub, i / sub, j / sub, layer, fl | 2, sky, blk, 3 - cs[k] * 1.5, ns[k]); };
-  for (let j = 0; j < sub; j++) for (let i = 0; i < sub; i++) { B.grow(); V(i, j + 1); V(i + 1, j + 1); V(i + 1, j); V(i, j); B.quad(false); }
-  // laterales donde el terreno cae (cubren el hueco bajo el borde redondeado)
-  const sides = [[0, 1, [1, 1], [1, 0]], [1, -1, [0, 0], [0, 1]], [4, LR, [0, 1], [1, 1]], [5, -LR, [1, 0], [0, 0]]];
-  for (const [f, off, ca, cb] of sides) {
-    const j = ri + off; if (T_FULL[regB[j]] || regB[j] === ID.snow) continue;
-    const ha = field(ca[0], ca[1]), hb = field(cb[0], cb[1]); B.grow();
-    B.v(x + ca[0], y, z + ca[1], 0, 1, layer, F_SNOW | f, sky, blk, 2, 0x88); B.v(x + cb[0], y, z + cb[1], 1, 1, layer, F_SNOW | f, sky, blk, 2, 0x88);
-    B.v(x + cb[0], y + hb, z + cb[1], 1, 1 - hb, layer, F_SNOW | f, sky, blk, 3, 0x88); B.v(x + ca[0], y + ha, z + ca[1], 0, 1 - ha, layer, F_SNOW | f, sky, blk, 3, 0x88);
-    B.quad(false);
-  }
-}
 
 </script>
 <script>
@@ -2827,15 +2944,22 @@ const VS_CHUNK = `#version 300 es
 layout(location=0) in vec3 a_pos; layout(location=1) in uvec4 a_tex; layout(location=2) in vec4 a_lit;
 uniform mat4 u_vp; uniform vec3 u_off; uniform vec3 u_grass[48]; uniform vec3 u_foli[48];
 ${'##COMMON##'}
-out vec3 v_pos; out vec3 v_uv; flat out uint v_flags; out vec3 v_lit; out vec3 v_tint; out vec3 v_world; flat out uint v_snowN;
+out vec3 v_pos; out vec3 v_uv; flat out uint v_flags; out vec3 v_lit; out vec3 v_tint; out vec3 v_world; flat out uint v_snowN; out vec3 v_n; out vec2 v_flow;
 void main(){
   vec3 p=a_pos+u_off; vec3 w=p+u_camPos; uint fl=a_tex.w;
+  // superficies realistas (agua, lava, nieve): normal suave en u,v y flujo en la capa
+  v_n=vec3(0.0,1.0,0.0); v_flow=vec2(0.0);
+  float oceanW=0.0;
+  if((fl&32768u)!=0u){ vec2 nn=vec2(a_tex.xy)/256.0*2.0-1.0; v_n=vec3(nn.x,sqrt(max(0.0,1.0-dot(nn,nn))),nn.y); uint fw=a_tex.z; if((fw&16384u)!=0u) oceanW=float(fw&255u)/255.0; else v_flow=vec2(float(fw&127u)-64.0,float((fw>>7u)&127u)-64.0)/40.0; }
   if((fl&16u)!=0u){ p.x+=sin(u_time*1.6+w.z*0.7+w.y*0.5)*0.035*(1.0+u_rain); p.z+=cos(u_time*1.3+w.x*0.6)*0.03*(1.0+u_rain); p.y+=sin(u_time*1.9+w.x+w.z)*0.015; }
   if((fl&32u)!=0u){ p.x+=sin(u_time*2.1+w.x*0.4+w.z*0.3)*0.09*(1.0+u_rain); p.z+=cos(u_time*1.7+w.z*0.5)*0.07*(1.0+u_rain); }
   uint tc=uint(a_lit.w*255.0+0.5);
   if((fl&64u)!=0u && (fl&7u)==2u){
-    if(tc<200u){ float A=0.16+u_rain*0.55; p.y+=oceanWave(w.xz).x*0.85 - A*1.1 - 0.05; } // océano: oleaje (el agua finita no tiene olas de mar)
+    float ow=(fl&32768u)!=0u ? oceanW : (tc<200u?1.0:0.0); // peso del oleaje: 1 en mar abierto, fracción donde el mar toca agua dulce (sin escalones)
+    if(ow>0.0){ float A=0.16+u_rain*0.55; p.y+=(oceanWave(w.xz).x*0.85 - A*1.1 - 0.05)*ow; }
   }
+  // chorro que cae: el tubo ondula como un líquido de verdad
+  if((fl&32768u)!=0u && tc==201u){ float wv=sin(w.y*2.3-u_time*9.0+w.x*1.7)*0.035+sin(w.y*5.1-u_time*14.0+w.z*2.3)*0.018; p.x+=wv*v_n.x+wv*0.5; p.z+=wv*v_n.z-wv*0.4; }
   if((fl&2048u)!=0u){ }
   v_pos=p; v_world=w; v_uv=vec3(vec2(a_tex.xy)/256.0,float(a_tex.z)); v_flags=fl; v_lit=a_lit.xyz;
   v_tint=vec3(1.0); if(tc>=64u) v_tint=pow(u_foli[min(tc-64u,47u)],vec3(2.2)); else if(tc>=1u) v_tint=pow(u_grass[min(tc-1u,47u)],vec3(2.2));
@@ -2846,9 +2970,16 @@ void main(){
 const FS_CHUNK = `#version 300 es
 ${'##COMMON##'}
 uniform sampler2DArray u_tex; uniform float u_pass;
-in vec3 v_pos; in vec3 v_uv; flat in uint v_flags; in vec3 v_lit; in vec3 v_tint; in vec3 v_world; flat in uint v_snowN;
+in vec3 v_pos; in vec3 v_uv; flat in uint v_flags; in vec3 v_lit; in vec3 v_tint; in vec3 v_world; flat in uint v_snowN; in vec3 v_n; in vec2 v_flow;
 out vec4 o;
 const vec3 NR[7]=vec3[7](vec3(1,0,0),vec3(-1,0,0),vec3(0,1,0),vec3(0,-1,0),vec3(0,0,1),vec3(0,0,-1),vec3(0,1,0));
+// Voronoi animado: (distancia al centro más cercano, al segundo, id de la placa)
+vec3 vor(vec2 p, float tt){ vec2 i=floor(p), f=fract(p); float d1=8.0, d2=8.0, id=0.0;
+  for(int y=-1;y<=1;y++) for(int x=-1;x<=1;x++){ vec2 g=vec2(float(x),float(y)); vec2 h=vec2(hash12(i+g),hash12(i+g+17.31)); vec2 r=g+0.5+0.42*sin(tt+6.2831*h)-f; float d=dot(r,r);
+    if(d<d1){ d2=d1; d1=d; id=hash12(i+g+3.7); } else if(d<d2) d2=d; }
+  return vec3(sqrt(d1),sqrt(d2),id); }
+// color de cuerpo negro: 0 = frío (negro) … 1 = muy caliente (amarillo blanquecino)
+vec3 blackbody(float t){ vec3 a=mix(vec3(0.0),vec3(0.55,0.025,0.0),smoothstep(0.0,0.3,t)); vec3 b=mix(vec3(1.0,0.22,0.01),vec3(1.0,0.62,0.16),smoothstep(0.55,0.85,t)); return mix(a,mix(b,vec3(1.0,0.86,0.55),smoothstep(0.88,1.0,t)),smoothstep(0.25,0.6,t)); }
 void main(){
   uint fl=v_flags; uint fi=fl&7u; vec2 uv=v_uv.xy;
   if((fl&128u)!=0u){ uv+=vec2(sin(u_time*0.35+v_world.z*0.4+uv.y*3.0),cos(u_time*0.3+v_world.x*0.4+uv.x*3.0))*0.12; }
@@ -2858,13 +2989,56 @@ void main(){
   if((fl&8u)!=0u && t.a<0.4) discard;
   vec3 alb=pow(t.rgb,vec3(2.2))*v_tint; float alpha=t.a;
   vec3 N=NR[min(fi,6u)];
+  bool surf=(fl&32768u)!=0u; if(surf) N=normalize(v_n);
+  // ---- lava fundida: placas de costra que avanzan con la colada y se agrietan, roca incandescente debajo
+  float lavaHot=0.0; vec3 lavaGlow=vec3(0.0);
+  if((fl&128u)!=0u){
+    vec2 fw=v_flow*1.6; float spd=length(fw);
+    bool tube=surf && abs(N.y)<0.3 && fi==0u; // chorro de lava que cae: cuerda viscosa con la costra estirada hacia abajo
+    vec2 p=tube ? vec2(atan(N.z,N.x)*0.7,(v_world.y+u_time*0.35)*0.3) : (v_world.xz+vec2(v_world.y*0.37))*1.05;
+    float tt=u_time*0.05;
+    vec3 va; float e, pid;
+    if(spd<0.05 || tube){ va=vor(p,tt); e=va.y-va.x; pid=va.z; } // lava quieta: las placas derivan y las grietas se abren y cierran
+    else { float ph=u_time/8.0+vnoise(p*0.3)*0.5; float f0=fract(ph), f1=fract(ph+0.5); float w0=1.0-abs(1.0-2.0*f0);
+      vec3 a=vor(p-fw*f0*1.6,tt), b=vor(p-fw*f1*1.6+7.31,tt); float ea=a.y-a.x, eb=b.y-b.x; e=w0>0.5?ea:eb; e=min(e,mix(eb,ea,w0)+0.04); pid=w0>0.5?a.z:b.z; va=w0>0.5?a:b; }
+    // temperatura: más caliente donde fluye rápido, en los chorros y en manchas que laten despacio
+    float hot=clamp(0.42+spd*0.7+(fbm(v_world.xz*0.28+vec2(u_time*0.02,-u_time*0.015))-0.5)*1.5+(tube?0.4:0.0),0.0,1.0);
+    // grietas sin parpadeo: más anchas cuando ocupan menos de un píxel, conservando su brillo total
+    float cw=0.045+0.15*hot*hot; float wd=max(cw,fwidth(e)*1.5); float cov=clamp((1.0-smoothstep(0.0,wd,e))*(cw/wd),0.0,1.0);
+    float NdV0=clamp(dot(-normalize(v_pos),N),0.0,1.0); cov*=mix(0.45,1.0,sqrt(NdV0)); // de canto la costra tapa las grietas hundidas
+    // zonas calientes: la costra se funde y aparece roca líquida
+    float pool=smoothstep(0.5,0.85,hot)*(1.0-smoothstep(0.0,0.4,e)*0.55);
+    // burbujas que se hinchan y revientan (pocas, en las zonas calientes)
+    vec2 bq=v_world.xz*0.7; vec2 bi=floor(bq), bf=fract(bq); float bh=hash12(bi+5.1); float bl=fract(u_time*(0.08+bh*0.07)+bh*7.0);
+    float bd=length(bf-vec2(hash12(bi+1.3),hash12(bi+2.9))*0.6-0.2); float br=0.04+0.16*bl; float bub=(1.0-smoothstep(br-0.04,br,bd))*step(0.82,bh)*smoothstep(0.0,0.2,bl)*(1.0-smoothstep(0.8,1.0,bl))*hot;
+    float molten=clamp(max(max(cov,pool),bub),0.0,1.0);
+    lavaHot=molten;
+    // emisión de cuerpo negro (K): 800 rojo apagado, 1000 rojo, 1300 naranja, 1450 amarillo; solo lo más caliente hace bloom
+    float Tc=720.0+300.0*(1.0-smoothstep(0.0,0.25,e))*(0.35+0.65*hot); // la costra cerca de las grietas aún brilla rojo oscuro
+    float Tm=1230.0+210.0*hot+150.0*bub+60.0*pool;
+    vec3 Ec=vec3(1.0,0.6*pow(clamp((Tc-700.0)/1100.0,0.0,1.0),1.6),0.5*pow(clamp((Tc-1300.0)/1500.0,0.0,1.0),2.0))*pow(Tc/1300.0,9.0)*5.0;
+    vec3 Em=vec3(1.0,0.6*pow(clamp((Tm-700.0)/1100.0,0.0,1.0),1.6),0.5*pow(clamp((Tm-1300.0)/1500.0,0.0,1.0),2.0))*pow(Tm/1300.0,9.0)*5.0;
+    Em*=0.94+0.06*sin(u_time*1.3+pid*20.0);
+    // relieve: placas abombadas biseladas hacia su centro, grietas hundidas
+    float hgt=smoothstep(0.0,0.18,e)*(1.0-molten)*0.1+bub*0.04;
+    vec3 dpx=dFdx(v_pos), dpy=dFdy(v_pos); float dhx=dFdx(hgt), dhy=dFdy(hgt);
+    vec3 r1=cross(dpy,N), r2=cross(N,dpx); float det=dot(dpx,r1); vec3 sg=(dhx*r1+dhy*r2)*sign(det); N=normalize(abs(det)*N-sg);
+    // costra: basalto oscuro y rugoso; su propio brillo rojizo junto a las grietas se suma después de iluminarla
+    alb=mix(vec3(0.022,0.019,0.017),vec3(0.042,0.033,0.028),pid)*(0.7+0.6*vnoise(v_world.xz*7.0)); // basalto casi negro
+    lavaGlow=mix(Ec,Em,molten); // mezcla final: costra (tenue) ↔ roca fundida
+  }
   float snowComp=0.0; // nieve pisada (0 = polvo suelto, 1 = compactada); viaja en el canal de AO
-  if((fl&2048u)!=0u && fi==2u){ vec2 nn=vec2(float(v_snowN>>4u),float(v_snowN&15u))/15.0*2.0-1.0; N=normalize(vec3(nn.x,sqrt(max(0.05,1.0-dot(nn,nn))),nn.y));
-    snowComp=clamp((1.0-v_lit.z)*2.0,0.0,1.0);
-    // polvo: relieve esponjoso fino (grumos suaves); la nieve compactada queda lisa
-    vec2 g=v_world.xz*7.0; float f0=vnoise(g), fx=vnoise(g+vec2(0.15,0.0)), fz=vnoise(g+vec2(0.0,0.15));
-    N=normalize(N+vec3(f0-fx,0.0,f0-fz)*1.4*(1.0-snowComp)); }
-  float sky=v_lit.x, blk=v_lit.y, ao=v_lit.z; ao=mix(0.32,1.0,ao); ao*=ao; if((fl&2048u)!=0u && fi==2u) ao=mix(1.0,0.8,snowComp);
+  bool snowS=(fl&2048u)!=0u;
+  if(snowS){
+    if(surf && fi==2u) snowComp=clamp((1.0-v_lit.z)*2.0,0.0,1.0);
+    // nieve de verdad: albedo muy alto y ligeramente azulado, sin la textura de 16x16
+    alb=vec3(0.80,0.83,0.88)*(0.96+0.04*vnoise(v_world.xz*1.7));
+    // polvo: relieve esponjoso en dos escalas (grumos y cristales); la compactada queda lisa
+    vec3 wp=v_world*vec3(6.5,6.5,6.5); float f0=vnoise(wp.xz+wp.y), fx=vnoise(wp.xz+wp.y+vec2(0.17,0.0)), fz=vnoise(wp.xz+wp.y+vec2(0.0,0.17));
+    vec3 wq=v_world*19.0; float g0=vnoise(wq.xz+wq.y), gx2=vnoise(wq.xz+wq.y+vec2(0.17,0.0)), gz2=vnoise(wq.xz+wq.y+vec2(0.0,0.17));
+    N=normalize(N+(vec3(f0-fx,0.0,f0-fz)*1.3+vec3(g0-gx2,0.0,g0-gz2)*0.5)*(1.0-snowComp*0.85));
+  }
+  float sky=v_lit.x, blk=v_lit.y, ao=v_lit.z; ao=mix(0.32,1.0,ao); ao*=ao; if(snowS && surf) ao=mix(1.0,0.85,snowComp)*mix(0.75,1.0,v_lit.z>0.6?1.0:v_lit.z/0.6);
   vec3 V=normalize(v_pos);
   vec3 col;
   if((fl&1024u)!=0u){ // portal del End: campo estelar
@@ -2875,28 +3049,27 @@ void main(){
   float NdL=dot(N,u_sunDir); float direct=0.0;
   if(u_dim==0){
     float vis=smoothstep(0.5,0.93,sky); float sh=vis>0.0?getShadow(v_pos,N):0.0;
-    direct=max(NdL,0.0)*sh*vis;
+    direct=snowS ? max((NdL+0.3)/1.3,0.0)*sh*vis : max(NdL,0.0)*sh*vis;
     if((fl&16384u)!=0u) direct+=max(-NdL,0.0)*0.45*sh*vis + 0.15*sh*vis;
   }
   vec3 amb = u_dim==0 ? u_amb*(0.55+0.45*(N.y*0.5+0.5))*(sky*sky) : u_amb*(0.75+0.25*(N.y*0.5+0.5));
   amb+=vec3(0.008+0.03*u_bright);
   vec3 torch=vec3(1.0,0.6,0.3)*pow(blk,2.3)*1.7 + dynLights(v_pos);
   col=alb*(u_sunCol*direct+(amb+torch)*ao);
-  if((fl&2048u)!=0u){ // nieve: dispersión subsuperficial + destellos
-    col=mix(col,col*vec3(0.82,0.9,1.08),1.0-direct);
-    col*=mix(1.0,0.78,snowComp); // compactada: más densa y algo más gris
-    { vec3 R2=reflect(V,N); col+=u_sunCol*direct*pow(max(dot(R2,u_sunDir),0.0),28.0)*0.1*snowComp; } // y un poco más brillante, como hielo
-    vec3 R=reflect(V,N); float h=hash13(floor(v_world*28.0+floor(u_time*0.0)));
-    col+=u_sunCol*direct*step(0.988,h)*pow(max(dot(R,u_sunDir),0.0),6.0)*2.5*(1.0-snowComp);
-    col+=u_sunCol*direct*pow(max(dot(R,u_sunDir),0.0),20.0)*0.25;
+  if(snowS){ // nieve: dispersión subsuperficial (sombras azuladas), compactación y destellos de cristales
+    col=mix(col,col*vec3(0.78,0.88,1.12),clamp(1.0-direct*1.4,0.0,1.0));
+    col*=mix(1.0,0.8,snowComp); // compactada: más densa y algo más gris
+    vec3 R=reflect(V,N);
+    col+=u_sunCol*direct*pow(max(dot(R,u_sunDir),0.0),30.0)*(0.06+0.2*snowComp); // la compactada brilla más, como hielo
+    // destellos: cada cristal tiene su propia orientación; solo brilla el que refleja el sol hacia el ojo (cambian al moverse)
+    vec3 cell=floor(v_world*36.0); float hh=hash13(cell);
+    if(hh>0.93){ vec3 rn=normalize(N+(vec3(hash13(cell+1.7),hash13(cell+4.1),hash13(cell+8.3))-0.5)*0.9); float g=pow(max(dot(reflect(V,rn),u_sunDir),0.0),400.0); col+=u_sunCol*direct*g*9.0*(1.0-snowComp)*(1.0-smoothstep(12.0,32.0,length(v_pos))); }
   }
-  if((fl&256u)!=0u) col=alb*2.4+col*0.3;
+  if((fl&256u)!=0u && (fl&128u)==0u) col=alb*2.4+col*0.3;
   if((fl&128u)!=0u){
-    vec2 q=v_world.xz*0.9+vec2(v_world.y*0.3); float t=u_time*0.25;
-    float n1=fbm(q*1.3+vec2(t,-t*0.7)); float n2=fbm(q*3.1-vec2(t*1.3,t*0.4)+n1*2.0);
-    float crust=smoothstep(0.42,0.62,n2); float hot=pow(1.0-crust,2.0);
-    vec3 lc=mix(vec3(1.0,0.32,0.03),vec3(1.0,0.85,0.35),smoothstep(0.3,0.0,abs(n1-0.5)))*3.2*(0.85+0.15*sin(u_time*2.0+n1*6.0));
-    col=mix(lc,vec3(0.10,0.035,0.02)*(0.5+u_amb),crust*0.85)+vec3(0.6,0.12,0.0)*hot*0.6;
+    // costra iluminada por el sol/ambiente + el calor de la roca fundida que asoma por las grietas
+    vec3 R=reflect(V,N); col+=u_sunCol*direct*pow(max(dot(R,u_sunDir),0.0),24.0)*0.08*(1.0-lavaHot);
+    col=col*(1.0-lavaHot)+lavaGlow;
   }
   if((fl&4096u)!=0u){ col=alb*4.0; alpha=t.a; }
   if((fl&512u)!=0u){ col=alb*2.2; alpha=0.75; }
@@ -2909,68 +3082,152 @@ void main(){
 }`;
 const FS_WATER = `#version 300 es
 ${'##COMMON##'}
-uniform sampler2DArray u_tex; uniform sampler2D u_sceneCopy; uniform sampler2D u_depthCopy; uniform vec2 u_res; uniform mat4 u_proj; uniform mat4 u_view; uniform float u_near; uniform float u_far;
-in vec3 v_pos; in vec3 v_uv; flat in uint v_flags; in vec3 v_lit; in vec3 v_tint; in vec3 v_world; flat in uint v_snowN;
+uniform sampler2D u_sceneCopy; uniform sampler2D u_depthCopy; uniform vec2 u_res; uniform mat4 u_proj; uniform mat4 u_view; uniform float u_near; uniform float u_far;
+uniform sampler2D u_ripple; uniform vec4 u_ripRect; // simulación de ondas: origen xz, 1/tamaño, activa
+in vec3 v_pos; in vec3 v_uv; flat in uint v_flags; in vec3 v_lit; in vec3 v_tint; in vec3 v_world; flat in uint v_snowN; in vec3 v_n; in vec2 v_flow;
 out vec4 o;
 float linD(float d){ float z=d*2.0-1.0; return 2.0*u_near*u_far/(u_far+u_near-z*(u_far-u_near)); }
-float wh(vec2 p){ float t=u_time;
-  float h=sin(dot(p,vec2(0.9,0.4))*0.9+t*1.4)*0.30+sin(dot(p,vec2(-0.5,0.8))*1.3+t*1.8)*0.22+sin(dot(p,vec2(0.2,-1.0))*2.4+t*2.6)*0.12;
-  h+=(vnoise(p*1.8+vec2(t*0.6,t*0.4))-0.5)*0.35+(vnoise(p*4.5-vec2(t*0.9,-t*0.7))-0.5)*0.16+(vnoise(p*11.0+vec2(t*1.4,t))-0.5)*0.06; return h; }
+// oleaje fino de viento: ondas direccionales con derivada analítica + ruido; las más finas que un píxel se apagan (sin centelleo)
+vec2 wgrad(vec2 p, float t, float fpw){
+  vec2 g=vec2(0.0);
+  const vec4 D[5]=vec4[5](vec4(0.87,0.49,1.7,0.055),vec4(-0.43,0.90,2.6,0.036),vec4(0.29,-0.96,4.1,0.024),vec4(0.96,0.28,6.9,0.013),vec4(-0.75,-0.66,11.0,0.007));
+  for(int i=0;i<5;i++){ float k=D[i].z; float bl=clamp(2.0-4.0*fpw*k/6.2832,0.0,1.0); float ph=dot(D[i].xy,p)*k+t*sqrt(9.8*k)*0.5+float(i)*1.31; g+=D[i].xy*k*D[i].w*cos(ph)*bl; }
+  float e=0.05; vec2 q=p*3.3+vec2(t*0.31,-t*0.23); float n0=vnoise(q), nx=vnoise(q+vec2(e*3.3,0.0)), nz=vnoise(q+vec2(0.0,e*3.3));
+  return g+vec2(nx-n0,nz-n0)/e*0.022*clamp(2.0-4.0*fpw*3.3,0.0,1.0);
+}
+// gotas de lluvia: anillos que se expanden y se apagan
+vec2 rainRip(vec2 p, float t){ vec2 g=vec2(0.0);
+  for(int l=0;l<3;l++){ vec2 q=p*2.4+float(l)*17.3; vec2 i=floor(q), f=fract(q); float h=hash12(i+float(l)); float ph=fract(t*(0.75+h*0.4)+h*9.0);
+    vec2 c=vec2(hash12(i+3.7),hash12(i+9.1))*0.6+0.2; vec2 d=f-c; float r=length(d); float R=ph*0.55; float w=r-R;
+    g+=d/max(r,1e-3)*exp(-w*w*500.0)*(1.0-ph)*(1.0-ph)*sin(w*70.0)*0.9; }
+  return g; }
+// cáusticas (patrón clásico de agua, enlosable y animado)
+float caustic(vec2 uv){
+  vec2 p=mod(uv*6.28318,6.28318)-250.0; vec2 i=p; float c=1.0; float inten=0.005;
+  for(int n=0;n<4;n++){ float t=u_time*0.45*(1.0-(3.5/float(n+1))); i=p+vec2(cos(t-i.x)+sin(t+i.y),sin(t-i.y)+cos(t+i.x)); c+=1.0/length(vec2(p.x/(sin(i.x+t)/inten),p.y/(cos(i.y+t)/inten))); }
+  c/=4.0; c=1.17-pow(c,1.4); return clamp(pow(abs(c),8.0),0.0,2.0); }
 void main(){
-  uint fi=v_flags&7u; float sky=v_lit.x; vec3 V=normalize(v_pos);
-  vec3 N=vec3(0,1,0);
-  bool ocean=v_snowN<200u, falling=v_snowN==201u; float crest=0.0;
-  if(fi==2u||fi==3u){ vec2 p=v_world.xz; float e=0.08; float h0=wh(p); float rip=ocean?0.22:0.07; // agua quieta de lagos/charcos: ondas pequeñas
-    N=normalize(vec3(-(wh(p+vec2(e,0))-h0)/e*rip,1.0,-(wh(p+vec2(0,e))-h0)/e*rip));
-    if(ocean){ vec3 ow=oceanWave(p); N=normalize(N+vec3(-ow.y,0.0,-ow.z)*0.85); float A=0.16+u_rain*0.55; crest=smoothstep(0.55,1.0,ow.x/(A*1.6)); }
-    if(fi==3u) N=-N; }
-  else { const vec3 NR[6]=vec3[6](vec3(1,0,0),vec3(-1,0,0),vec3(0,1,0),vec3(0,-1,0),vec3(0,0,1),vec3(0,0,-1)); N=NR[fi];
-    // chorro que cae: vetas verticales que bajan rápido (como agua vertida, transparente y con brillo)
-    float st=falling?(vnoise(vec2((v_world.x+v_world.z)*5.0,v_world.y*1.2+u_time*6.0))-0.5)*0.6:0.0;
-    N=normalize(N+vec3(sin(v_world.y*3.0+u_time*2.0)*0.05+st,0,cos(v_world.y*3.0+u_time*2.0)*0.05+st)); }
-  float NdV=max(dot(-V,N),0.0); float fres=0.02+0.98*pow(1.0-NdV,5.0); if(u_under>0.5) fres=0.0;
-  vec3 waterCol=vec3(0.02,0.11,0.16); vec3 absorb=vec3(0.45,0.09,0.06);
+  uint fl=v_flags; uint fi=fl&7u; float sky=v_lit.x; vec3 V=normalize(v_pos); float t=u_time;
+  bool ocean=v_snowN<200u, falling=v_snowN==201u; bool surf=(fl&32768u)!=0u;
+  bool top=surf && !falling;
+  const vec3 NR[6]=vec3[6](vec3(1,0,0),vec3(-1,0,0),vec3(0,1,0),vec3(0,-1,0),vec3(0,0,1),vec3(0,0,-1));
+  vec3 Nm=surf?normalize(v_n):NR[min(fi,5u)];
+  vec3 N=Nm; float crest=0.0, rip=0.0, agit=0.0;
+  float fpw=max(length(dFdx(v_world)),length(dFdy(v_world))); // tamaño del píxel en el mundo
+  float drop=v_lit.z*15.0; // chorros: metros de caída; superficies: profundidad de la columna
+  if(top){
+    vec2 p=v_world.xz;
+    // el detalle avanza con la corriente (flow map en dos fases, sin costuras)
+    vec2 flw=v_flow*1.6; float spd=length(flw); agit=clamp(spd*0.7,0.0,1.0);
+    float f0=fract(t*0.22), f1=fract(t*0.22+0.5); float w0=1.0-abs(1.0-2.0*f0);
+    vec2 g=mix(wgrad(p-flw*f1*2.0+0.37,t,fpw),wgrad(p-flw*f0*2.0,t,fpw),w0);
+    g*=ocean?1.5:mix(0.35,2.0,agit); // un lago tranquilo es casi un espejo; un río o una caída se agita
+    if(ocean){ vec3 ow=oceanWave(p); g+=ow.yz*0.85; float A=0.16+u_rain*0.55; crest=smoothstep(0.55,1.0,ow.x/(A*1.6)); }
+    // ondas de interacción: lo que se mueve en el agua deja estela y anillos (simulación en GPU)
+    if(u_ripRect.w>0.5){ vec2 ru=(p-u_ripRect.xy)*u_ripRect.z; if(ru.x>0.004&&ru.x<0.996&&ru.y>0.004&&ru.y<0.996){ float e=1.0/256.0; float h0=texture(u_ripple,ru).r; float hx=texture(u_ripple,ru+vec2(e,0.0)).r; float hz=texture(u_ripple,ru+vec2(0.0,e)).r; g+=vec2(hx-h0,hz-h0)*10.0; rip=abs(h0); agit=max(agit,clamp(rip*1.5,0.0,1.0)); } }
+    if(u_rain>0.05) g+=rainRip(p,t)*u_rain*smoothstep(0.75,0.95,sky)*clamp(2.0-fpw*20.0,0.0,1.0);
+    N=normalize(Nm+vec3(-g.x,0.0,-g.y)*Nm.y);
+  } else if(falling){
+    // chorro: vetas que bajan a la velocidad de caída (v = raíz de 2gh) y burbujas de aire
+    float vf=sqrt(19.6*max(drop,0.15)); float a=atan(Nm.z,Nm.x);
+    float st=vnoise(vec2(a*2.5,(v_world.y+t*vf)*0.5))-0.5; float st2=vnoise(vec2(a*6.0+3.0,(v_world.y+t*vf)*1.4))-0.5;
+    N=normalize(Nm+vec3(-Nm.z,0.0,Nm.x)*st*0.9+vec3(0.0,st2*0.6,0.0)); agit=1.0;
+  }
+  bool below=!gl_FrontFacing; if(below) N=-N; // superficie vista desde debajo del agua
+  bool under=below || u_under>0.5;
+  { float k=dot(N,-V); if(k<0.02) N=normalize(N+(-V)*(0.02-k)); } // normales de espaldas al ojo: sin puntos negros rasantes
+  float NdV=clamp(dot(-V,N),0.0,1.0);
   float vis=smoothstep(0.5,0.93,sky); float sh=u_dim==0?getShadow(v_pos,vec3(0,1,0))*vis:0.0;
-  vec3 refl; vec3 R=reflect(V,N); if(R.y<0.02) R.y=0.02+abs(R.y)*0.2; R=normalize(R);
-  refl=skyColor(R)*mix(0.05,1.0,sky*sky);
-  vec2 suv=gl_FragCoord.xy/u_res;
-  vec3 refr;
+  // agua de mar: azul y clara; agua dulce: algo más verdosa y turbia (absorción y dispersión por bloque)
+  vec3 sA=ocean?vec3(0.45,0.07,0.03):vec3(0.45,0.10,0.08);
+  vec3 sS=ocean?vec3(0.02,0.035,0.06):vec3(0.05,0.07,0.07);
+  vec3 sT=sA+sS;
+  vec3 lightIn=u_amb*0.9*(0.2+0.8*sky*sky)+u_sunCol*sh*0.8+vec3(1.0,0.6,0.3)*pow(v_lit.y,2.3)*0.35+dynLights(v_pos)*0.3;
+  vec3 R=reflect(V,N); if(!under && R.y<0.02) R.y=0.02+abs(R.y)*0.2; R=normalize(R);
+  // reflejo del cielo; cerca del horizonte, donde un rayo sin acierto casi siempre daría con tierra, un tono de terreno oscuro
+  vec3 refl=mix(skyColor(R),skyColorK(normalize(vec3(R.x,0.02,R.z)),0.0)*vec3(0.32,0.36,0.3)*0.5,smoothstep(0.16,0.0,R.y)*0.7)*mix(0.03,1.0,sky*sky);
+  float fres=0.02+0.98*pow(1.0-NdV,5.0);
+  vec2 suv=gl_FragCoord.xy/u_res; vec3 refr; float edge=1.0, vDepth=1.0;
 #if Q>=2
-  float dScene=linD(texture(u_depthCopy,suv).r); float dHere=linD(gl_FragCoord.z);
-  vec2 off=N.xz*0.06*clamp((dScene-dHere)*0.25,0.0,1.0)/(1.0+dHere*0.05);
-  vec2 ruv=suv+off; float dS2=linD(texture(u_depthCopy,ruv).r); if(dS2<dHere) ruv=suv;
-  float thick=max(linD(texture(u_depthCopy,ruv).r)-dHere,0.0); if(u_under>0.5) thick=0.5; if(falling) thick=min(thick,0.7); // un chorro es fino: no absorbe como la profundidad de lo que tiene detrás
+  float zH=linD(gl_FragCoord.z); float zS=linD(texture(u_depthCopy,suv).r);
+  // refracción: solo la inclinación del detalle, en espacio de vista (una rampa no desplaza toda la imagen)
+  vec3 tilt=mat3(u_view)*(N-Nm); float rl0=length(v_pos)*max(zS/max(zH,1e-3)-1.0,0.0);
+  vec2 off=tilt.xy*0.035*clamp(rl0*0.6,0.0,1.0)/max(1.0,zH*0.08);
+  vec2 ruv=clamp(suv+off,0.001,0.999); float zR=linD(texture(u_depthCopy,ruv).r);
+  ruv=suv+off*smoothstep(zH,zH+0.3,zR); zR=linD(texture(u_depthCopy,ruv).r); if(zR<zH) zR=zS; // no refractar lo que está delante del agua
+  vec3 fp=u_camPos+v_pos*(zR/max(zH,1e-3)); // fondo refractado, reconstruido con la profundidad
+  float rayLen=distance(fp,u_camPos+v_pos); vDepth=max(v_world.y-fp.y,0.0);
+  if(under && !below) rayLen=min(rayLen,6.0);
+  if(falling){ rayLen=2.0*0.3*max(NdV,0.05); vDepth=0.3; }
   vec3 behind=texture(u_sceneCopy,ruv).rgb;
-  vec3 tr=exp(-absorb*thick*0.9);
-  refr=behind*tr+waterCol*(u_amb+u_sunCol*0.25*sh)*(1.0-tr)*mix(0.15,1.0,sky*sky);
-  // caústicas
-  float ca=pow(abs(sin(wh(v_world.xz*0.7)*6.0)),8.0); refr+=behind*ca*0.25*exp(-thick*0.2)*sh;
+  if(!falling && !under){
+    behind*=mix(1.0,0.62,smoothstep(0.0,0.05,vDepth)); // el fondo mojado es más oscuro
+    vec3 Tl=exp(-(sT-min(sT.r,min(sT.g,sT.b)))*vDepth*1.3); behind*=Tl; // la luz del sol también atraviesa el agua hasta el fondo
+    // cáusticas en el fondo, siguiendo el sol refractado
+    if(sh>0.0){ vec3 Ts=refract(-u_sunDir,vec3(0.0,1.0,0.0),0.75); vec2 cp=fp.xz+Ts.xz/max(-Ts.y,0.3)*vDepth; float cau=caustic(cp*0.23); float foc=exp(-vDepth*0.25)*smoothstep(0.0,0.3,vDepth); behind*=1.0+(cau*2.2-0.5)*foc*sh*clamp(2.0-fpw*6.0,0.0,1.0); }
+  }
+  vec3 Tv=exp(-sT*rayLen);
+  vec3 ins=lightIn*(sS/sT)*exp(-sT*0.5*vDepth)*(1.0-Tv)*1.6;
+  refr=behind*Tv+ins;
+  edge=smoothstep(0.0,0.045,vDepth); // línea de contacto suave en la orilla (no un borde de cristal)
+  // reflejos de pantalla (lo que hay sobre el agua se refleja de verdad)
+  if(!under && sky>0.2 && R.y<0.35){
+    vec3 vp=(u_view*vec4(v_pos,1.0)).xyz; vec3 vr=normalize(mat3(u_view)*R);
+    float jit=fract(52.98*fract(dot(gl_FragCoord.xy,vec2(0.0671,0.00584))));
+    float stepL=0.3+0.3*jit; vec3 ray=vp; bool hit=false; vec2 huv=vec2(0.0);
 #if Q>=3
-  vec3 vp=(u_view*vec4(v_pos,1.0)).xyz; vec3 vr=normalize(mat3(u_view)*R);
-  float stepL=0.6; vec3 ray=vp; bool hit=false; vec2 huv=vec2(0);
-  int STEPS = 32;
-  for(int i=0;i<40;i++){ if(i>=STEPS) break; ray+=vr*stepL; stepL*=1.18; vec4 c=u_proj*vec4(ray,1.0); vec2 uv2=c.xy/c.w*0.5+0.5; if(uv2.x<0.0||uv2.x>1.0||uv2.y<0.0||uv2.y>1.0||c.w<0.0) break; float sd=linD(texture(u_depthCopy,uv2).r); float rd=-ray.z; if(rd>sd+0.05 && rd-sd<stepL*2.0+0.5){ hit=true; huv=uv2; break; } }
-  if(hit && u_under<0.5){ float edge=1.0-smoothstep(0.75,1.0,max(abs(huv.x-0.5),abs(huv.y-0.5))*2.0); refl=mix(refl,texture(u_sceneCopy,huv).rgb,edge); }
-#endif
+    const int STEPS=36;
 #else
-  refr=waterCol*(u_amb+u_sunCol*0.3*sh)*mix(0.2,1.0,sky*sky)*3.0;
+    const int STEPS=20;
 #endif
-  vec3 col=mix(refr,refl,fres);
-  float spec=pow(max(dot(R,u_sunDir),0.0),280.0)*12.0+pow(max(dot(R,u_sunDir),0.0),40.0)*0.35;
-  col+=u_sunCol*spec*sh;
-  col+=(vec3(1.0,0.6,0.3)*pow(v_lit.y,2.3)*0.5+dynLights(v_pos))*0.4;
-  // espuma blanca en las crestas del oleaje
-  if(ocean && fi==2u && u_under<0.5){ float fm=crest*smoothstep(0.45,0.8,vnoise(v_world.xz*1.7+vec2(u_time*0.3,0.0))*0.7+vnoise(v_world.xz*5.0)*0.3); col=mix(col,(u_amb*0.8+u_sunCol*0.5*sh)*0.8,fm*0.55); }
-  // espuma en orillas
-#if Q>=2
-  float foam=1.0-smoothstep(0.0,0.35,thick); if(fi==2u && u_under<0.5) col+=vec3(0.75)*foam*vnoise(v_world.xz*6.0+u_time)*0.6*(u_amb.b+0.2);
+    for(int i=0;i<STEPS;i++){ ray+=vr*stepL; stepL*=Q>=3?1.15:1.25; vec4 c=u_proj*vec4(ray,1.0); if(c.w<=0.0) break; vec2 uv2=c.xy/c.w*0.5+0.5; if(uv2.x<0.0||uv2.x>1.0||uv2.y<0.0||uv2.y>1.0) break; float sd=linD(texture(u_depthCopy,uv2).r); float rd=-ray.z; if(rd>sd+0.02 && rd-sd<0.4+0.03*rd+stepL){ hit=true; huv=uv2; break; } }
+    if(hit){ float ed=(1.0-smoothstep(0.7,1.0,max(abs(huv.x-0.5),abs(huv.y-0.5))*2.0)); refl=mix(refl,texture(u_sceneCopy,huv).rgb,ed); }
+  }
+#else
+  // sin copia de la escena: la profundidad de la columna se calculó al hacer la malla
+  vDepth=top?drop:0.6; vec3 Tv=exp(-sT*vDepth*(1.0+1.5*(1.0-NdV)));
+  refr=lightIn*(sS/sT)*(1.0-Tv)*1.6;
 #endif
+  vec3 col;
+  if(below){
+    // desde abajo: ventana de Snell (se ve el cielo) y fuera de ella reflexión total interna
+    vec3 tdir=refract(V,N,1.33); vec3 Lw=lightIn*(sS/sT)*1.6;
+    if(dot(tdir,tdir)<0.001) col=Lw;
+    else { float ct=clamp(dot(-V,N),0.0,1.0); float fr2=0.02+0.98*pow(1.0-ct,5.0); col=mix(skyColor(tdir)*mix(0.03,1.0,sky*sky)*0.85+u_sunCol*sh*pow(max(dot(tdir,u_sunDir),0.0),300.0)*8.0,Lw,fr2); }
+  } else {
+    col=mix(refr,refl,fres*edge);
+    // brillo del sol (GGX); la rugosidad crece donde la normal cambia más rápido que un píxel (anti-centelleo)
+    vec3 dn=dFdx(N), dm=dFdy(N); float r0=mix(0.035,0.12,agit)+u_rain*0.05;
+    float a=sqrt(clamp(r0*r0+min(0.25*(dot(dn,dn)+dot(dm,dm)),0.18),0.0,1.0));
+    vec3 H=normalize(u_sunDir-V); float NdH=max(dot(N,H),0.0), NdL=max(dot(N,u_sunDir),0.0);
+    float a2=a*a; float dd=NdH*NdH*(a2-1.0)+1.0; float D=a2/(3.14159*dd*dd);
+    float Vis=0.5/max(NdL*sqrt(NdV*NdV*(1.0-a2)+a2)+NdV*sqrt(NdL*NdL*(1.0-a2)+a2),1e-4);
+    float F=0.02+0.98*pow(1.0-max(dot(H,-V),0.0),5.0);
+    col+=u_sunCol*sh*D*Vis*F*NdL*edge;
+    // luz que atraviesa las crestas finas hacia el sol (verde azulado)
+    if(ocean) col+=vec3(0.03,0.16,0.13)*u_sunCol*sh*crest*pow(max(dot(V,u_sunDir),0.0),3.0)*1.5;
+  }
+  // espuma solo donde el agua está agitada: crestas, corriente rápida en la orilla, estelas, chorros
+  if(!under){
+    float foamN=vnoise(v_world.xz*2.2+v_flow*t*0.8)*0.6+vnoise(v_world.xz*7.0-vec2(t*0.4,0.0))*0.4;
+    float fm=0.0;
+    if(ocean) fm=max(fm,crest*smoothstep(0.42,0.8,foamN)*0.75);
+    if(top){ float shore=1.0-smoothstep(0.02,0.3,vDepth); fm=max(fm,shore*agit*smoothstep(0.35,0.75,foamN)*0.7); fm=max(fm,smoothstep(0.5,1.6,rip)*smoothstep(0.3,0.7,foamN)); }
+    if(falling){ float aer=smoothstep(0.4,3.0,drop)*(0.6+0.4*vnoise(vec2(atan(Nm.z,Nm.x)*3.0,(v_world.y+t*sqrt(19.6*max(drop,0.15)))*1.5))); fm=max(fm,0.12+aer*0.75); } // el agua se airea al caer: blanca y opaca
+    vec3 foamCol=(u_amb*0.9+u_sunCol*0.55*sh*max(N.y,0.3)+vec3(1.0,0.6,0.3)*pow(v_lit.y,2.3)*0.3)*0.85;
+    col=mix(col,foamCol,clamp(fm,0.0,0.92));
+  }
   col=applyFog(col,v_pos,smoothstep(0.3,1.0,sky));
 #if Q>=2
   o=vec4(col,1.0);
 #else
+  float al=clamp(1.0-dot(exp(-sT*vDepth),vec3(0.333)),0.18,0.95); al=mix(al,1.0,fres);
+#if Q==1
+  o=vec4(col,al);
+#else
   col=aces(col*u_expo); col=pow(col,vec3(1.0/2.2));
-  o=vec4(col,mix(0.72,0.95,fres));
+  o=vec4(col,al);
+#endif
 #endif
 }`;
 const VS_SHADOW = `#version 300 es
@@ -3513,7 +3770,7 @@ function renderWorld(world, cam, yaw, pitch, opts = {}) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, R.fbo.scene.fb);
   }
   // translúcidos (agua primero sin mezcla en calidad alta)
-  { const P = R.progs.water; gl.useProgram(P.p); setCommon(P); gl.uniformMatrix4fv(P.u.u_vp, false, R.vp);
+  { const P = R.progs.water; gl.useProgram(P.p); setCommon(P); gl.uniformMatrix4fv(P.u.u_vp, false, R.vp); if (typeof ripBind === 'function') ripBind(P);
     if (R.q >= 2) { gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, R.fbo.copy.tex); gl.uniform1i(P.u.u_sceneCopy, 2); gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, R.fbo.copy.depth); gl.uniform1i(P.u.u_depthCopy, 3); gl.uniform2f(P.u.u_res, R.w, R.h); gl.uniformMatrix4fv(P.u.u_proj, false, R.proj); gl.uniformMatrix4fv(P.u.u_view, false, R.view); gl.uniform1f(P.u.u_near, R.near); gl.uniform1f(P.u.u_far, R.far); gl.disable(gl.BLEND); }
     else { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); }
     gl.disable(gl.CULL_FACE);
@@ -3646,10 +3903,11 @@ function boxLines(x0, y0, z0, x1, y1, z1) {
 const G = { tick: 0, time: 1000, worlds: null, world: null, player: null, entities: new Map(), mode: 'menu', gameMode: 'survival', difficulty: 2, seed: 0, net: null, particles: [], rain: 0, rainLevel: 0, rainTimer: 12000, containers: {}, spawned: new Set(), dragonKilled: false, endInit: false, shake: 0, paused: false };
 let nextEid = 1;
 // ------------------------------------------------------------ colisiones
+const SNOW_FIRM = 0.4; // parte de la capa de nieve que aguanta peso (el resto es polvo que se aparta)
 function blockBoxes(id, meta, x, y, z, out, world) {
   if (id < 0) { out.push([x, y, z, x + 1, y + 1, z + 1]); return; }
   const d = REG[id]; if (!d || !d.solid) return;
-  if (d.render === 'snow') { const h = (Math.max(1, meta) - 1) / 8; if (h > 0) out.push([x, y, z, x + 1, y + h, z + 1]); return; }
+  if (d.render === 'snow') { const h = Math.max(1, meta) / 8 * SNOW_FIRM; if (h > 0.01) out.push([x, y, z, x + 1, y + h, z + 1]); return; } // nieve suelta: los pies se hunden
   if (d.shape) { if (d.shape === 'gate' && (meta & 4)) return; const tall = d.shape === 'fence' || d.shape === 'wall' || d.shape === 'gate'; for (const b of shapeBoxes(d, meta, (dx, dz) => world ? world.get(x + dx, y, z + dz) : 0, true)) out.push([x + b[0] / 16, y + b[1] / 16, z + b[2] / 16, x + b[3] / 16, y + (tall ? 24 : b[4]) / 16, z + b[5] / 16]); return; }
   if (d.box) { const b = d.box; const top = d.fenceH ? d.fenceH : b[4] / 16; out.push([x + b[0] / 16, y + b[1] / 16, z + b[2] / 16, x + b[3] / 16, y + top, z + b[5] / 16]); return; }
   if (d.id === ID.cactus) { out.push([x + 1 / 16, y, z + 1 / 16, x + 15 / 16, y + 1, z + 15 / 16]); return; }
@@ -4068,6 +4326,7 @@ function updatePlayerPhysics(p, dt, input) {
   let speed = p.sneaking ? 1.31 : p.sprinting ? 5.61 : 4.317; if (p.effects.speed) speed *= 1.4;
   if (input.useHeld) speed *= 0.2;
   if (web) speed *= 0.25; if (bd && bd.slowWalk) speed *= 0.45;
+  if (bd && bd.render === 'snow' && p.onGround) { const sink = Math.max(1, w.getMeta(Math.floor(p.x), Math.floor(p.y - 0.05), Math.floor(p.z))) / 8 * (1 - SNOW_FIRM); speed *= 1 - clamp(sink / 0.55, 0, 1) * 0.42; }
   if (p.inWater || p.inLava) {
     const sw = p.inLava ? 1.0 : (input.sprint && input.f ? 5.6 : 2.2);
     p.vx = lerp(p.vx, wx * sw, Math.min(1, dt * 5)); p.vz = lerp(p.vz, wz * sw, Math.min(1, dt * 5));
@@ -4257,13 +4516,15 @@ function entityTick(e, dt) {
   }
   // físicas
   if (e.inWater || e.inLava) {
+    e.fallDist = 0; // el agua frena la caída: sin daño al tocar fondo después
     if (d.swim) { if (tgt) e.vy = lerp(e.vy, clamp(tgt.y - e.y, -1, 1) * 2, 0.1); else e.vy *= 0.9; }
+    else if (e.inLava) { e.vy = lerp(e.vy, 0.7, 0.08); } // la lava es densa y viscosa: se flota despacio, hundido a medias
     else { e.vy = lerp(e.vy, 2.5, 0.2); }
-    e.vx *= 0.8; e.vz *= 0.8;
+    const dr = e.inLava ? 0.55 : 0.8; e.vx *= dr; e.vz *= dr;
     const fv = flowVec(w, Math.floor(e.x), Math.floor(e.y + 0.2), Math.floor(e.z)); e.vx += fv[0] * 0.3; e.vz += fv[1] * 0.3;
   } else if (!d.noGrav) e.vy -= 32 * dt;
   if (moving && e.hc && e.onGround && e.navT !== e.age) e.vy = 10; // salto de ~1,3 bloques con el paso de 0,05 s (8,5 no superaba un bloque)
-  if (e.onGround) { e.vx *= 0.82; e.vz *= 0.82; }
+  if (e.onGround) { const fr = w.get(Math.floor(e.x), Math.floor(e.y - 0.05), Math.floor(e.z)) === ID.snow ? 0.7 : 0.82; e.vx *= fr; e.vz *= fr; } // en nieve profunda cuesta avanzar
   e.vy = Math.max(e.vy, -60);
   const vyB = e.vy; moveEntity(w, e, e.vx * dt, e.vy * dt, e.vz * dt);
   if (vyB < 0 && !e.onGround) e.fallDist += -vyB * dt;
@@ -4283,7 +4544,7 @@ function runTickTimers() { for (let i = TICK_TIMERS.length - 1; i >= 0; i--) if 
 function itemTick(e, dt, w) {
   if (e.pickup > 0) e.pickup--;
   const inW = liquidAt(w, e.x, e.y + 0.1, e.z);
-  if (inW) { e.vy = lerp(e.vy, 1, 0.2); e.vx *= 0.9; e.vz *= 0.9; const fv = flowVec(w, Math.floor(e.x), Math.floor(e.y + 0.1), Math.floor(e.z)); e.vx += fv[0] * 0.5; e.vz += fv[1] * 0.5; if (inW === 2 && !(e.stack.id === ID.netherite_ingot || REG[e.stack.id].name.startsWith('netherite'))) { e.removed = true; smoke(e.x, e.y, e.z, { size: 0.3 }); return; } }
+  if (inW) { const bx = Math.floor(e.x), bz = Math.floor(e.z); let by = Math.floor(e.y + 0.1); while (liquidAt(w, e.x, by + 1.02, e.z) === inW && by < e.y + 4) by++; const sy = by + liquidSurface(w, bx, by, bz); const tgt = clamp((sy - 0.12 - e.y) * (inW === 2 ? 2 : 7), -2.5, 2.5) + Math.sin(e.age * 0.12 + e.id) * 0.15; e.vy = lerp(e.vy, tgt, inW === 2 ? 0.08 : 0.22); e.vx *= inW === 2 ? 0.7 : 0.9; e.vz *= inW === 2 ? 0.7 : 0.9; const fv = flowVec(w, Math.floor(e.x), Math.floor(e.y + 0.1), Math.floor(e.z)); e.vx += fv[0] * 0.5; e.vz += fv[1] * 0.5; if (inW === 2 && !(e.stack.id === ID.netherite_ingot || REG[e.stack.id].name.startsWith('netherite'))) { e.removed = true; smoke(e.x, e.y, e.z, { size: 0.3 }); return; } }
   else e.vy -= 20 * dt;
   if (e.onGround) { e.vx *= 0.6; e.vz *= 0.6; }
   // dentro de un bloque sólido: empujar arriba
@@ -6360,7 +6621,7 @@ function bucketPour(w, x, y, z, liq) {
 function liquidSurface(world, x, y, z) {
   const b = world.get(x, y, z); if (b <= 0) return 0; const d = REG[b]; if (d.inWater) return 1; if (!d.liquid) return 0;
   const up = world.get(x, y + 1, z); if (up > 0 && REG[up] && REG[up].liquid === d.liquid) return 1;
-  const m = world.getMeta(x, y, z); if (m & LIQ_FALL) return 1; return liqAmt(m) / 8 * 0.9;
+  const m = world.getMeta(x, y, z); if (m & LIQ_FALL) return 1; return liqAmt(m) / 8 * 0.92; // igual que la superficie dibujada (liqTopH)
 }
 // depuración: suma de volumen (en octavos) de un líquido en una caja
 function fluidVolume(w, x0, y0, z0, x1, y1, z1, liq) { let s = 0; for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) { const b = w.get(x, y, z); if (isLiq(b) && REG[b].liquid === liq) s += liqAmt(w.getMeta(x, y, z)); } return s; }
@@ -7045,8 +7306,119 @@ function findBedNear(w, e) {
 
 // ===== p_fluidfx.js
 // ============================================================================
-//  Render de fluidos: océano con olas, agua/lava en partículas (screen-space fluid)
+//  Ondas del agua: simulación de la ecuación de onda en GPU alrededor de la cámara.
+//  Lo que se mueve en el agua (jugador, mobs, objetos, flechas, chorros que caen) deja estelas y anillos
+//  que se propagan, se reflejan y se apagan; FS_WATER usa el gradiente de la altura como relieve.
 // ============================================================================
+const RIP = { N: 256, size: 64, tex: null, fb: null, cur: 0, ox: 0, oz: 0, prog: null, gl: null, acc: 0, imps: [], ok: false, dummy: null, last: null };
+const VS_RIP = `#version 300 es
+layout(location=0) in vec2 a; out vec2 v_uv; void main(){ v_uv=a*0.5+0.5; gl_Position=vec4(a,0.0,1.0); }`;
+const FS_RIP = `#version 300 es
+precision highp float; uniform sampler2D u_prev; uniform vec2 u_shift; uniform vec4 u_imp[16]; uniform int u_n; uniform float u_px;
+in vec2 v_uv; out vec4 o;
+void main(){
+  vec2 uv=v_uv+u_shift; // la rejilla sigue a la cámara
+  if(uv.x<0.0||uv.x>1.0||uv.y<0.0||uv.y>1.0){ o=vec4(0.0); return; }
+  vec2 s=texture(u_prev,uv).rg; float h=s.r, hp=s.g;
+  float l=texture(u_prev,uv-vec2(u_px,0.0)).r, r=texture(u_prev,uv+vec2(u_px,0.0)).r, d=texture(u_prev,uv-vec2(0.0,u_px)).r, u=texture(u_prev,uv+vec2(0.0,u_px)).r;
+  float hn=(2.0*h-hp+0.18*(l+r+d+u-4.0*h))*0.986; // ecuación de onda con amortiguación
+  for(int i=0;i<16;i++){ if(i>=u_n) break; vec2 dd=(v_uv-u_imp[i].xy)/u_imp[i].z; hn+=u_imp[i].w*exp(-dot(dd,dd)); }
+  float e=min(min(v_uv.x,1.0-v_uv.x),min(v_uv.y,1.0-v_uv.y)); hn*=smoothstep(0.0,0.06,e); // bordes absorbentes
+  o=vec4(clamp(hn,-4.0,4.0),h,0.0,1.0);
+}`;
+function ripInit() {
+  const gl = R.gl; RIP.gl = gl; RIP.ok = false;
+  // textura vacía: el sampler del agua siempre necesita algo válido en su unidad
+  RIP.dummy = gl.createTexture(); gl.activeTexture(gl.TEXTURE7); gl.bindTexture(gl.TEXTURE_2D, RIP.dummy); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4)); gl.activeTexture(gl.TEXTURE0);
+  if (!R.cfb) return;
+  try { RIP.prog = compileRaw(VS_RIP, FS_RIP); } catch (e) { console.warn('ondas', e); return; }
+  RIP.tex = []; RIP.fb = [];
+  for (let i = 0; i < 2; i++) {
+    const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, RIP.N, RIP.N, 0, gl.RGBA, gl.HALF_FLOAT, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fb = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, fb); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) { gl.bindFramebuffer(gl.FRAMEBUFFER, null); return; }
+    gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); RIP.tex.push(t); RIP.fb.push(fb);
+  }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  RIP.quad = gl.createVertexArray(); gl.bindVertexArray(RIP.quad); const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0); gl.bindVertexArray(null);
+  RIP.ok = true;
+}
+// programa sin el bloque común (shaders de pantalla completa)
+function compileRaw(vs, fs) {
+  const gl = R.gl; const mk = (t, src) => { const s = gl.createShader(t); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+  const p = gl.createProgram(); gl.attachShader(p, mk(gl.VERTEX_SHADER, vs)); gl.attachShader(p, mk(gl.FRAGMENT_SHADER, fs)); gl.linkProgram(p); if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const u = {}; const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS); for (let i = 0; i < n; i++) { const info = gl.getActiveUniform(p, i); u[info.name.replace('[0]', '')] = gl.getUniformLocation(p, info.name); }
+  return { p, u };
+}
+// impulso en la superficie: x,z del mundo, radio (bloques), fuerza (+ hunde / - levanta)
+function ripImpulse(x, z, rad, str) { if (RIP.ok && R.q >= 2 && RIP.imps.length < 64) RIP.imps.push(x, z, rad, str); }
+// avanza la simulación (a 40 pasos por segundo) y deja la textura lista para FS_WATER
+function ripUpdate(dt) {
+  const gl = R.gl; if (!gl) return;
+  if (RIP.gl !== gl) ripInit();
+  if (!RIP.ok || R.q < 2 || !G.player) { RIP.imps.length = 0; return; }
+  const cam = R.cam; const px = RIP.size / RIP.N;
+  // origen alineado a la rejilla: al moverse la cámara se desplaza el contenido un número entero de celdas
+  const nox = Math.floor((cam[0] - RIP.size / 2) / px) * px, noz = Math.floor((cam[2] - RIP.size / 2) / px) * px;
+  let shx = (nox - RIP.ox) / RIP.size, shz = (noz - RIP.oz) / RIP.size;
+  if (Math.abs(shx) > 0.5 || Math.abs(shz) > 0.5) { shx = 0; shz = 0; for (const fb of RIP.fb) { gl.bindFramebuffer(gl.FRAMEBUFFER, fb); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); } }
+  RIP.ox = nox; RIP.oz = noz;
+  RIP.acc = Math.min(0.1, RIP.acc + dt); let steps = 0;
+  const P = RIP.prog; gl.useProgram(P.p); gl.bindVertexArray(RIP.quad); gl.disable(gl.DEPTH_TEST); gl.disable(gl.BLEND); gl.disable(gl.CULL_FACE); gl.viewport(0, 0, RIP.N, RIP.N);
+  gl.uniform1f(P.u.u_px, 1 / RIP.N);
+  while (RIP.acc >= 1 / 40 && steps < 3) {
+    RIP.acc -= 1 / 40;
+    const src = RIP.cur, dst = 1 - src;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, RIP.fb[dst]); gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, RIP.tex[src]); gl.uniform1i(P.u.u_prev, 0);
+    gl.uniform2f(P.u.u_shift, steps === 0 ? shx : 0, steps === 0 ? shz : 0);
+    // impulsos (solo en el primer paso del cuadro)
+    const arr = new Float32Array(64); let n = 0;
+    if (steps === 0) for (let i = 0; i + 3 < RIP.imps.length && n < 16; i += 4) { arr[n * 4] = (RIP.imps[i] - RIP.ox) / RIP.size; arr[n * 4 + 1] = (RIP.imps[i + 1] - RIP.oz) / RIP.size; arr[n * 4 + 2] = Math.max(px * 1.5, RIP.imps[i + 2]) / RIP.size; arr[n * 4 + 3] = RIP.imps[i + 3]; n++; }
+    gl.uniform4fv(P.u.u_imp, arr); gl.uniform1i(P.u.u_n, n);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); RIP.cur = dst; steps++;
+  }
+  if (steps) RIP.imps.length = 0;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.bindVertexArray(null); gl.enable(gl.DEPTH_TEST);
+}
+// enlaza la textura de ondas al programa del agua (unidad 7)
+function ripBind(P) {
+  const gl = R.gl; if (!P.u.u_ripple) return; if (RIP.gl !== gl) ripInit();
+  gl.activeTexture(gl.TEXTURE7); gl.bindTexture(gl.TEXTURE_2D, RIP.ok && R.q >= 2 ? RIP.tex[RIP.cur] : RIP.dummy); gl.uniform1i(P.u.u_ripple, 7);
+  if (P.u.u_ripRect) gl.uniform4f(P.u.u_ripRect, RIP.ox, RIP.oz, 1 / RIP.size, RIP.ok && R.q >= 2 ? 1 : 0);
+  gl.activeTexture(gl.TEXTURE0);
+}
+// fuentes de ondas: entidades que se mueven en el agua o caen en ella, chorros que caen en una poza
+function ripSources(w, dt) {
+  if (!w || !G.player) return; // las salpicaduras van en cualquier calidad; las ondas solo con la simulación activa
+  const cam = R.cam; const half = RIP.size / 2 - 2;
+  const near = e => Math.abs(e.x - cam[0]) < half && Math.abs(e.z - cam[2]) < half;
+  const consider = (e, rad, mass) => {
+    const bx = Math.floor(e.x), bz = Math.floor(e.z); let by = Math.floor(e.y + 0.05); let sy = -1;
+    for (let k = 0; k < 3; k++) { const b = w.get(bx, by + k, bz); if (b > 0 && REG[b] && (REG[b].liquid === 1 || REG[b].inWater)) sy = by + k + liquidSurface(w, bx, by + k, bz); }
+    if (sy < 0) { e._wIn = false; return; }
+    const top = e.y + (e.h || 0.5), wasIn = e._wIn; const inS = e.y < sy + 0.05 && top > sy - 0.3; // cruza la superficie
+    e._wIn = e.y < sy;
+    if (!inS) return;
+    const sp = Math.hypot(e.vx || 0, e.vz || 0);
+    if (!wasIn && e._wIn && (e.vy || 0) < -2) { const k = Math.min(3, -(e.vy) / 6) * mass; ripImpulse(e.x, e.z, rad * 1.4, 1.4 * k); if (typeof waterSplash === 'function') waterSplash(w, e.x, sy, e.z, k); }
+    else if (sp > 0.4) { e._wT = (e._wT || 0) + dt; if (e._wT > 0.07) { e._wT = 0; ripImpulse(e.x - (e.vx || 0) * 0.05, e.z - (e.vz || 0) * 0.05, rad, Math.min(0.7, sp * 0.09) * mass); } }
+    else if (Math.random() < dt * 2) ripImpulse(e.x, e.z, rad * 0.8, 0.12 * mass); // flotando: un leve balanceo
+  };
+  const p = G.player; if (p && !p.dead && near(p) && G.gameMode !== 'spectator') consider(p, 0.45, 1);
+  for (const e of G.entities.values()) { if (e.removed || e.dead || e.dim !== p.dim || !near(e)) continue; if (e.type === 'item') consider(e, 0.2, 0.35); else if (e instanceof Mob) consider(e, Math.max(0.3, (e.w || 0.6) * 0.6), Math.min(2, (e.w || 0.6) * 1.2)); else if (e instanceof Projectile) consider(e, 0.15, 0.4); }
+  if (!RIP.ok || R.q < 2) return;
+  // chorros que caen en una poza: agitación constante en el punto de impacto
+  const pcx = Math.floor(cam[0]) >> 4, pcz = Math.floor(cam[2]) >> 4;
+  for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) { const c = w.chunk(pcx + dx, pcz + dz); if (!c || !c.emitters) continue; const E = c.emitters; for (let i = 0; i < E.length; i += 4) if (E[i + 3] === ID.water && Math.random() < dt * 14) ripImpulse(E[i] + 0.5 + (Math.random() - 0.5) * 0.5, E[i + 2] + 0.5 + (Math.random() - 0.5) * 0.5, 0.35, 0.45 + Math.random() * 0.4); }
+}
+// salpicadura al caer algo al agua: gotas proporcionales a la velocidad y sonido
+function waterSplash(w, x, y, z, k) {
+  const n = Math.round([3, 8, 14][SETTINGS.particles ?? 2] * Math.min(2.5, k));
+  for (let i = 0; i < n; i++) { const a = Math.random() * 6.28, s = (1 + Math.random() * 2.5) * Math.min(1.8, 0.6 + k * 0.5); P_({ x: x + Math.cos(a) * 0.25, y: y + 0.05, z: z + Math.sin(a) * 0.25, vx: Math.cos(a) * s, vy: (2.5 + Math.random() * 3.5) * Math.min(1.6, 0.6 + k * 0.4), vz: Math.sin(a) * s, life: 0.6 + Math.random() * 0.5, size: 0.06 + Math.random() * 0.08, r: 0.8, g: 0.9, b: 1, a: 0.8, grav: 18, collide: true, layer: TEX.drip, fluid: 1 }); }
+  if (k > 0.3) playSound('splash', x, y, z, Math.min(1, 0.3 + k * 0.3));
+}
+(R.restoreHooks = R.restoreHooks || []).push(() => { RIP.gl = null; RIP.ok = false; });
 
 // ===== i_main.js
 // ============================================================================
@@ -7083,6 +7455,7 @@ function playSound(type, x, y, z, vol = 1, extra) {
     case 'pop': tone(t, 0.08, 900 + Math.random() * 500, 1600, 0.15 * vol); break;
     case 'explode': { const g = noiseHit(t, 2.2, 400, 0.4, 1.2 * vol, 'lowpass'); tone(t, 1.2, 60, 25, 0.9 * vol, 'sine'); noiseHit(t, 2.5, 1200, 0.5, 0.25 * vol, 'lowpass', AU.verb); break; }
     case 'fuse': noiseHit(t, 1.4, 5000, 0.5, 0.25 * vol, 'highpass'); break;
+    case 'splash': noiseHit(t, 0.5, 900, 0.6, 0.45 * vol, 'lowpass'); noiseHit(t + 0.02, 0.35, 3200, 0.9, 0.25 * vol); for (let i = 0; i < 4; i++) noiseHit(t + 0.08 + Math.random() * 0.25, 0.08, 2500 + Math.random() * 2500, 3, 0.08 * vol); break;
     case 'fizz': noiseHit(t, 0.6, 5000, 0.7, 0.3 * vol, 'highpass'); break;
     case 'bow': tone(t, 0.18, 500, 180, 0.3 * vol, 'triangle'); noiseHit(t, 0.1, 2000, 1, 0.2 * vol); break;
     case 'throw': noiseHit(t, 0.25, 1500, 0.6, 0.25 * vol); break;
@@ -7387,6 +7760,8 @@ function gameFrame(dt) {
   const tfov = SETTINGS.fov * (p.sprinting && !zoomOn ? 1.12 : 1) * (p.spy ? 0.14 : 1) * (p.bowT > 0 ? 1 - Math.min(1, p.bowT) * 0.15 : 1) * (p.gliding ? 1.1 : 1) / G.zoomCur;
   G.fovCur = lerp(G.fovCur || tfov, tfov, Math.min(1, dt * 10));
   R.yawCam = yaw; const alpha = pausedSP ? 1 : acc / 50;
+  // ondas del agua (estelas, salpicaduras, chorros): fuentes y un paso de simulación en GPU antes de dibujar
+  if (typeof ripUpdate === 'function') { if (!pausedSP) ripSources(w, dt); ripUpdate(pausedSP ? 0 : dt); }
   renderWorld(w, eye, yaw, pitch, {
     fov: G.fovCur, under, roll, bob, biome: w.biomeAt(Math.floor(p.x), Math.floor(p.z)),
     drawEntities: () => { drawAllEntities(p.dim, alpha, perspective > 0 && G.gameMode !== 'spectator'); },
