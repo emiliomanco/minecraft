@@ -60,6 +60,7 @@ function slotRender(el, s) {
   el.innerHTML = h;
 }
 let itemNameT = 0;
+function showActionMsg(t) { const el = $('itemName'); el.textContent = t; el.style.opacity = 1; itemNameT = 2.5; }
 function showItemName() { const s = G.player.held(); const el = $('itemName'); el.textContent = s ? REG[s.id].disp : ''; el.style.opacity = 1; itemNameT = 2; }
 // ------------------------------------------------------------ chat/títulos
 function chatMsg(text, color) {
@@ -335,7 +336,7 @@ function onKeyDown(e) {
     case 'perspective': perspective = (perspective + 1) % 3; e.preventDefault(); break;
     case 'hideHud': hudHidden = !hudHidden; $('hud').style.display = hudHidden ? 'none' : 'block'; e.preventDefault(); break;
     case 'jump': { const now = performance.now(); if ((G.gameMode === 'creative') && now - lastSpace < 300) { G.player.flying = !G.player.flying; G.player.vy = 0; } lastSpace = now; const p = G.player; const el = p.armor[1] && p.armor[1].id === ID.elytra; if (el && !p.onGround && !p.flying && !p.inWater && p.vy < 0 && !p.gliding) { p.gliding = true; } break; }
-    case 'forward': { const now = performance.now(); if (now - lastW < 250) INPUT.sprintToggle = true; lastW = now; break; }
+    case 'ragdoll': if (!INPUT.keys.F3 && typeof playerRagdollToggle === 'function') playerRagdollToggle(); break;
   }
   if (e.code === 'F2') { e.preventDefault(); screenshot(); }
   if (e.code === 'F11') { e.preventDefault(); if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen().then(() => { try { navigator.keyboard && navigator.keyboard.lock(); } catch (err) { } }).catch(() => { }); }
@@ -343,7 +344,7 @@ function onKeyDown(e) {
 function setF3Display() { const v = F3 && G.mode === 'game' ? 'block' : 'none'; $('debugL').style.display = $('debugR').style.display = v; dbgT = 0; }
 function onKeyUp(e) {
   if (e.code === 'F3' || actionFor(e.code) === 'debug') INPUT.keys.F3 = false;
-  INPUT.keys[e.code] = false; if (actionFor(e.code) === 'forward') INPUT.sprintToggle = false;
+  INPUT.keys[e.code] = false;
 }
 function screenshot() { const el = document.createElement('a'); try { requestAnimationFrame(() => { el.href = $('gl').toDataURL('image/png'); el.download = 'minecraft2_' + Date.now() + '.png'; el.click(); chatMsg('Captura guardada'); }); } catch (e) { } }
 // chat
@@ -453,11 +454,11 @@ function useItem(hit) {
   if (d.rocket) { if (p.gliding) { p.boost = 1.2; consumeHeld(p); playSound('firework', p.x, p.y, p.z, 0.8); return true; } if (hit && !hit.ent) { const x = hit.x + 0.5 + hit.n[0], y = hit.y + 0.5 + hit.n[1], z = hit.z + 0.5 + hit.n[2]; fireworkFX(p.dim, x, y, z); consumeHeld(p); return true; } return false; }
   if (d.bucket !== undefined) {
     const dir = lookDir(p);
-    if (d.bucket === 0) { const h = raycast(w, p.x, p.eye, p.z, dir[0], dir[1], dir[2], 5, true); if (h && REG[h.id].liquid && w.getMeta(h.x, h.y, h.z) === 0) { setBlockNet(w, h.x, h.y, h.z, 0); if (G.gameMode !== 'creative') { consumeHeld(p); giveItem(p, { id: h.id === ID.water ? ID.water_bucket : ID.lava_bucket, c: 1 }); } playSound('bucket', h.x, h.y, h.z, 0.8); return true; } return false; }
+    if (d.bucket === 0) { const h = raycast(w, p.x, p.eye, p.z, dir[0], dir[1], dir[2], 5, true); if (h && REG[h.id].liquid) { const got = bucketTake(w, h.x, h.y, h.z); if (!got) { showActionMsg('No hay suficiente líquido para llenar el cubo'); return true; } if (G.gameMode !== 'creative') { consumeHeld(p); giveItem(p, { id: got === 1 ? ID.water_bucket : ID.lava_bucket, c: 1 }); } playSound('bucket', h.x, h.y, h.z, 0.8); return true; } return false; }
     if (!hit || hit.ent) return false; const liq = d.bucket === 1 ? ID.water : ID.lava;
-    let tx = hit.x, ty = hit.y, tz = hit.z; const tb = w.get(tx, ty, tz); if (!(REG[tb].replace && !REG[tb].liquid)) { tx += hit.n[0]; ty += hit.n[1]; tz += hit.n[2]; }
-    const cur = w.get(tx, ty, tz); if (cur !== 0 && !REG[cur].replace) return false;
-    if (p.dim === 'nether' && liq === ID.water) { fizz(w, tx, ty, tz); } else setBlockNet(w, tx, ty, tz, liq, 0);
+    let tx = hit.x, ty = hit.y, tz = hit.z; const tb = w.get(tx, ty, tz); if (!(REG[tb].replace && !REG[tb].liquid) && !(tb === liq && liqAmt(w.getMeta(tx, ty, tz)) < 8)) { tx += hit.n[0]; ty += hit.n[1]; tz += hit.n[2]; }
+    const cur = w.get(tx, ty, tz); if (cur !== 0 && !REG[cur].replace && cur !== liq) return false;
+    if (p.dim === 'nether' && liq === ID.water) { fizz(w, tx, ty, tz); } else bucketPour(w, tx, ty, tz, liq === ID.water ? 1 : 2);
     if (G.gameMode !== 'creative') p.inv[p.sel] = { id: ID.bucket, c: 1 }; playSound('bucket_empty', tx, ty, tz, 0.8); updateHUD(); return true;
   }
   if (!hit || hit.ent) return false;
@@ -599,7 +600,9 @@ function debugText(fps) {
     '',
     `Pantalla: ${R.w}x${R.h} (${R.vendor || 'GPU'})`,
     `${R.gpu}`,
+    R.gpuKind === "cpu" ? "SIN GPU: el navegador dibuja con la CPU" : R.gpuKind ? "GPU " + R.gpuKind : "",
     `WebGL 2.0  Sombras: ${R.shadowSize || 'no'}  HDR: ${R.cfb ? 'sí' : 'no'}`,
+    `CPU por cuadro: ${(R.cpuMs || 0).toFixed(1)} ms  Cuadro: ${(R.frameMs || 0).toFixed(1)} ms${(R.frameMs || 0) > (R.cpuMs || 0) * 1.6 + 4 ? ' (limita la GPU)' : (R.cpuMs || 0) > 12 ? ' (limita la CPU)' : ''}`,
     '',
   ];
   if (tgt && !tgt.ent) { right.push('Bloque objetivo: ' + tgt.x + ', ' + (tgt.y + yo) + ', ' + tgt.z, 'minecraft:' + REG[tgt.id].name, 'meta: ' + w.getMeta(tgt.x, tgt.y, tgt.z)); }
