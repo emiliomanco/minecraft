@@ -717,6 +717,8 @@ function flAfterReadback() {
     const b = w.get(c.x, c.y, c.z); if (b === 0 || (b > 0 && REG[b].replace && !REG[b].solid)) w.set(c.x, c.y, c.z, c.nl >= 24 ? ID.obsidian : ID.cobblestone);
     fizz(w, c.x, c.y, c.z); for (const i of c.idx) flKill(i); c.idx.length = 0; c.nw = c.nl = 0;
   }
+  // el agua apaga el fuego que toca (vapor)
+  for (const c of occ.values()) if (c.nw >= 3) for (const [dx, dy, dz] of [[0, 0, 0], [1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) { const fx = c.x + dx, fy = c.y + dy, fz = c.z + dz; if (w.get(fx, fy, fz) === ID.fire) { w.set(fx, fy, fz, 0); fizz(w, fx, fy, fz); if (typeof vfxSmokeEmit === 'function') vfxSmokeEmit(fx + 0.5, fy + 0.6, fz + 0.5, 0.8, 0.3, 2); } }
   // la lava incendia lo inflamable que toca
   for (const c of occ.values()) if (c.nl >= 4 && Math.random() < 0.08) {
     const dx = (Math.random() * 3 | 0) - 1, dy = (Math.random() * 2 | 0), dz = (Math.random() * 3 | 0) - 1; const fx = c.x + dx, fy = c.y + dy, fz = c.z + dz;

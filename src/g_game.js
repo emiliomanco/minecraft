@@ -289,15 +289,19 @@ function fireTick(w, x, y, z) {
   let fuel = below > 0 && REG[below].flammable;
   if (!fuel) for (const [ax, ay, az] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, -1]]) { const n = w.get(x + ax, y + ay, z + az); if (n > 0 && REG[n].flammable) { fuel = true; break; } }
   if (!fuel && Math.random() < 0.06) { w.set(x, y, z, 0); return; }
+  // fuegos juntos se funden en uno mayor: más calor, se propaga más lejos y consume antes; lanza brasas
+  let nbF = 0; for (let ax = -1; ax <= 1; ax++) for (let ay = -1; ay <= 1; ay++) for (let az = -1; az <= 1; az++) if ((ax || ay || az) && w.get(x + ax, y + ay, z + az) === ID.fire) nbF++;
+  if (typeof emberEmit === 'function' && Math.random() < 0.12 + nbF * 0.04) emberEmit(w, x, y, z, 1 + nbF * 0.1);
+  if (fuel && nbF >= 4 && Math.random() < 0.04 + nbF * 0.006) { const n = below > 0 && REG[below].flammable ? [0, -1, 0] : null; if (n) w.set(x, y - 1, z, Math.random() < 0.5 ? ID.fire : 0); }
   // propagar a vecinos inflamables
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 3 + (nbF >> 2); i++) {
     const dx = (Math.random() * 3 | 0) - 1, dy = (Math.random() * 4 | 0) - 1, dz = (Math.random() * 3 | 0) - 1;
     const b = w.get(x + dx, y + dy, z + dz);
     if (b > 0 && REG[b].flammable && Math.random() < 0.4) { w.set(x + dx, y + dy, z + dz, Math.random() < 0.5 ? ID.fire : 0); }
     else if (b === 0) { let near = false; for (const [ax, ay, az] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) { const n = w.get(x + dx + ax, y + dy + ay, z + dz + az); if (n > 0 && REG[n].flammable) near = true; } if (near && Math.random() < 0.3) w.set(x + dx, y + dy, z + dz, ID.fire); }
   }
   if (below > 0 && REG[below].flammable && Math.random() < 0.3) w.set(x, y - 1, z, ID.fire);
-  w.scheduleTick(x, y, z, 30 + Math.random() * 40 | 0, 4);
+  w.scheduleTick(x, y, z, Math.max(12, 30 - nbF * 2) + Math.random() * 40 | 0, 4);
 }
 // adaptador para generar árboles directamente en el mundo
 function worldBuilder(w) {

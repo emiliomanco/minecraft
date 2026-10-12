@@ -279,7 +279,7 @@ function drawSmokeVolume() {
 function drawVFX(opts) {
   if (vfxVolumetric()) {
     if (VFX.q !== R.q || VFX.gl !== R.gl) { VFX.q = R.q; VFX.gl = R.gl; vfxInitGL(); }
-    if (VFX.progs) { if (opts.fireCells && opts.fireCells.length) drawFireVolumes(opts.fireCells); drawSmokeVolume(); return; }
+    if (VFX.progs) { if (opts.fireCells && opts.fireCells.length) drawFireVolumes(opts.fireCells); if (typeof efDraw === 'function') efDraw(); drawSmokeVolume(); return; }
   }
   if (opts.flames && opts.flames.length) drawFlames(opts.flames);
 }
