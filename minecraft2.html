@@ -7981,7 +7981,7 @@ function flRecenter(w, px, py, pz, force) {
   const [ox, oy, oz] = FL.org; if (!force && FL.world === w && Math.abs(nx - ox) < 16 && Math.abs(ny - oy) < 12 && Math.abs(nz - oz) < 16) return;
   const gl = R.gl;
   if (FL.world === w && FL.hi > 0) { // desplazar las partículas al nuevo origen
-    const P = FL.P.shift; gl.useProgram(P.p); flCommon(P); gl.bindVertexArray(FL.vao); flBindTex(P, 'u_pos', 0, FL.pos[FL.cur]); gl.uniform3f(P.u.u_shift, ox - nx, oy - ny, oz - nz);
+    let P = FL.P.shift; gl.useProgram(P.p); flCommon(P); gl.bindVertexArray(FL.vao); flBindTex(P, 'u_pos', 0, FL.pos[FL.cur]); gl.uniform3f(P.u.u_shift, ox - nx, oy - ny, oz - nz);
     flPass(P, FL.fbPos[1 - FL.cur], FL.rows);
     P = FL.P.copy; gl.useProgram(P.p); flBindTex(P, 'u_vel', 1, FL.vel[FL.cur]); flPass(P, FL.fbVel[1 - FL.cur], FL.rows); FL.cur = 1 - FL.cur;
   } else if (FL.world !== w) { for (let i = 0; i < FL.hi; i++) if (FL.phase[i]) flKill(i); FL.hi = 0; FL.ptr = 0; FL.alive = 0; FL.killQ.length = 0;
