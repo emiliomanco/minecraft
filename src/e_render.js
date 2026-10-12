@@ -778,7 +778,7 @@ function uploadMesh(ch, m) {
     const b1 = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b1); gl.bufferData(gl.ARRAY_BUFFER, d.tex, gl.STATIC_DRAW); gl.enableVertexAttribArray(1); gl.vertexAttribIPointer(1, 4, gl.UNSIGNED_SHORT, 0, 0);
     const b2 = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b2); gl.bufferData(gl.ARRAY_BUFFER, d.lit, gl.STATIC_DRAW); gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 4, gl.UNSIGNED_BYTE, true, 0, 0);
     const ib = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, d.idx, gl.STATIC_DRAW);
-    gl.bindVertexArray(null); ch.mesh[k] = { vao, bufs: [b0, b1, b2, ib], count: d.count };
+    gl.bindVertexArray(null); ch.mesh[k] = { vao, bufs: [b0, b1, b2, ib], count: d.count, fall: d.fall !== undefined ? d.fall : d.count };
   }
 }
 function freeMesh(ch) { if (!ch.mesh) return; const gl = R.gl; for (const k of ['o', 't', 'w']) { const m = ch.mesh[k]; if (!m) continue; gl.deleteVertexArray(m.vao); for (const b of m.bufs) gl.deleteBuffer(b); } ch.mesh = null; }
@@ -926,7 +926,16 @@ function renderWorld(world, cam, yaw, pitch, opts = {}) {
     else { gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); }
     gl.disable(gl.CULL_FACE);
     R._transVis = vis.slice().reverse();
-    for (const c of R._transVis) { const m = c.mesh.w; if (!m) continue; gl.uniform3f(P.u.u_off, c.cx * 16 - cam[0], -cam[1], c.cz * 16 - cam[2]); gl.bindVertexArray(m.vao); gl.drawElements(gl.TRIANGLES, m.count, gl.UNSIGNED_INT, 0); R.stats.draws++; }
+    let falls = false;
+    for (const c of R._transVis) { const m = c.mesh.w; if (!m) continue; if (m.fall < m.count) falls = true; if (!m.fall) continue; gl.uniform3f(P.u.u_off, c.cx * 16 - cam[0], -cam[1], c.cz * 16 - cam[2]); gl.bindVertexArray(m.vao); gl.drawElements(gl.TRIANGLES, m.fall, gl.UNSIGNED_INT, 0); R.stats.draws++; }
+    if (falls) { // chorros y cascadas: refractan la escena con los lagos ya dibujados (solo color; la profundidad copiada sigue siendo la opaca)
+      if (R.q >= 2) {
+        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, R.fbo.scene.fb); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, R.fbo.copy.fb);
+        gl.blitFramebuffer(0, 0, R.w, R.h, 0, 0, R.w, R.h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, R.fbo.scene.fb);
+      }
+      for (const c of R._transVis) { const m = c.mesh.w; if (!m || m.fall >= m.count) continue; gl.uniform3f(P.u.u_off, c.cx * 16 - cam[0], -cam[1], c.cz * 16 - cam[2]); gl.bindVertexArray(m.vao); gl.drawElements(gl.TRIANGLES, m.count - m.fall, gl.UNSIGNED_INT, m.fall * 4); R.stats.draws++; }
+    }
   }
   // segunda pasada: cristal/hielo/portales/fuego (descartando agua en shader de chunk por alfa)
   { const P = R.progs.chunk; gl.useProgram(P.p); setCommon(P); gl.uniformMatrix4fv(P.u.u_vp, false, R.vp); gl.uniform1f(P.u.u_pass, 1);

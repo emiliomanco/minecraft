@@ -108,7 +108,19 @@ class MeshBuf {
   quad2() { this.quad(false); const b = this.nv - 4; const I = this.idx; let k = this.ni; I[k++] = b; I[k++] = b + 2; I[k++] = b + 1; I[k++] = b; I[k++] = b + 3; I[k++] = b + 2; this.ni = k; }
   out() { return { pos: this.pos.slice(0, this.nv * 3), tex: this.tex.slice(0, this.nv * 4), lit: this.lit.slice(0, this.nv * 4), idx: this.idx.slice(0, this.ni), count: this.ni }; }
 }
-const MB_O = new MeshBuf(), MB_T = new MeshBuf(), MB_W = new MeshBuf();
+const MB_O = new MeshBuf(), MB_T = new MeshBuf(), MB_W = new MeshBuf(), MB_F = new MeshBuf();
+// agua: superficies y después los chorros (en el mismo búfer; 'fall' marca dónde empiezan). Los chorros se dibujan en una
+// segunda pasada para que refracten una copia de la escena que ya tiene el lago delante/detrás
+function outWater(W, F) {
+  if (!F.nv) { const o = W.out(); o.fall = o.count; return o; }
+  const nv = W.nv + F.nv, ni = W.ni + F.ni;
+  const pos = new Float32Array(nv * 3), tex = new Uint16Array(nv * 4), lit = new Uint8Array(nv * 4), idx = new Uint32Array(ni);
+  pos.set(W.pos.subarray(0, W.nv * 3)); pos.set(F.pos.subarray(0, F.nv * 3), W.nv * 3);
+  tex.set(W.tex.subarray(0, W.nv * 4)); tex.set(F.tex.subarray(0, F.nv * 4), W.nv * 4);
+  lit.set(W.lit.subarray(0, W.nv * 4)); lit.set(F.lit.subarray(0, F.nv * 4), W.nv * 4);
+  idx.set(W.idx.subarray(0, W.ni)); for (let k = 0; k < F.ni; k++) idx[W.ni + k] = F.idx[k] + W.nv;
+  return { pos, tex, lit, idx, count: ni, fall: W.ni };
+}
 const FACE = [
   { n: [1, 0, 0], a: 0, t1: 2, t2: 1, c: [[1, 0, 1], [1, 0, 0], [1, 1, 0], [1, 1, 1]] },
   { n: [-1, 0, 0], a: 0, t1: 2, t2: 1, c: [[0, 0, 0], [0, 0, 1], [0, 1, 1], [0, 1, 0]] },
@@ -166,7 +178,7 @@ let MESH_QUALITY = 2;
 function buildMesh(world, ch) { buildRegion(world, ch); return meshRegion(world, ch); }
 function meshRegion(world, ch) {
   computeLight(world, ch);
-  const O = MB_O, T = MB_T; O.reset(); T.reset(); MB_W.reset();
+  const O = MB_O, T = MB_T; O.reset(); T.reset(); MB_W.reset(); MB_F.reset();
   const H = world.H; const top = Math.min(H - 1, ch.top + 1);
   const fancy = MESH_QUALITY >= 1;
   const bxw = ch.cx * 16, bzw = ch.cz * 16; const EM = []; let EMlava = 0;
@@ -223,7 +235,7 @@ function meshRegion(world, ch) {
     }
   }
   ch.emitters = EM;
-  return { o: O.out(), t: T.out(), w: MB_W.out() };
+  return { o: O.out(), t: T.out(), w: outWater(MB_W, MB_F) };
 }
 function tintFor(d, f, ch, x, z) {
   if (d.tintTop && f === 2) return 1 + ch.biomes[x | z << 4];
@@ -360,7 +372,7 @@ function snowStepTop(c) {
 }
 // celda de agua o lava: superficie suave, chorro cayendo (tubo) o nada (si está cubierta)
 function emitLiquidCell(B, kind, x, y, z, ri, ch, bxw, bzw) {
-  if (liqFall(ri)) { emitFall(B, kind, x, y, z, ri, ch); return; }
+  if (liqFall(ri)) { emitFall(B === MB_W ? MB_F : B, kind, x, y, z, ri, ch); return; }
   const u = ri + LRR; if ((isLiqB(regB[u], kind) && !liqFall(u)) || T_FULL[regB[u]]) { emitLiquidSides(B, kind, x, y, z, ri, ch, null); return; } // cubierta por más líquido o por un bloque: solo lados contra cristal
   emitSurface(B, kind, x, y, z, ri, ch, bxw, bzw);
 }
@@ -417,24 +429,44 @@ function emitSurface(B, kind, x, y, z, ri, ch, bxw, bzw) {
   const I = B.idx; let q = B.ni;
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) { const a = base + j * M + i, b = a + 1, c = a + M + 1, d = a + M; I[q++] = d; I[q++] = c; I[q++] = b; I[q++] = d; I[q++] = b; I[q++] = a; }
   B.ni = q;
-  if (snow || kind === SK_LAVA) emitSurfSides(B, kind, x, y, z, ri, P, N, fl, sky, blk, tint);
+  if (snow || kind === SK_LAVA) emitSurfSides(B, kind, x, y, z, ri, P, N, fl, sky, blk, tint, hs);
   else emitLiquidSides(B, kind, x, y, z, ri, ch, P, N, tint);
 }
 // lados de una superficie de nieve o lava: donde el borde queda en el aire (bajada, borde libre) se baja hasta la base
 // de la celda con un perfil redondeado (la lava además abomba hacia fuera, como un frente de colada)
+function emitSnowSkirt(B, x, y, z, P, N, hs, s, fl, sky, blk, tint) {
+  const [nx, nz, x0, z0, ex, ez] = SIDES4[s]; const o = _SO; const M = N + 1;
+  B.ensure((N + 1) * 2, N * 12); const base = B.nv;
+  for (let i = 0; i <= N; i++) {
+    const t = i / N; const uu = x0 + ex * t, vv = z0 + ez * t; surfBez(P, uu, vv, o); const top = hs[Math.round(vv * N) * M + Math.round(uu * N)];
+    const l = Math.hypot(o[1], 1, o[2]); const nu = -o[1] / l * 0.5 + 0.5, nv = -o[2] / l * 0.5 + 0.5;
+    B.v(x + uu, y + top - 0.4, z + vv, nu, nv, surfFlow(0, 0), fl, sky, blk, 3, tint);
+    B.v(x + uu, y + top, z + vv, nu, nv, surfFlow(0, 0), fl, sky, blk, 3, tint);
+  }
+  const I = B.idx; let q = B.ni; // las dos caras: la rendija puede verse desde cualquier lado
+  for (let i = 0; i < N; i++) { const a = base + i * 2, b2 = a + 1, c = a + 3, d = a + 2; I[q++] = a; I[q++] = c; I[q++] = d; I[q++] = a; I[q++] = b2; I[q++] = c; I[q++] = a; I[q++] = d; I[q++] = c; I[q++] = a; I[q++] = c; I[q++] = b2; }
+  B.ni = q;
+}
 const SIDES4 = [[1, 0, 1, 0, 0, 1], [-1, 0, 0, 0, 0, 1], [0, 1, 0, 1, 1, 0], [0, -1, 0, 0, 1, 0]]; // [nx, nz, x0, z0, dx, dz] del borde
-function emitSurfSides(B, kind, x, y, z, ri, P, N, fl, sky, blk, tint) {
-  const o = _SO;
+function emitSurfSides(B, kind, x, y, z, ri, P, N, fl, sky, blk, tint, hs) {
+  const o = _SO; const M = N + 1;
   for (let s = 0; s < 4; s++) {
     const [nx, nz, x0, z0, ex, ez] = SIDES4[s]; const j = ri + nx + nz * LR; const b = regB[j];
     if (T_FULL[b]) continue;
-    if (kind === SK_SNOW) { if (snowLevel(j) > -9) continue; if (airLike(b) && snowLevel(j - LRR) > -9) continue; } // la nieve vecina continúa la superficie
+    if (kind === SK_SNOW) {
+      if (snowLevel(j) > -9) continue; // la nieve vecina continúa la superficie al mismo nivel
+      // la vecina sigue un nivel más abajo: cada celda calcula las esquinas en su propio marco y en los rincones entre tres niveles
+      // pueden no coincidir; un faldón vertical bajo el borde de la celda de arriba tapa esas rendijas
+      if (airLike(b) && snowLevel(j - LRR) > -9) { emitSnowSkirt(B, x, y, z, P, N, hs, s, fl, Math.max(sky, regS[j]), Math.max(blk, regL[j]), tint); continue; }
+    }
     else { if (isLiqB(b, kind)) continue; if (airLike(b) && isLiqB(regB[j - LRR], kind)) continue; }
     const sk = Math.max(sky, regS[j]), bl = Math.max(blk, regL[j]);
     const bulge = kind === SK_LAVA ? 0.07 : 0.0; const R = 3; // filas: base, medio, borde
     B.ensure((N + 1) * (R + 1), N * R * 6); const base = B.nv;
     for (let i = 0; i <= N; i++) {
-      const t = i / N; const uu = x0 + ex * t, vv = z0 + ez * t; surfBez(P, uu, vv, o); const top = Math.max(0.02, o[0]);
+      const t = i / N; const uu = x0 + ex * t, vv = z0 + ez * t; surfBez(P, uu, vv, o);
+      // la arista de arriba es la misma que la de la superficie (con ondulación, escalones y pisadas): sin rendija entre lado y manto
+      const top = Math.max(0.02, hs ? hs[Math.round(vv * N) * M + Math.round(uu * N)] : o[0]);
       // normal de la superficie en el borde (para fundir el sombreado del lado con el de arriba)
       const l = Math.hypot(o[1], 1, o[2]); const snx = -o[1] / l, snz = -o[2] / l;
       for (let r = 0; r <= R; r++) {
