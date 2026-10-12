@@ -413,7 +413,7 @@ function updateLights(dt) {
   const fires = (G._fires || []).sort((a, b) => ((a[0] - p.x) ** 2 + (a[2] - p.z) ** 2) - ((b[0] - p.x) ** 2 + (b[2] - p.z) ** 2)).slice(0, 4);
   for (const f of fires) { const fl = 0.75 + Math.sin(t * 13 + f[0]) * 0.12 + Math.sin(t * 23 + f[2]) * 0.1; L.push({ x: f[0], y: f[1], z: f[2], r: 9, c: [2.2 * fl, 1.0 * fl, 0.35 * fl] }); }
   // resplandor de la lava: las 3 superficies más cercanas, siempre las mismas (sin parpadeo aleatorio), con un pulso lento
-  const lv = (G._lavas || []); if (lv.length) { const d2 = a => (a[0] - p.x) ** 2 + (a[1] - p.y) ** 2 + (a[2] - p.z) ** 2; const near = lv.slice().sort((a, b) => d2(a) - d2(b)); const used = [];
+  let lv = (G._lavas || []); if (typeof FL !== 'undefined' && FL.lavaPts && FL.lavaPts.length) lv = lv.concat(FL.lavaPts); if (lv.length) { const d2 = a => (a[0] - p.x) ** 2 + (a[1] - p.y) ** 2 + (a[2] - p.z) ** 2; const near = lv.slice().sort((a, b) => d2(a) - d2(b)); const used = [];
     for (const a of near) { if (used.length >= 3) break; if (d2(a) > 26 * 26) break; if (used.some(u => (u[0] - a[0]) ** 2 + (u[2] - a[2]) ** 2 < 9)) continue; used.push(a); const k = 0.9 + 0.1 * Math.sin(t * 1.7 + a[0] * 1.3 + a[2] * 0.7); L.push({ x: a[0], y: a[1] + 0.6, z: a[2], r: 8, c: [2.0 * k, 0.72 * k, 0.18 * k] }); } }
 }
 // ------------------------------------------------------------ superposiciones y mano

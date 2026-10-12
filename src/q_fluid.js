@@ -142,6 +142,7 @@ void main(){ int i=idx(); vec4 Pi=texelFetch(u_pred,tc(i),0); vec4 Xi=texelFetch
   if(lava){ vi*=0.985; if(ws>0.0) T=mix(T,Ts/ws,0.15); T=clamp(T-u_dt*(cn<16.0?0.07:0.004),0.15,1.0); }
   else { float sp=length(vi); T=max(T*0.96,clamp((sp-3.0)*0.12,0.0,1.0)*clamp(1.0-cn/22.0,0.0,1.0)); }
   float sp=length(vi); if(sp>20.0) vi*=20.0/sp;
+  if(sp<0.45) vi*=mix(0.82,1.0,sp/0.45); // temblor del solver en reposo: se apaga (el líquido quieto queda quieto)
   oP=vec4(Pi.xyz,Pi.w); oV=vec4(vi,T); }`;
 // altas y bajas: puntos escritos directamente en POS/VEL
 const VS_FLSPAWN = `#version 300 es
@@ -208,7 +209,7 @@ function flInit() {
   FL.mass = 1 / raw; FL.kp = FL.mass * K6; FL.ks = -FL.mass * 45 / (Math.PI * Math.pow(h, 6));
   FL.wq = FL.kp * Math.pow(h * h - Math.pow(0.2 * h, 2), 3);
   FL.phase = new Uint8Array(FL.N); FL.spawnFrame = new Int32Array(FL.N); FL.voxLoaded = new Set(); FL.hi = 0; FL.alive = 0; FL.ptr = 0; FL.spawnQ.length = 0; FL.killQ.length = 0; FL.world = null;
-  FL.rb.pbo = gl.createBuffer(); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, FL.rb.pbo); gl.bufferData(gl.PIXEL_PACK_BUFFER, FL.N * 32, gl.STREAM_READ); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+  FL.rb.pbo = gl.createBuffer(); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, FL.rb.pbo); gl.bufferData(gl.PIXEL_PACK_BUFFER, FL.N * 16, gl.STREAM_READ); FL.rb.pbo2 = gl.createBuffer(); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, FL.rb.pbo2); gl.bufferData(gl.PIXEL_PACK_BUFFER, FL.N * 16, gl.STREAM_READ); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
   FL.rb.sync = null; FL.rb.ready = false; FL.rb.pos = new Float32Array(FL.N * 4); FL.rb.vel = new Float32Array(FL.N * 4);
   FL.ok = true;
   flRInit(); FL.R.gl = gl; // compilar ya los shaders del render (la primera compilación tarda)
@@ -241,19 +242,24 @@ function flVoxFill(w) {
   FL.voxDirty.length = 0; FL.voxLoaded = new Set();
   for (let cz = oz >> 4; cz <= (oz + vz - 1) >> 4; cz++) for (let cx = ox >> 4; cx <= (ox + vx - 1) >> 4; cx++) if (w.chunk(cx, cz)) FL.voxLoaded.add(cx + ',' + cz);
 }
-// chunks que llegaron después de rellenar la región: copiar su parte
+// chunks que llegaron después de rellenar la región: copiar su parte (una subida por chunk)
 function flVoxChunks(w) {
-  const [vx, vy, vz] = FL.vdim, [ox, oy, oz] = FL.org;
+  const [vx, vy, vz] = FL.vdim, [ox, oy, oz] = FL.org, D = FL.voxData, H = w.H; const gl = R.gl; let up = 0;
   for (let cz = oz >> 4; cz <= (oz + vz - 1) >> 4; cz++) for (let cx = ox >> 4; cx <= (ox + vx - 1) >> 4; cx++) {
     const key = cx + ',' + cz; if (FL.voxLoaded.has(key)) continue; const c = w.chunk(cx, cz); if (!c) continue; FL.voxLoaded.add(key);
-    for (let lz = 0; lz < 16; lz++) for (let lx = 0; lx < 16; lx++) { const wx = cx * 16 + lx, wz = cz * 16 + lz; if (wx < ox || wz < oz || wx >= ox + vx || wz >= oz + vz) continue;
-      for (let y = 0; y < vy; y += 1) FL.voxDirty.push(wx, oy + y, wz); }
+    const x0 = Math.max(ox, cx * 16), x1 = Math.min(ox + vx, cx * 16 + 16), z0 = Math.max(oz, cz * 16), z1 = Math.min(oz + vz, cz * 16 + 16); if (x1 <= x0 || z1 <= z0) continue;
+    const bw = x1 - x0, bd = z1 - z0; const box = new Uint8Array(bw * vy * bd);
+    for (let z = z0; z < z1; z++) for (let x = x0; x < x1; x++) { const base = (x & 15) | ((z & 15) << 4);
+      for (let y = 0; y < vy; y++) { const wy = oy + y; const v = wy < 0 ? 1 : wy >= H ? 0 : flVoxVal(c.blocks, c.meta, base | (wy << 8), H);
+        D[(x - ox) + vx * (y + vy * (z - oz))] = v; box[(x - x0) + bw * (y + vy * (z - z0))] = v; } }
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1); gl.bindTexture(gl.TEXTURE_3D, FL.vox); gl.texSubImage3D(gl.TEXTURE_3D, 0, x0 - ox, 0, z0 - oz, bw, vy, bd, gl.RED, gl.UNSIGNED_BYTE, box); gl.bindTexture(gl.TEXTURE_3D, null); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    if (++up >= 4) return; // como mucho 4 por vez
   }
 }
 // un bloque cambió: actualizar su celda y la de abajo (cubierta o no)
 function flOnBlock(w, x, y, z) { if (!FL.ok || w !== FL.world) return; FL.voxDirty.push(x, y, z, x, y - 1, z); }
 function flVoxFlush(w) {
-  if (!FL.voxDirty.length) return; const gl = R.gl; const [vx, vy, vz] = FL.vdim, [ox, oy, oz] = FL.org; const one = new Uint8Array(1);
+  if (!FL.voxDirty.length) return; if (FL.voxDirty.length > 3 * 4000) { flVoxFill(w); return; } const gl = R.gl; const [vx, vy, vz] = FL.vdim, [ox, oy, oz] = FL.org; const one = new Uint8Array(1);
   gl.bindTexture(gl.TEXTURE_3D, FL.vox); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
   const seen = new Set();
   for (let i = 0; i < FL.voxDirty.length; i += 3) { const x = FL.voxDirty[i] - ox, y = FL.voxDirty[i + 1] - oy, z = FL.voxDirty[i + 2] - oz;
@@ -370,7 +376,7 @@ function flReadback() {
     if (st !== gl.SIGNALED) return;
     gl.deleteSync(rb.sync); rb.sync = null;
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, rb.pbo); const n = rb.n;
-    gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, rb.pos, 0, n * 4); gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, FL.N * 16, rb.vel, 0, n * 4);
+    gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, rb.pos, 0, n * 4); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, rb.pbo2); gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, rb.vel, 0, n * 4);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null); rb.ready = true; rb.count = n; rb.orgNow = rb.orgPending; rb.frameAt = rb.framePending; rb.stamp = performance.now();
     if (typeof flAfterReadback === 'function') flAfterReadback();
     return;
@@ -380,7 +386,7 @@ function flReadback() {
   gl.bindBuffer(gl.PIXEL_PACK_BUFFER, rb.pbo);
   gl.bindFramebuffer(gl.READ_FRAMEBUFFER, FL.fbPV[FL.cur]);
   gl.readBuffer(gl.COLOR_ATTACHMENT0); gl.readPixels(0, 0, FL.W, rows, gl.RGBA, gl.FLOAT, 0);
-  gl.readBuffer(gl.COLOR_ATTACHMENT1); gl.readPixels(0, 0, FL.W, rows, gl.RGBA, gl.FLOAT, FL.N * 16);
+  gl.readBuffer(gl.COLOR_ATTACHMENT1); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, rb.pbo2); gl.readPixels(0, 0, FL.W, rows, gl.RGBA, gl.FLOAT, 0);
   gl.readBuffer(gl.COLOR_ATTACHMENT0); gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
   rb.sync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); rb.n = n; rb.orgPending = FL.org.slice(); rb.framePending = FL.frame; gl.flush();
 }
@@ -678,7 +684,7 @@ function flAfterReadback() {
     const ph = FL.phase[i]; if (!ph || FL.spawnFrame[i] > F) continue; const k4 = i * 4; const pw = P[k4 + 3]; if (pw < 0.5) continue;
     const flag = Math.floor(pw / 10 + 1e-4); const base = Math.round(pw - flag * 10);
     const x = P[k4] + o[0], y = P[k4 + 1] + o[1], z = P[k4 + 2] + o[2];
-    if (flag === 1 || flag === 2) { flAbsorb(w, x, y, z, base, flag); flKill(i); continue; }
+    if (flag === 1 || flag === 2) { flAbsorb(w, x, y, z, base, flag); flKill(i); if (flag === 1 && Math.random() < 0.15 && typeof ripImpulse === 'function') ripImpulse(x, z, 0.35, 0.5); continue; }
     if (flag >= 3) { // salió de la región: guardarla como volumen donde esté (cada 8, un octavo)
       const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z); const liq = base === 2 ? 2 : 1; const k = FLK(bx, by, bz) + 0.25; const v = (FL.acc2.get(k) || 0) + 1;
       if (v >= 8) { FL.acc2.delete(k); const cv = cellVol(w, bx, by, bz, liq); if (cv >= 0 && cv < 8) flSetStatic(w, bx, by, bz, liq, cv + 1, base === 3); } else FL.acc2.set(k, v);
@@ -687,10 +693,12 @@ function flAfterReadback() {
     let c = occ.get(key); if (!c) { c = { x: bx, y: by, z: bz, nw: 0, nl: 0, np: 0, top: -1e9, vx: 0, vy: 0, vz: 0, vmax: 0, idx: [] }; occ.set(key, c); }
     const vx = V[k4], vy = V[k4 + 1], vz = V[k4 + 2]; const sp = Math.hypot(vx, vy, vz);
     if (base === 2) c.nl++; else { c.nw++; if (base === 3) c.np++; }
-    if (y > c.top) c.top = y; c.vx += vx; c.vy += vy; c.vz += vz; if (sp > c.vmax) c.vmax = sp; c.idx.push(i);
+    if (y > c.top) c.top = y; c.vx += vx; c.vy += vy; c.vz += vz; c.vs = (c.vs || 0) + sp; if (sp > c.vmax) c.vmax = sp; c.idx.push(i);
   }
   for (const c of occ.values()) { const m = c.idx.length; c.vx /= m; c.vy /= m; c.vz /= m; }
   FL.occ = occ;
+  // la lava en movimiento ilumina (las celdas con más lava, como luces dinámicas)
+  FL.lavaPts = []; for (const c of occ.values()) if (c.nl >= 12) FL.lavaPts.push([c.x + 0.5, c.y, c.z + 0.5]);
   // agua y lava en la misma celda
   for (const c of occ.values()) if (c.nw > 0 && c.nl > 0) {
     const b = w.get(c.x, c.y, c.z); if (b === 0 || (b > 0 && REG[b].replace && !REG[b].solid)) w.set(c.x, c.y, c.z, c.nl >= 24 ? ID.obsidian : ID.cobblestone);
@@ -703,14 +711,14 @@ function flAfterReadback() {
     if (fuel) w.set(fx, fy, fz, ID.fire);
   }
   // calma por celda
-  const calm = new Map(); for (const [k, c] of occ) { if (!c.idx.length) continue; const lim = c.nl > c.nw ? 0.12 : 0.3; calm.set(k, c.vmax < lim ? (FL.calm.get(k) || 0) + dtR : 0); } FL.calm = calm;
+  const calm = new Map(); for (const [k, c] of occ) { if (!c.idx.length) continue; const lim = c.nl > c.nw ? 0.1 : 0.18; calm.set(k, c.vs / c.idx.length < lim ? (FL.calm.get(k) || 0) + dtR : 0); } FL.calm = calm;
   // grupos conectados en calma → volumen nivelado en las celdas (o se evaporan si son cuatro gotas)
   const seen = new Set();
   for (const [k0, c0] of occ) {
-    if (seen.has(k0) || !c0.idx.length) continue; const comp = []; const q = [c0]; seen.add(k0); let allCalm = true; const lava = c0.nl > c0.nw;
-    while (q.length) { const c = q.pop(); comp.push(c); if ((calm.get(FLK(c.x, c.y, c.z)) || 0) < (lava ? 2.5 : 1.2)) allCalm = false;
+    if (seen.has(k0) || !c0.idx.length) continue; const comp = []; const q = [c0]; seen.add(k0); let nCalm = 0; const lava = c0.nl > c0.nw;
+    while (q.length) { const c = q.pop(); comp.push(c); if ((calm.get(FLK(c.x, c.y, c.z)) || 0) >= (lava ? 2.5 : 1.2)) nCalm++;
       for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) { const kk = FLK(c.x + dx, c.y + dy, c.z + dz); if (seen.has(kk)) continue; const cc = occ.get(kk); if (!cc || !cc.idx.length || (cc.nl > cc.nw) !== lava) continue; seen.add(kk); q.push(cc); } }
-    if (!allCalm) continue;
+    if (nCalm < comp.length * 0.8) continue;
     flDepositComp(w, comp, lava);
   }
 }
