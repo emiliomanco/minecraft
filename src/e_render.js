@@ -145,19 +145,19 @@ void main(){
     else { float ph=u_time/8.0+vnoise(p*0.3)*0.5; float f0=fract(ph), f1=fract(ph+0.5); float w0=1.0-abs(1.0-2.0*f0);
       vec3 a=vor(p-fw*f0*1.6,tt), b=vor(p-fw*f1*1.6+7.31,tt); float ea=a.y-a.x, eb=b.y-b.x; e=w0>0.5?ea:eb; e=min(e,mix(eb,ea,w0)+0.04); pid=w0>0.5?a.z:b.z; va=w0>0.5?a:b; }
     // temperatura: más caliente donde fluye rápido, en los chorros y en manchas que laten despacio
-    float hot=clamp(0.42+spd*0.7+(fbm(v_world.xz*0.28+vec2(u_time*0.02,-u_time*0.015))-0.5)*1.5+(tube?0.4:0.0),0.0,1.0);
+    float hot=clamp(0.62+spd*0.7+(fbm(v_world.xz*0.28+vec2(u_time*0.02,-u_time*0.015))-0.5)*1.5+(tube?0.4:0.0),0.0,1.0);
     // grietas sin parpadeo: más anchas cuando ocupan menos de un píxel, conservando su brillo total
-    float cw=0.045+0.15*hot*hot; float wd=max(cw,fwidth(e)*1.5); float cov=clamp((1.0-smoothstep(0.0,wd,e))*(cw/wd),0.0,1.0);
+    float cw=0.1+0.26*hot*hot; float wd=max(cw,fwidth(e)*1.5); float cov=clamp((1.0-smoothstep(0.0,wd,e))*(cw/wd),0.0,1.0);
     float NdV0=clamp(dot(-normalize(v_pos),N),0.0,1.0); cov*=mix(0.45,1.0,sqrt(NdV0)); // de canto la costra tapa las grietas hundidas
     // zonas calientes: la costra se funde y aparece roca líquida
-    float pool=smoothstep(0.5,0.85,hot)*(1.0-smoothstep(0.0,0.4,e)*0.55);
+    float pool=smoothstep(0.45,0.8,hot)*(1.0-smoothstep(0.0,0.4,e)*0.55);
     // burbujas que se hinchan y revientan (pocas, en las zonas calientes)
     vec2 bq=v_world.xz*0.7; vec2 bi=floor(bq), bf=fract(bq); float bh=hash12(bi+5.1); float bl=fract(u_time*(0.08+bh*0.07)+bh*7.0);
     float bd=length(bf-vec2(hash12(bi+1.3),hash12(bi+2.9))*0.6-0.2); float br=0.04+0.16*bl; float bub=(1.0-smoothstep(br-0.04,br,bd))*step(0.82,bh)*smoothstep(0.0,0.2,bl)*(1.0-smoothstep(0.8,1.0,bl))*hot;
     float molten=clamp(max(max(cov,pool),bub),0.0,1.0);
     lavaHot=molten;
     // emisión de cuerpo negro (K): 800 rojo apagado, 1000 rojo, 1300 naranja, 1450 amarillo; solo lo más caliente hace bloom
-    float Tc=720.0+300.0*(1.0-smoothstep(0.0,0.25,e))*(0.35+0.65*hot); // la costra cerca de las grietas aún brilla rojo oscuro
+    float Tc=1010.0+260.0*(1.0-smoothstep(0.0,0.3,e))*(0.35+0.65*hot); // costra joven: aún brilla naranja oscuro // la costra cerca de las grietas aún brilla rojo oscuro
     float Tm=1230.0+210.0*hot+150.0*bub+60.0*pool;
     vec3 Ec=vec3(1.0,0.6*pow(clamp((Tc-700.0)/1100.0,0.0,1.0),1.6),0.5*pow(clamp((Tc-1300.0)/1500.0,0.0,1.0),2.0))*pow(Tc/1300.0,9.0)*5.0;
     vec3 Em=vec3(1.0,0.6*pow(clamp((Tm-700.0)/1100.0,0.0,1.0),1.6),0.5*pow(clamp((Tm-1300.0)/1500.0,0.0,1.0),2.0))*pow(Tm/1300.0,9.0)*5.0;
@@ -167,7 +167,7 @@ void main(){
     vec3 dpx=dFdx(v_pos), dpy=dFdy(v_pos); float dhx=dFdx(hgt), dhy=dFdy(hgt);
     vec3 r1=cross(dpy,N), r2=cross(N,dpx); float det=dot(dpx,r1); vec3 sg=(dhx*r1+dhy*r2)*sign(det); N=normalize(abs(det)*N-sg);
     // costra: basalto oscuro y rugoso; su propio brillo rojizo junto a las grietas se suma después de iluminarla
-    alb=mix(vec3(0.022,0.019,0.017),vec3(0.042,0.033,0.028),pid)*(0.7+0.6*vnoise(v_world.xz*7.0)); // basalto casi negro
+    alb=mix(vec3(0.05,0.022,0.012),vec3(0.08,0.035,0.018),pid)*(0.7+0.6*vnoise(v_world.xz*7.0)); // costra fina y rojiza, no roca parda
     lavaGlow=mix(Ec,Em,molten); // mezcla final: costra (tenue) ↔ roca fundida
   }
   float snowComp=0.0; // nieve pisada (0 = polvo suelto, 1 = compactada); viaja en el canal de AO

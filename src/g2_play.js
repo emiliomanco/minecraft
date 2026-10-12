@@ -61,7 +61,7 @@ function slotRender(el, s) {
 }
 let itemNameT = 0;
 function showActionMsg(t) { const el = $('itemName'); el.textContent = t; el.style.opacity = 1; itemNameT = 2.5; }
-function showItemName() { const s = G.player.held(); const el = $('itemName'); el.textContent = s ? REG[s.id].disp : ''; el.style.opacity = 1; itemNameT = 2; }
+function showItemName() { const s = G.player.held(); const el = $('itemName'); el.textContent = s ? REG[s.id].disp + bucketLabel(s) : ''; el.style.opacity = 1; itemNameT = 2; }
 // ------------------------------------------------------------ chat/títulos
 function chatMsg(text, color) {
   const el = document.createElement('div'); el.className = 'cmsg'; el.textContent = text; if (color) el.style.color = color; el.dataset.t = performance.now();
@@ -201,7 +201,7 @@ function refreshInvUI() {
   if (UI.open === 'furnace') { const c = UI.data.c; const fa = $('fArrow'), ff = $('fFlame'); if (fa) fa.style.width = ((c.cook || 0) / 200 * 100) + '%'; if (ff) ff.style.opacity = c.burn > 0 ? 0.3 + 0.7 * c.burn / (c.burnMax || 1) : 0.08; }
   updateHUD();
 }
-function showTooltip(s) { const st = s.palette ? { id: s.palette, c: 1 } : s.get ? s.get() : null; const tt = $('tooltip'); if (!st) { tt.style.display = 'none'; return; } const d = REG[st.id]; let h = `<b>${d.disp}</b>`; if (st.e) for (const k in st.e) h += `<br><span style="color:#a8a8ff">${ENCH[k] ? ENCH[k][0] : k} ${ROMAN[st.e[k]] || st.e[k]}</span>`;
+function showTooltip(s) { const st = s.palette ? { id: s.palette, c: 1 } : s.get ? s.get() : null; const tt = $('tooltip'); if (!st) { tt.style.display = 'none'; return; } const d = REG[st.id]; let h = `<b>${d.disp}</b>` + (bucketLabel(st) ? `<br><span style="color:#9cf">${bucketLabel(st).trim()}</span>` : ''); if (st.e) for (const k in st.e) h += `<br><span style="color:#a8a8ff">${ENCH[k] ? ENCH[k][0] : k} ${ROMAN[st.e[k]] || st.e[k]}</span>`;
   if (d.dur) h += `<br><span style="color:#aaa">Durabilidad: ${d.dur - (st.d || 0)} / ${d.dur}</span>`; if (d.armor && d.armor.pts) h += `<br><span style="color:#58f">+${d.armor.pts} armadura</span>`; if (d.dmg) h += `<br><span style="color:#5f5">${d.dmg} de daño</span>`; if (d.food) h += `<br><span style="color:#fa5">+${d.food[0]} comida</span>`; h += `<br><span style="color:#555;font-size:14px">minecraft:${d.name}</span>`; tt.innerHTML = h; tt.style.display = 'block'; }
 function hideTooltip() { $('tooltip').style.display = 'none'; }
 function closeScreen() {
@@ -453,17 +453,22 @@ function useItem(hit) {
   }
   if (d.rocket) { if (p.gliding) { p.boost = 1.2; consumeHeld(p); playSound('firework', p.x, p.y, p.z, 0.8); return true; } if (hit && !hit.ent) { const x = hit.x + 0.5 + hit.n[0], y = hit.y + 0.5 + hit.n[1], z = hit.z + 0.5 + hit.n[2]; fireworkFX(p.dim, x, y, z); consumeHeld(p); return true; } return false; }
   if (d.bucket !== undefined) {
-    const dir = lookDir(p);
-    if (d.bucket === 0) { const h = raycast(w, p.x, p.eye, p.z, dir[0], dir[1], dir[2], 5, true); if (h && REG[h.id].liquid) { const got = bucketTake(w, h.x, h.y, h.z); if (!got) { showActionMsg('No hay suficiente líquido para llenar el cubo'); return true; } if (G.gameMode !== 'creative') { consumeHeld(p); giveItem(p, { id: got === 1 ? ID.water_bucket : ID.lava_bucket, c: 1 }); } playSound('bucket', h.x, h.y, h.z, 0.8); return true; }
-      // líquido en movimiento (partículas): llenar el cubo con las 64 más cercanas a donde se mira
-      const fl = typeof flBucketTake === 'function' ? flBucketTake(w, p.x, p.eye, p.z, dir, h ? h.t : 5) : 0;
-      if (fl) { if (G.gameMode !== 'creative') { consumeHeld(p); giveItem(p, { id: fl === 1 ? ID.water_bucket : ID.lava_bucket, c: 1 }); } playSound('bucket', p.x, p.eye, p.z, 0.8); return true; }
-      return false; }
-    if (!hit || hit.ent) return false; const liq = d.bucket === 1 ? ID.water : ID.lava;
-    let tx = hit.x, ty = hit.y, tz = hit.z; const tb = w.get(tx, ty, tz); if (!(REG[tb].replace && !REG[tb].liquid) && !(tb === liq && liqAmt(w.getMeta(tx, ty, tz)) < 8)) { tx += hit.n[0]; ty += hit.n[1]; tz += hit.n[2]; }
-    const cur = w.get(tx, ty, tz); if (cur !== 0 && !REG[cur].replace && cur !== liq) return false;
-    if (p.dim === 'nether' && liq === ID.water) { fizz(w, tx, ty, tz); } else bucketPour(w, tx, ty, tz, liq === ID.water ? 1 : 2);
-    if (G.gameMode !== 'creative') p.inv[p.sel] = { id: ID.bucket, c: 1 }; playSound('bucket_empty', tx, ty, tz, 0.8); updateHUD(); return true;
+    // cubos con capacidad (10 L): agachado y con clic mantenido se recoge lo que hay alrededor del puntero; sin agacharse se vacía todo
+    const dir = lookDir(p); const cont = d.bucket; const ml = cont ? (s.ml ?? BUCKET_ML) : 0;
+    if (p.sneaking) {
+      if (ml >= BUCKET_ML) { showActionMsg('El cubo está lleno (10 L)'); return true; }
+      const now = performance.now(); if (now - (p._bkT || 0) < 100) return 'hold'; p._bkT = now;
+      const got = bucketCollect(w, p, dir, cont, BUCKET_ML - ml);
+      if (got.ml > 0) {
+        const nm = Math.min(BUCKET_ML, ml + got.ml); const item = { id: got.liq === 2 ? ID.lava_bucket : ID.water_bucket, c: 1, ml: nm };
+        if (s.c > 1) { s.c--; p.inv[p.sel] = item; giveItem(p, { id: ID.bucket, c: s.c }); } else p.inv[p.sel] = item;
+        showActionMsg((got.liq === 2 ? 'Lava: ' : 'Agua: ') + (nm / 1000).toFixed(1) + ' / 10 L'); if (Math.random() < 0.35) playSound('bucket', p.x, p.eye, p.z, 0.4); updateHUD();
+      }
+      return 'hold';
+    }
+    if (!cont || ml <= 0) return false;
+    bucketPourMl(w, p, dir, hit, cont, ml);
+    if (G.gameMode !== 'creative') p.inv[p.sel] = { id: ID.bucket, c: 1 }; playSound('bucket_empty', p.x, p.eye, p.z, 0.8); updateHUD(); return true;
   }
   if (!hit || hit.ent) return false;
   if (s.id === ID.flint_and_steel) {
