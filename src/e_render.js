@@ -5,7 +5,7 @@ const R = { gl: null, q: 2, dyn: 1, progs: {}, fbo: {}, w: 1, h: 1, view: M4.cre
 const GLSL_COMMON = `
 precision highp float; precision highp int; precision highp sampler2DArray; precision highp sampler2DShadow;
 uniform vec3 u_sunDir; uniform vec3 u_sunReal; uniform vec3 u_sunCol; uniform vec3 u_amb; uniform vec3 u_camPos;
-uniform float u_time; uniform int u_dim; uniform float u_rain; uniform vec3 u_fogCol; uniform vec2 u_fog; uniform float u_under; uniform float u_bright; uniform float u_expo;
+uniform float u_time; uniform float u_tide; uniform int u_dim; uniform float u_rain; uniform vec3 u_fogCol; uniform vec2 u_fog; uniform float u_under; uniform float u_bright; uniform float u_expo;
 uniform sampler2DShadow u_shadow; uniform mat4 u_shadowVP; uniform float u_shadowOn; uniform float u_shadowTexel;
 uniform sampler2DShadow u_shadow2; uniform mat4 u_shadowVP2; uniform float u_shadowTexel2; uniform float u_shadowFar;
 uniform vec4 u_lp[8]; uniform vec3 u_lc[8]; uniform int u_nl;
@@ -99,7 +99,7 @@ void main(){
   uint tc=uint(a_lit.w*255.0+0.5);
   if((fl&64u)!=0u && (fl&7u)==2u){
     float ow=(fl&32768u)!=0u ? oceanW : (tc<200u?1.0:0.0); // peso del oleaje: 1 en mar abierto, fracción donde el mar toca agua dulce (sin escalones)
-    if(ow>0.0){ float A=0.16+u_rain*0.55; p.y+=(oceanWave(w.xz).x*0.85 - A*1.1 - 0.05)*ow; }
+    if(ow>0.0){ float A=0.16+u_rain*0.55; p.y+=(oceanWave(w.xz).x*0.85 - A*1.1 - 0.05 + u_tide)*ow; } // oleaje + marea
   }
   // chorro que cae: el tubo ondula como un líquido de verdad
   if((fl&32768u)!=0u && tc==201u){ float wv=sin(w.y*2.3-u_time*9.0+w.x*1.7)*0.035+sin(w.y*5.1-u_time*14.0+w.z*2.3)*0.018; p.x+=wv*v_n.x+wv*0.5; p.z+=wv*v_n.z-wv*0.4; }
@@ -816,7 +816,7 @@ function computeEnv(dim, camY, under, biome) {
 function setCommon(P) {
   const gl = R.gl, u = P.u;
   if (u.u_sunDir) gl.uniform3fv(u.u_sunDir, ENV.sunDir); if (u.u_sunReal) gl.uniform3fv(u.u_sunReal, ENV.sunReal); if (u.u_sunCol) gl.uniform3fv(u.u_sunCol, ENV.sunCol);
-  if (u.u_amb) gl.uniform3fv(u.u_amb, ENV.amb); if (u.u_camPos) gl.uniform3fv(u.u_camPos, R.cam); if (u.u_time) gl.uniform1f(u.u_time, R.time);
+  if (u.u_amb) gl.uniform3fv(u.u_amb, ENV.amb); if (u.u_camPos) gl.uniform3fv(u.u_camPos, R.cam); if (u.u_time) gl.uniform1f(u.u_time, R.time); if (u.u_tide) gl.uniform1f(u.u_tide, oceanTide());
   if (u.u_dim) gl.uniform1i(u.u_dim, R.dimIdx); if (u.u_rain) gl.uniform1f(u.u_rain, G.rainLevel || 0); if (u.u_fogCol) gl.uniform3fv(u.u_fogCol, ENV.fogCol);
   if (u.u_fog) gl.uniform2fv(u.u_fog, ENV.fog); if (u.u_under) gl.uniform1f(u.u_under, R.under ? 1 : 0); if (u.u_bright) gl.uniform1f(u.u_bright, SETTINGS.brightness); if (u.u_expo) gl.uniform1f(u.u_expo, R.expo || 0.3); if (u.u_camSky) gl.uniform1f(u.u_camSky, R.camSky ?? 1);
   if (u.u_shadowOn) gl.uniform1f(u.u_shadowOn, R.shadowActive ? 1 : 0); if (u.u_shadowVP) gl.uniformMatrix4fv(u.u_shadowVP, false, R.shadowVP);

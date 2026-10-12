@@ -24,6 +24,13 @@ precision highp float; precision highp int; precision highp sampler2D; precision
 uniform sampler2D u_pos, u_vel, u_pred, u_lam, u_key, u_tab; uniform sampler3D u_vox;
 uniform ivec3 u_vdim; uniform int u_M; uniform float u_dt, u_kp, u_ks, u_eps;
 const float H=0.5, H2=0.25, RAD=0.1;
+uniform float u_time, u_rain, u_tide; uniform vec3 u_org;
+// oleaje del mar (el mismo que dibuja VS_CHUNK): x = desplazamiento de la superficie, yz = velocidad orbital horizontal
+vec3 seaWave(vec2 p){ float A=0.16+u_rain*0.55; float h=0.0; vec2 u=vec2(0.0);
+  const vec4 W[5]=vec4[5](vec4(0.81,0.59,22.0,0.42),vec4(0.97,-0.24,13.0,0.26),vec4(0.45,0.89,8.5,0.16),vec4(-0.2,0.98,5.2,0.09),vec4(0.7,-0.71,3.4,0.05));
+  for(int i=0;i<5;i++){ vec2 d=W[i].xy; float k=6.2832/W[i].z; float c=sqrt(9.8/k); float ph=k*(dot(d,p)-c*u_time*0.55)+float(i)*1.7; float a=A*W[i].w*2.2; float s=sin(ph);
+    h+=a*(pow(s*0.5+0.5,1.6)*2.0-1.0); u+=a*k*c*0.55*s*d; }
+  return vec3(h*0.85-A*1.1-0.05+u_tide,u); }
 ivec2 tc(int i){ return ivec2(i&255, i>>8); }
 int idx(){ ivec2 f=ivec2(gl_FragCoord.xy); return f.y*256+f.x; }
 uint hashc(ivec3 c){ uvec3 u=uvec3(c+ivec3(4096)); return ((u.x*73856093u)^(u.y*19349663u)^(u.z*83492791u))&262143u; }
@@ -69,12 +76,16 @@ void main(){
   for(int e=0;e<8;e++){ if(e>=u_nEnt) break; vec4 E=u_ent[e], EV=u_entV[e];
     float t=clamp(x.y-E.y,-EV.w,EV.w); vec3 c=vec3(E.x,E.y+t,E.z); vec3 d=x-c; float dl=length(d);
     if(dl<E.w){ vec3 n=dl>1e-4?d/dl:vec3(0.0,1.0,0.0); v=mix(v,EV.xyz*1.1+n*(E.w-dl)*10.0,0.6); } }
+  // orilla: junto a (o sobre) el mar, el oleaje arrastra el agua adelante y atrás
+  { ivec3 c=ivec3(floor(x)); bool sea=false; for(int k=0;k<6;k++){ ivec3 o2=k==0?ivec3(0,-1,0):k==1?ivec3(1,-1,0):k==2?ivec3(-1,-1,0):k==3?ivec3(0,-1,1):k==4?ivec3(0,-1,-1):ivec3(0,0,0); if(vox(c+o2)==27.0) sea=true; }
+    if(sea && P.w>0.5 && P.w<2.5 || sea && P.w>2.5 && P.w<3.5){ vec3 sw=seaWave(x.xz+u_org.xz); v.xz=mix(v.xz,v.xz+sw.yz*2.2,0.25); } }
   float sp=length(v); if(sp>20.0) v*=20.0/sp;
   vec3 x1=sweep(x,x+v*u_dt);
   float ph=P.w;
   if(x1.x<1.0||x1.z<1.0||x1.y<1.0||x1.x>float(u_vdim.x)-1.0||x1.z>float(u_vdim.z)-1.0||x1.y>float(u_vdim.y)-1.0) ph+=30.0;
   else { float vv=vox(ivec3(floor(x1))); float fy=fract(x1.y);
-    if(vv>16.5 && vv<25.5){ float a=vv-16.0; float lv=a>8.5?1.0:a/8.0*0.92; if(fy<lv-0.04) ph+=10.0; }
+    if(vv>26.5 && vv<27.5){ vec3 sw=seaWave(x1.xz+u_org.xz); if(fy<0.92+sw.x-0.04) ph+=10.0; }
+    else if(vv>16.5 && vv<25.5){ float a=vv-16.0; float lv=a>8.5?1.0:a/8.0*0.92; if(fy<lv-0.04) ph+=10.0; }
     else if(vv>32.5 && vv<41.5){ float a=vv-32.0; float lv=a>8.5?1.0:a/8.0*0.92; if(fy<lv-0.04) ph+=20.0; } }
   o=vec4(x1,ph);
 }`;
@@ -226,7 +237,7 @@ function flVoxTable() {
 }
 function flVoxVal(cb, cm, i, H) {
   const b = cb[i]; if (!b) return 0; const d = REG[b];
-  if (d && d.liquid) { const up = (i >> 8) + 1 < H ? cb[i + 256] : 0; const cov = up && REG[up] && REG[up].liquid === d.liquid; const a = cov ? 9 : liqAmt(cm[i]); return (d.liquid === 1 ? 16 : 32) + a; }
+  if (d && d.liquid) { const up = (i >> 8) + 1 < H ? cb[i + 256] : 0; const cov = up && REG[up] && REG[up].liquid === d.liquid; if (d.liquid === 1 && !cov && (cm[i] & LIQ_OCEAN)) return 27; const a = cov ? 9 : liqAmt(cm[i]); return (d.liquid === 1 ? 16 : 32) + a; }
   if (d && d.inWater) return 16 + 9;
   return FLVC[b];
 }
@@ -294,6 +305,8 @@ function flFlushQueues() {
 function flBindTex(P, name, unit, t, target) { const gl = R.gl; if (P.u[name] === undefined) return; gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(target || gl.TEXTURE_2D, t); gl.uniform1i(P.u[name], unit); }
 function flCommon(P) { const gl = R.gl; const u = P.u;
   if (u.u_vdim) gl.uniform3i(u.u_vdim, FL.vdim[0], FL.vdim[1], FL.vdim[2]); if (u.u_M) gl.uniform1i(u.u_M, FL.M); if (u.u_dt) gl.uniform1f(u.u_dt, FL.dt);
+  if (u.u_time) { gl.uniform1f(u.u_time, R.time || performance.now() / 1000); gl.uniform1f(u.u_rain, G.rainLevel || 0); gl.uniform1f(u.u_tide, oceanTide()); }
+  if (u.u_org) gl.uniform3f(u.u_org, FL.org[0], FL.org[1], FL.org[2]);
   if (u.u_kp) gl.uniform1f(u.u_kp, FL.kp); if (u.u_ks) gl.uniform1f(u.u_ks, FL.ks); if (u.u_eps) gl.uniform1f(u.u_eps, FL.eps);
   flBindTex(P, 'u_vox', 8, FL.vox, gl.TEXTURE_3D); }
 function flPass(P, fb, rows) { const gl = R.gl; gl.bindFramebuffer(gl.FRAMEBUFFER, fb); gl.viewport(0, 0, FL.W, rows); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
@@ -684,7 +697,7 @@ function flAfterReadback() {
     const ph = FL.phase[i]; if (!ph || FL.spawnFrame[i] > F) continue; const k4 = i * 4; const pw = P[k4 + 3]; if (pw < 0.5) continue;
     const flag = Math.floor(pw / 10 + 1e-4); const base = Math.round(pw - flag * 10);
     const x = P[k4] + o[0], y = P[k4 + 1] + o[1], z = P[k4 + 2] + o[2];
-    if (flag === 1 || flag === 2) { flAbsorb(w, x, y, z, base, flag); flKill(i); if (flag === 1 && Math.random() < 0.15 && typeof ripImpulse === 'function') ripImpulse(x, z, 0.35, 0.5); continue; }
+    if (flag === 1 || flag === 2) { flAbsorb(w, x, y, z, base, flag); flKill(i); if (flag === 1 && Math.random() < 0.3 && typeof ripImpulse === 'function') { const sp = Math.hypot(V[k4], V[k4 + 1], V[k4 + 2]); ripImpulse(x, z, 0.3 + sp * 0.04, Math.min(1.4, 0.15 + sp * 0.18)); } continue; }
     if (flag >= 3) { // salió de la región: guardarla como volumen donde esté (cada 8, un octavo)
       const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z); const liq = base === 2 ? 2 : 1; const k = FLK(bx, by, bz) + 0.25; const v = (FL.acc2.get(k) || 0) + 1;
       if (v >= 8) { FL.acc2.delete(k); const cv = cellVol(w, bx, by, bz, liq); if (cv >= 0 && cv < 8) flSetStatic(w, bx, by, bz, liq, cv + 1, base === 3); } else FL.acc2.set(k, v);

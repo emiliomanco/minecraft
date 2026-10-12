@@ -43,7 +43,9 @@ function moveEntity(world, e, dx, dy, dz) {
   if (dx !== odx) e.vx = 0; if (dz !== odz) e.vz = 0; if (dy !== ody) e.vy = 0;
 }
 function blockAt(world, x, y, z) { return world.get(Math.floor(x), Math.floor(y), Math.floor(z)); }
-function liquidAt(world, x, y, z) { const b = blockAt(world, x, y, z); const d = b > 0 ? REG[b] : null; const l = d ? d.liquid || (d.inWater ? 1 : 0) : 0; if (!l) return typeof flLiquidAt === 'function' ? flLiquidAt(world, x, y, z) : 0; return (y - Math.floor(y)) < liquidSurface(world, Math.floor(x), Math.floor(y), Math.floor(z)) ? l : 0; } // con volumen parcial solo cuenta por debajo de la superficie
+function liquidAt(world, x, y, z) { const b = blockAt(world, x, y, z); const d = b > 0 ? REG[b] : null; const l = d ? d.liquid || (d.inWater ? 1 : 0) : 0;
+  if ((b === ID.water && (world.getMeta(Math.floor(x), Math.floor(y), Math.floor(z)) & LIQ_OCEAN)) || (!l && world.get(Math.floor(x), Math.floor(y) - 1, Math.floor(z)) === ID.water)) { const os = oceanSurfY(world, x, y, z); if (os === os) return y < os ? 1 : 0; } // mar con olas
+  if (!l) return typeof flLiquidAt === 'function' ? flLiquidAt(world, x, y, z) : 0; return (y - Math.floor(y)) < liquidSurface(world, Math.floor(x), Math.floor(y), Math.floor(z)) ? l : 0; } // con volumen parcial solo cuenta por debajo de la superficie
 function entityInBlock(world, e, pred) {
   const hw = e.w / 2 - 0.001;
   for (let x = Math.floor(e.x - hw); x <= Math.floor(e.x + hw); x++) for (let z = Math.floor(e.z - hw); z <= Math.floor(e.z + hw); z++) for (let y = Math.floor(e.y); y <= Math.floor(e.y + e.h - 0.01); y++) { const b = world.get(x, y, z); if (b > 0 && pred(REG[b], x, y, z)) return { x, y, z, b }; }
@@ -432,7 +434,14 @@ function updatePlayerPhysics(p, dt, input) {
     const sw = p.inLava ? 1.0 : (input.sprint && input.f ? 5.6 : 2.2);
     p.vx = lerp(p.vx, wx * sw, Math.min(1, dt * 5)); p.vz = lerp(p.vz, wz * sw, Math.min(1, dt * 5));
     if (p.inWater && input.sprint && input.f && p.eyeInWater) { const ly = Math.sin(p.pitch); p.vy = lerp(p.vy, ly * 5, dt * 4); }
-    else { p.vy -= (p.inLava ? 6 : 4) * dt; if (input.jump) p.vy = lerp(p.vy, p.inLava ? 2 : 3.6, dt * 8); else if (input.sneak) p.vy = lerp(p.vy, -3, dt * 4); p.vy = Math.max(p.vy, -3.5); p.vy *= Math.exp(-2 * dt); }
+    else {
+      if (p.inLava) p.vy -= 6 * dt;
+      else { // empuje de Arquímedes según la parte del cuerpo bajo la superficie (el mar sube y baja con las olas)
+        const surf = waterSurfaceAt(w, p.x, p.y + 0.1, p.z); const frac = clamp((surf - p.y) / 1.8, 0, 1);
+        p.vy += clamp(9.8 * (frac / 0.83 - 1), -6, 7) * dt;
+        const ow = isOceanTop(w, Math.floor(p.x), Math.floor(surf - 0.92 + 0.001), Math.floor(p.z)) ? oceanWaveAt(p.x, p.z) : null; if (ow && !input.f) { p.vx += ow.ux * dt * 1.5; p.vz += ow.uz * dt * 1.5; }
+      }
+      if (input.jump) p.vy = lerp(p.vy, p.inLava ? 2 : 3.6, dt * 8); else if (input.sneak) p.vy = lerp(p.vy, -3, dt * 4); p.vy = Math.max(p.vy, -3.5); p.vy *= Math.exp(-2.4 * dt); }
     const fv = flowVec(w, Math.floor(p.x), Math.floor(p.y + 0.2), Math.floor(p.z)); p.vx += fv[0] * 6 * dt; p.vz += fv[1] * 6 * dt;
     // salir del agua saltando bordes
     const before = p.hc; moveEntity(w, p, p.vx * dt, p.vy * dt, p.vz * dt); if (p.hc && input.jump) p.vy = 5.5;
@@ -620,7 +629,7 @@ function entityTick(e, dt) {
     e.fallDist = 0; // el agua frena la caída: sin daño al tocar fondo después
     if (d.swim) { if (tgt) e.vy = lerp(e.vy, clamp(tgt.y - e.y, -1, 1) * 2, 0.1); else e.vy *= 0.9; }
     else if (e.inLava) { e.vy = lerp(e.vy, 0.7, 0.08); } // la lava es densa y viscosa: se flota despacio, hundido a medias
-    else { e.vy = lerp(e.vy, 2.5, 0.2); }
+    else { const surf = waterSurfaceAt(w, e.x, e.y + 0.1, e.z); const h = e.h || 1; const frac = clamp((surf - e.y) / h, 0, 1); e.vy += clamp(9.8 * (frac / 0.6 - 1), -6, 7) * dt; e.vy *= 0.9; } // flotan a medio hundir y suben y bajan con las olas
     const dr = e.inLava ? 0.55 : 0.8; e.vx *= dr; e.vz *= dr;
     const fv = flowVec(w, Math.floor(e.x), Math.floor(e.y + 0.2), Math.floor(e.z)); e.vx += fv[0] * 0.3; e.vz += fv[1] * 0.3;
   } else if (!d.noGrav) e.vy -= 32 * dt;

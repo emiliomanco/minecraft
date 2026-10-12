@@ -174,6 +174,7 @@ function bucketPour(w, x, y, z, liq) {
 function liquidSurface(world, x, y, z) {
   const b = world.get(x, y, z); const d = b > 0 ? REG[b] : null; if (d && d.inWater) return 1; if (!d || !d.liquid) return typeof flSurfIn === 'function' ? flSurfIn(world, x, y, z) : 0;
   const up = world.get(x, y + 1, z); if (up > 0 && REG[up] && REG[up].liquid === d.liquid) return 1;
+  if (b === ID.water && (world.getMeta(x, y, z) & LIQ_OCEAN)) return clamp(0.92 + oceanWaveAt(x + 0.5, z + 0.5).h, 0, 1.6); // mar: con olas y marea
   const m = world.getMeta(x, y, z); if (m & LIQ_FALL) return 1; return liqAmt(m) / 8 * 0.92; // igual que la superficie dibujada (liqTopH)
 }
 // depuración: suma de volumen (en octavos) de un líquido en una caja
@@ -188,4 +189,30 @@ function migrateFluidChunk(w, c) {
     if (b === ID.water && nm === 0 && ocean[i & 255] && (i >> 8) <= SEA) nm = LIQ_OCEAN;
     M[i] = nm;
   }
+}
+// ---- océano: oleaje Gerstner y marea, idénticos a los del shader (VS_CHUNK/oceanWave), para flotar con las olas
+const OCEAN_W = [[0.81, 0.59, 22.0, 0.42], [0.97, -0.24, 13.0, 0.26], [0.45, 0.89, 8.5, 0.16], [-0.2, 0.98, 5.2, 0.09], [0.7, -0.71, 3.4, 0.05]];
+function oceanTide() { return 0.28 * Math.sin(((G.time || 0) % 24000) / 12000 * Math.PI * 2); } // dos mareas por día
+const _OWV = { h: 0, ux: 0, uz: 0 };
+// desplazamiento de la superficie respecto al nivel quieto (h) y velocidad orbital horizontal del agua (ux, uz)
+function oceanWaveAt(x, z) {
+  const t = (typeof R !== 'undefined' && R.time) ? R.time : performance.now() / 1000; const A = 0.16 + (G.rainLevel || 0) * 0.55; let h = 0, ux = 0, uz = 0;
+  for (let i = 0; i < 5; i++) { const W = OCEAN_W[i]; const k = 6.2832 / W[2], c = Math.sqrt(9.8 / k); const ph = k * (W[0] * x + W[1] * z - c * t * 0.55) + i * 1.7; const a = A * W[3] * 2.2; const s = Math.sin(ph);
+    h += a * (Math.pow(s * 0.5 + 0.5, 1.6) * 2 - 1); const om = k * c * 0.55; ux += a * om * s * W[0]; uz += a * om * s * W[1]; }
+  _OWV.h = h * 0.85 - A * 1.1 - 0.05 + oceanTide(); _OWV.ux = ux; _OWV.uz = uz; return _OWV;
+}
+// celda de mar con aire (o algo no líquido) encima
+function isOceanTop(w, x, y, z) { return isOcean(w, x, y, z) && w.get(x, y + 1, z) !== ID.water; }
+// altura de la superficie del mar con olas sobre la columna (x,z) cerca de y; NaN si no hay mar
+function oceanSurfY(w, x, y, z) {
+  const bx = Math.floor(x), bz = Math.floor(z), cy = Math.floor(y);
+  for (let yy = cy + 1; yy >= cy - 2; yy--) if (isOceanTop(w, bx, yy, bz)) return yy + 0.92 + oceanWaveAt(x, z).h;
+  return NaN;
+}
+// superficie del agua (mar con olas, agua quieta o en movimiento) por encima de un punto sumergido
+function waterSurfaceAt(w, x, y, z) {
+  const os = oceanSurfY(w, x, y, z); if (os === os) return os;
+  const bx = Math.floor(x), bz = Math.floor(z); let by = Math.floor(y); let k = 0;
+  while (k < 4 && liquidAt(w, x, by + 1.02, z)) { by++; k++; }
+  return by + liquidSurface(w, bx, by, bz);
 }

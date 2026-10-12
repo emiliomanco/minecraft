@@ -2916,7 +2916,7 @@ const R = { gl: null, q: 2, dyn: 1, progs: {}, fbo: {}, w: 1, h: 1, view: M4.cre
 const GLSL_COMMON = `
 precision highp float; precision highp int; precision highp sampler2DArray; precision highp sampler2DShadow;
 uniform vec3 u_sunDir; uniform vec3 u_sunReal; uniform vec3 u_sunCol; uniform vec3 u_amb; uniform vec3 u_camPos;
-uniform float u_time; uniform int u_dim; uniform float u_rain; uniform vec3 u_fogCol; uniform vec2 u_fog; uniform float u_under; uniform float u_bright; uniform float u_expo;
+uniform float u_time; uniform float u_tide; uniform int u_dim; uniform float u_rain; uniform vec3 u_fogCol; uniform vec2 u_fog; uniform float u_under; uniform float u_bright; uniform float u_expo;
 uniform sampler2DShadow u_shadow; uniform mat4 u_shadowVP; uniform float u_shadowOn; uniform float u_shadowTexel;
 uniform sampler2DShadow u_shadow2; uniform mat4 u_shadowVP2; uniform float u_shadowTexel2; uniform float u_shadowFar;
 uniform vec4 u_lp[8]; uniform vec3 u_lc[8]; uniform int u_nl;
@@ -3010,7 +3010,7 @@ void main(){
   uint tc=uint(a_lit.w*255.0+0.5);
   if((fl&64u)!=0u && (fl&7u)==2u){
     float ow=(fl&32768u)!=0u ? oceanW : (tc<200u?1.0:0.0); // peso del oleaje: 1 en mar abierto, fracción donde el mar toca agua dulce (sin escalones)
-    if(ow>0.0){ float A=0.16+u_rain*0.55; p.y+=(oceanWave(w.xz).x*0.85 - A*1.1 - 0.05)*ow; }
+    if(ow>0.0){ float A=0.16+u_rain*0.55; p.y+=(oceanWave(w.xz).x*0.85 - A*1.1 - 0.05 + u_tide)*ow; } // oleaje + marea
   }
   // chorro que cae: el tubo ondula como un líquido de verdad
   if((fl&32768u)!=0u && tc==201u){ float wv=sin(w.y*2.3-u_time*9.0+w.x*1.7)*0.035+sin(w.y*5.1-u_time*14.0+w.z*2.3)*0.018; p.x+=wv*v_n.x+wv*0.5; p.z+=wv*v_n.z-wv*0.4; }
@@ -3727,7 +3727,7 @@ function computeEnv(dim, camY, under, biome) {
 function setCommon(P) {
   const gl = R.gl, u = P.u;
   if (u.u_sunDir) gl.uniform3fv(u.u_sunDir, ENV.sunDir); if (u.u_sunReal) gl.uniform3fv(u.u_sunReal, ENV.sunReal); if (u.u_sunCol) gl.uniform3fv(u.u_sunCol, ENV.sunCol);
-  if (u.u_amb) gl.uniform3fv(u.u_amb, ENV.amb); if (u.u_camPos) gl.uniform3fv(u.u_camPos, R.cam); if (u.u_time) gl.uniform1f(u.u_time, R.time);
+  if (u.u_amb) gl.uniform3fv(u.u_amb, ENV.amb); if (u.u_camPos) gl.uniform3fv(u.u_camPos, R.cam); if (u.u_time) gl.uniform1f(u.u_time, R.time); if (u.u_tide) gl.uniform1f(u.u_tide, oceanTide());
   if (u.u_dim) gl.uniform1i(u.u_dim, R.dimIdx); if (u.u_rain) gl.uniform1f(u.u_rain, G.rainLevel || 0); if (u.u_fogCol) gl.uniform3fv(u.u_fogCol, ENV.fogCol);
   if (u.u_fog) gl.uniform2fv(u.u_fog, ENV.fog); if (u.u_under) gl.uniform1f(u.u_under, R.under ? 1 : 0); if (u.u_bright) gl.uniform1f(u.u_bright, SETTINGS.brightness); if (u.u_expo) gl.uniform1f(u.u_expo, R.expo || 0.3); if (u.u_camSky) gl.uniform1f(u.u_camSky, R.camSky ?? 1);
   if (u.u_shadowOn) gl.uniform1f(u.u_shadowOn, R.shadowActive ? 1 : 0); if (u.u_shadowVP) gl.uniformMatrix4fv(u.u_shadowVP, false, R.shadowVP);
@@ -4015,7 +4015,9 @@ function moveEntity(world, e, dx, dy, dz) {
   if (dx !== odx) e.vx = 0; if (dz !== odz) e.vz = 0; if (dy !== ody) e.vy = 0;
 }
 function blockAt(world, x, y, z) { return world.get(Math.floor(x), Math.floor(y), Math.floor(z)); }
-function liquidAt(world, x, y, z) { const b = blockAt(world, x, y, z); const d = b > 0 ? REG[b] : null; const l = d ? d.liquid || (d.inWater ? 1 : 0) : 0; if (!l) return typeof flLiquidAt === 'function' ? flLiquidAt(world, x, y, z) : 0; return (y - Math.floor(y)) < liquidSurface(world, Math.floor(x), Math.floor(y), Math.floor(z)) ? l : 0; } // con volumen parcial solo cuenta por debajo de la superficie
+function liquidAt(world, x, y, z) { const b = blockAt(world, x, y, z); const d = b > 0 ? REG[b] : null; const l = d ? d.liquid || (d.inWater ? 1 : 0) : 0;
+  if ((b === ID.water && (world.getMeta(Math.floor(x), Math.floor(y), Math.floor(z)) & LIQ_OCEAN)) || (!l && world.get(Math.floor(x), Math.floor(y) - 1, Math.floor(z)) === ID.water)) { const os = oceanSurfY(world, x, y, z); if (os === os) return y < os ? 1 : 0; } // mar con olas
+  if (!l) return typeof flLiquidAt === 'function' ? flLiquidAt(world, x, y, z) : 0; return (y - Math.floor(y)) < liquidSurface(world, Math.floor(x), Math.floor(y), Math.floor(z)) ? l : 0; } // con volumen parcial solo cuenta por debajo de la superficie
 function entityInBlock(world, e, pred) {
   const hw = e.w / 2 - 0.001;
   for (let x = Math.floor(e.x - hw); x <= Math.floor(e.x + hw); x++) for (let z = Math.floor(e.z - hw); z <= Math.floor(e.z + hw); z++) for (let y = Math.floor(e.y); y <= Math.floor(e.y + e.h - 0.01); y++) { const b = world.get(x, y, z); if (b > 0 && pred(REG[b], x, y, z)) return { x, y, z, b }; }
@@ -4404,7 +4406,14 @@ function updatePlayerPhysics(p, dt, input) {
     const sw = p.inLava ? 1.0 : (input.sprint && input.f ? 5.6 : 2.2);
     p.vx = lerp(p.vx, wx * sw, Math.min(1, dt * 5)); p.vz = lerp(p.vz, wz * sw, Math.min(1, dt * 5));
     if (p.inWater && input.sprint && input.f && p.eyeInWater) { const ly = Math.sin(p.pitch); p.vy = lerp(p.vy, ly * 5, dt * 4); }
-    else { p.vy -= (p.inLava ? 6 : 4) * dt; if (input.jump) p.vy = lerp(p.vy, p.inLava ? 2 : 3.6, dt * 8); else if (input.sneak) p.vy = lerp(p.vy, -3, dt * 4); p.vy = Math.max(p.vy, -3.5); p.vy *= Math.exp(-2 * dt); }
+    else {
+      if (p.inLava) p.vy -= 6 * dt;
+      else { // empuje de Arquímedes según la parte del cuerpo bajo la superficie (el mar sube y baja con las olas)
+        const surf = waterSurfaceAt(w, p.x, p.y + 0.1, p.z); const frac = clamp((surf - p.y) / 1.8, 0, 1);
+        p.vy += clamp(9.8 * (frac / 0.83 - 1), -6, 7) * dt;
+        const ow = isOceanTop(w, Math.floor(p.x), Math.floor(surf - 0.92 + 0.001), Math.floor(p.z)) ? oceanWaveAt(p.x, p.z) : null; if (ow && !input.f) { p.vx += ow.ux * dt * 1.5; p.vz += ow.uz * dt * 1.5; }
+      }
+      if (input.jump) p.vy = lerp(p.vy, p.inLava ? 2 : 3.6, dt * 8); else if (input.sneak) p.vy = lerp(p.vy, -3, dt * 4); p.vy = Math.max(p.vy, -3.5); p.vy *= Math.exp(-2.4 * dt); }
     const fv = flowVec(w, Math.floor(p.x), Math.floor(p.y + 0.2), Math.floor(p.z)); p.vx += fv[0] * 6 * dt; p.vz += fv[1] * 6 * dt;
     // salir del agua saltando bordes
     const before = p.hc; moveEntity(w, p, p.vx * dt, p.vy * dt, p.vz * dt); if (p.hc && input.jump) p.vy = 5.5;
@@ -4592,7 +4601,7 @@ function entityTick(e, dt) {
     e.fallDist = 0; // el agua frena la caída: sin daño al tocar fondo después
     if (d.swim) { if (tgt) e.vy = lerp(e.vy, clamp(tgt.y - e.y, -1, 1) * 2, 0.1); else e.vy *= 0.9; }
     else if (e.inLava) { e.vy = lerp(e.vy, 0.7, 0.08); } // la lava es densa y viscosa: se flota despacio, hundido a medias
-    else { e.vy = lerp(e.vy, 2.5, 0.2); }
+    else { const surf = waterSurfaceAt(w, e.x, e.y + 0.1, e.z); const h = e.h || 1; const frac = clamp((surf - e.y) / h, 0, 1); e.vy += clamp(9.8 * (frac / 0.6 - 1), -6, 7) * dt; e.vy *= 0.9; } // flotan a medio hundir y suben y bajan con las olas
     const dr = e.inLava ? 0.55 : 0.8; e.vx *= dr; e.vz *= dr;
     const fv = flowVec(w, Math.floor(e.x), Math.floor(e.y + 0.2), Math.floor(e.z)); e.vx += fv[0] * 0.3; e.vz += fv[1] * 0.3;
   } else if (!d.noGrav) e.vy -= 32 * dt;
@@ -6704,6 +6713,7 @@ function bucketPour(w, x, y, z, liq) {
 function liquidSurface(world, x, y, z) {
   const b = world.get(x, y, z); const d = b > 0 ? REG[b] : null; if (d && d.inWater) return 1; if (!d || !d.liquid) return typeof flSurfIn === 'function' ? flSurfIn(world, x, y, z) : 0;
   const up = world.get(x, y + 1, z); if (up > 0 && REG[up] && REG[up].liquid === d.liquid) return 1;
+  if (b === ID.water && (world.getMeta(x, y, z) & LIQ_OCEAN)) return clamp(0.92 + oceanWaveAt(x + 0.5, z + 0.5).h, 0, 1.6); // mar: con olas y marea
   const m = world.getMeta(x, y, z); if (m & LIQ_FALL) return 1; return liqAmt(m) / 8 * 0.92; // igual que la superficie dibujada (liqTopH)
 }
 // depuración: suma de volumen (en octavos) de un líquido en una caja
@@ -6718,6 +6728,32 @@ function migrateFluidChunk(w, c) {
     if (b === ID.water && nm === 0 && ocean[i & 255] && (i >> 8) <= SEA) nm = LIQ_OCEAN;
     M[i] = nm;
   }
+}
+// ---- océano: oleaje Gerstner y marea, idénticos a los del shader (VS_CHUNK/oceanWave), para flotar con las olas
+const OCEAN_W = [[0.81, 0.59, 22.0, 0.42], [0.97, -0.24, 13.0, 0.26], [0.45, 0.89, 8.5, 0.16], [-0.2, 0.98, 5.2, 0.09], [0.7, -0.71, 3.4, 0.05]];
+function oceanTide() { return 0.28 * Math.sin(((G.time || 0) % 24000) / 12000 * Math.PI * 2); } // dos mareas por día
+const _OWV = { h: 0, ux: 0, uz: 0 };
+// desplazamiento de la superficie respecto al nivel quieto (h) y velocidad orbital horizontal del agua (ux, uz)
+function oceanWaveAt(x, z) {
+  const t = (typeof R !== 'undefined' && R.time) ? R.time : performance.now() / 1000; const A = 0.16 + (G.rainLevel || 0) * 0.55; let h = 0, ux = 0, uz = 0;
+  for (let i = 0; i < 5; i++) { const W = OCEAN_W[i]; const k = 6.2832 / W[2], c = Math.sqrt(9.8 / k); const ph = k * (W[0] * x + W[1] * z - c * t * 0.55) + i * 1.7; const a = A * W[3] * 2.2; const s = Math.sin(ph);
+    h += a * (Math.pow(s * 0.5 + 0.5, 1.6) * 2 - 1); const om = k * c * 0.55; ux += a * om * s * W[0]; uz += a * om * s * W[1]; }
+  _OWV.h = h * 0.85 - A * 1.1 - 0.05 + oceanTide(); _OWV.ux = ux; _OWV.uz = uz; return _OWV;
+}
+// celda de mar con aire (o algo no líquido) encima
+function isOceanTop(w, x, y, z) { return isOcean(w, x, y, z) && w.get(x, y + 1, z) !== ID.water; }
+// altura de la superficie del mar con olas sobre la columna (x,z) cerca de y; NaN si no hay mar
+function oceanSurfY(w, x, y, z) {
+  const bx = Math.floor(x), bz = Math.floor(z), cy = Math.floor(y);
+  for (let yy = cy + 1; yy >= cy - 2; yy--) if (isOceanTop(w, bx, yy, bz)) return yy + 0.92 + oceanWaveAt(x, z).h;
+  return NaN;
+}
+// superficie del agua (mar con olas, agua quieta o en movimiento) por encima de un punto sumergido
+function waterSurfaceAt(w, x, y, z) {
+  const os = oceanSurfY(w, x, y, z); if (os === os) return os;
+  const bx = Math.floor(x), bz = Math.floor(z); let by = Math.floor(y); let k = 0;
+  while (k < 4 && liquidAt(w, x, by + 1.02, z)) { by++; k++; }
+  return by + liquidSurface(w, bx, by, bz);
 }
 
 // ===== l_vfx.js
@@ -7530,6 +7566,13 @@ precision highp float; precision highp int; precision highp sampler2D; precision
 uniform sampler2D u_pos, u_vel, u_pred, u_lam, u_key, u_tab; uniform sampler3D u_vox;
 uniform ivec3 u_vdim; uniform int u_M; uniform float u_dt, u_kp, u_ks, u_eps;
 const float H=0.5, H2=0.25, RAD=0.1;
+uniform float u_time, u_rain, u_tide; uniform vec3 u_org;
+// oleaje del mar (el mismo que dibuja VS_CHUNK): x = desplazamiento de la superficie, yz = velocidad orbital horizontal
+vec3 seaWave(vec2 p){ float A=0.16+u_rain*0.55; float h=0.0; vec2 u=vec2(0.0);
+  const vec4 W[5]=vec4[5](vec4(0.81,0.59,22.0,0.42),vec4(0.97,-0.24,13.0,0.26),vec4(0.45,0.89,8.5,0.16),vec4(-0.2,0.98,5.2,0.09),vec4(0.7,-0.71,3.4,0.05));
+  for(int i=0;i<5;i++){ vec2 d=W[i].xy; float k=6.2832/W[i].z; float c=sqrt(9.8/k); float ph=k*(dot(d,p)-c*u_time*0.55)+float(i)*1.7; float a=A*W[i].w*2.2; float s=sin(ph);
+    h+=a*(pow(s*0.5+0.5,1.6)*2.0-1.0); u+=a*k*c*0.55*s*d; }
+  return vec3(h*0.85-A*1.1-0.05+u_tide,u); }
 ivec2 tc(int i){ return ivec2(i&255, i>>8); }
 int idx(){ ivec2 f=ivec2(gl_FragCoord.xy); return f.y*256+f.x; }
 uint hashc(ivec3 c){ uvec3 u=uvec3(c+ivec3(4096)); return ((u.x*73856093u)^(u.y*19349663u)^(u.z*83492791u))&262143u; }
@@ -7575,12 +7618,16 @@ void main(){
   for(int e=0;e<8;e++){ if(e>=u_nEnt) break; vec4 E=u_ent[e], EV=u_entV[e];
     float t=clamp(x.y-E.y,-EV.w,EV.w); vec3 c=vec3(E.x,E.y+t,E.z); vec3 d=x-c; float dl=length(d);
     if(dl<E.w){ vec3 n=dl>1e-4?d/dl:vec3(0.0,1.0,0.0); v=mix(v,EV.xyz*1.1+n*(E.w-dl)*10.0,0.6); } }
+  // orilla: junto a (o sobre) el mar, el oleaje arrastra el agua adelante y atrás
+  { ivec3 c=ivec3(floor(x)); bool sea=false; for(int k=0;k<6;k++){ ivec3 o2=k==0?ivec3(0,-1,0):k==1?ivec3(1,-1,0):k==2?ivec3(-1,-1,0):k==3?ivec3(0,-1,1):k==4?ivec3(0,-1,-1):ivec3(0,0,0); if(vox(c+o2)==27.0) sea=true; }
+    if(sea && P.w>0.5 && P.w<2.5 || sea && P.w>2.5 && P.w<3.5){ vec3 sw=seaWave(x.xz+u_org.xz); v.xz=mix(v.xz,v.xz+sw.yz*2.2,0.25); } }
   float sp=length(v); if(sp>20.0) v*=20.0/sp;
   vec3 x1=sweep(x,x+v*u_dt);
   float ph=P.w;
   if(x1.x<1.0||x1.z<1.0||x1.y<1.0||x1.x>float(u_vdim.x)-1.0||x1.z>float(u_vdim.z)-1.0||x1.y>float(u_vdim.y)-1.0) ph+=30.0;
   else { float vv=vox(ivec3(floor(x1))); float fy=fract(x1.y);
-    if(vv>16.5 && vv<25.5){ float a=vv-16.0; float lv=a>8.5?1.0:a/8.0*0.92; if(fy<lv-0.04) ph+=10.0; }
+    if(vv>26.5 && vv<27.5){ vec3 sw=seaWave(x1.xz+u_org.xz); if(fy<0.92+sw.x-0.04) ph+=10.0; }
+    else if(vv>16.5 && vv<25.5){ float a=vv-16.0; float lv=a>8.5?1.0:a/8.0*0.92; if(fy<lv-0.04) ph+=10.0; }
     else if(vv>32.5 && vv<41.5){ float a=vv-32.0; float lv=a>8.5?1.0:a/8.0*0.92; if(fy<lv-0.04) ph+=20.0; } }
   o=vec4(x1,ph);
 }`;
@@ -7732,7 +7779,7 @@ function flVoxTable() {
 }
 function flVoxVal(cb, cm, i, H) {
   const b = cb[i]; if (!b) return 0; const d = REG[b];
-  if (d && d.liquid) { const up = (i >> 8) + 1 < H ? cb[i + 256] : 0; const cov = up && REG[up] && REG[up].liquid === d.liquid; const a = cov ? 9 : liqAmt(cm[i]); return (d.liquid === 1 ? 16 : 32) + a; }
+  if (d && d.liquid) { const up = (i >> 8) + 1 < H ? cb[i + 256] : 0; const cov = up && REG[up] && REG[up].liquid === d.liquid; if (d.liquid === 1 && !cov && (cm[i] & LIQ_OCEAN)) return 27; const a = cov ? 9 : liqAmt(cm[i]); return (d.liquid === 1 ? 16 : 32) + a; }
   if (d && d.inWater) return 16 + 9;
   return FLVC[b];
 }
@@ -7800,6 +7847,8 @@ function flFlushQueues() {
 function flBindTex(P, name, unit, t, target) { const gl = R.gl; if (P.u[name] === undefined) return; gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(target || gl.TEXTURE_2D, t); gl.uniform1i(P.u[name], unit); }
 function flCommon(P) { const gl = R.gl; const u = P.u;
   if (u.u_vdim) gl.uniform3i(u.u_vdim, FL.vdim[0], FL.vdim[1], FL.vdim[2]); if (u.u_M) gl.uniform1i(u.u_M, FL.M); if (u.u_dt) gl.uniform1f(u.u_dt, FL.dt);
+  if (u.u_time) { gl.uniform1f(u.u_time, R.time || performance.now() / 1000); gl.uniform1f(u.u_rain, G.rainLevel || 0); gl.uniform1f(u.u_tide, oceanTide()); }
+  if (u.u_org) gl.uniform3f(u.u_org, FL.org[0], FL.org[1], FL.org[2]);
   if (u.u_kp) gl.uniform1f(u.u_kp, FL.kp); if (u.u_ks) gl.uniform1f(u.u_ks, FL.ks); if (u.u_eps) gl.uniform1f(u.u_eps, FL.eps);
   flBindTex(P, 'u_vox', 8, FL.vox, gl.TEXTURE_3D); }
 function flPass(P, fb, rows) { const gl = R.gl; gl.bindFramebuffer(gl.FRAMEBUFFER, fb); gl.viewport(0, 0, FL.W, rows); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
@@ -8190,7 +8239,7 @@ function flAfterReadback() {
     const ph = FL.phase[i]; if (!ph || FL.spawnFrame[i] > F) continue; const k4 = i * 4; const pw = P[k4 + 3]; if (pw < 0.5) continue;
     const flag = Math.floor(pw / 10 + 1e-4); const base = Math.round(pw - flag * 10);
     const x = P[k4] + o[0], y = P[k4 + 1] + o[1], z = P[k4 + 2] + o[2];
-    if (flag === 1 || flag === 2) { flAbsorb(w, x, y, z, base, flag); flKill(i); if (flag === 1 && Math.random() < 0.15 && typeof ripImpulse === 'function') ripImpulse(x, z, 0.35, 0.5); continue; }
+    if (flag === 1 || flag === 2) { flAbsorb(w, x, y, z, base, flag); flKill(i); if (flag === 1 && Math.random() < 0.3 && typeof ripImpulse === 'function') { const sp = Math.hypot(V[k4], V[k4 + 1], V[k4 + 2]); ripImpulse(x, z, 0.3 + sp * 0.04, Math.min(1.4, 0.15 + sp * 0.18)); } continue; }
     if (flag >= 3) { // salió de la región: guardarla como volumen donde esté (cada 8, un octavo)
       const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z); const liq = base === 2 ? 2 : 1; const k = FLK(bx, by, bz) + 0.25; const v = (FL.acc2.get(k) || 0) + 1;
       if (v >= 8) { FL.acc2.delete(k); const cv = cellVol(w, bx, by, bz, liq); if (cv >= 0 && cv < 8) flSetStatic(w, bx, by, bz, liq, cv + 1, base === 3); } else FL.acc2.set(k, v);
