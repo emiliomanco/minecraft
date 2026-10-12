@@ -913,6 +913,7 @@ function renderWorld(world, cam, yaw, pitch, opts = {}) {
     for (const c of vis) { const m = c.mesh.o; if (!m) continue; gl.uniform3f(P.u.u_off, c.cx * 16 - cam[0], -cam[1], c.cz * 16 - cam[2]); gl.bindVertexArray(m.vao); gl.drawElements(gl.TRIANGLES, m.count, gl.UNSIGNED_INT, 0); R.stats.tris += m.count / 3; R.stats.draws++; } }
   // entidades
   if (opts.drawEntities) { const P = R.progs.box; gl.useProgram(P.p); setCommon(P); gl.uniformMatrix4fv(P.u.u_vp, false, R.vp); gl.bindVertexArray(R.cube); opts.drawEntities(); }
+  if (typeof flDrawDebug === 'function') flDrawDebug();
   if (opts.drawOverlay) opts.drawOverlay(false);
   // copia para agua
   if (R.q >= 2 && R.fbo.copy) {
@@ -937,6 +938,7 @@ function renderWorld(world, cam, yaw, pitch, opts = {}) {
       for (const c of R._transVis) { const m = c.mesh.w; if (!m || m.fall >= m.count) continue; gl.uniform3f(P.u.u_off, c.cx * 16 - cam[0], -cam[1], c.cz * 16 - cam[2]); gl.bindVertexArray(m.vao); gl.drawElements(gl.TRIANGLES, m.count - m.fall, gl.UNSIGNED_INT, m.fall * 4); R.stats.draws++; }
     }
   }
+  if (typeof flRender === 'function') flRender(); // fluido continuo (partículas) sobre el agua quieta
   // segunda pasada: cristal/hielo/portales/fuego (descartando agua en shader de chunk por alfa)
   { const P = R.progs.chunk; gl.useProgram(P.p); setCommon(P); gl.uniformMatrix4fv(P.u.u_vp, false, R.vp); gl.uniform1f(P.u.u_pass, 1);
     gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);

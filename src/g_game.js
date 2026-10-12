@@ -218,6 +218,7 @@ function markDirty(w, x, z, urgent) {
 const NETBATCH = [];
 function onBlockSet(w, x, y, z, old, id, meta) {
   markDirty(w, x, z, true);
+  if (typeof flOnBlock === 'function') flOnBlock(w, x, y, z);
   if (G.net && G.net.role === 'host' && !G.applyingNet) NETBATCH.push([w.dim, x, y, z, id, meta]);
   if (G.net && G.net.role === 'client') return;
   // fluidos y bloques dependientes

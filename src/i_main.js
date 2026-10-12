@@ -89,6 +89,7 @@ function serializeWorld() {
 }
 function worldIcon() { try { const c = document.createElement('canvas'); c.width = 64; c.height = 64; c.getContext('2d').drawImage($('gl'), ($('gl').width - $('gl').height) / 2, 0, $('gl').height, $('gl').height, 0, 0, 64, 64); return c.toDataURL('image/jpeg', 0.7); } catch (e) { return null; } }
 async function saveWorld(silent) {
+  if (typeof flDepositAll === 'function' && G.world) flDepositAll(G.world); // el líquido en movimiento se guarda como volumen
   if (!G.worlds || (G.net && G.net.role === 'client')) return; const data = serializeWorld();
   try { await DB.put({ id: G.worldId, name: G.worldName, seedStr: G.seedStr, mode: G.gameMode, lastPlayed: Date.now(), icon: G.iconURL || worldIcon(), data }); if (!silent) chatMsg('Mundo guardado', '#aaa'); } catch (e) { console.error(e); chatMsg('Error al guardar: ' + e.message, '#f66'); }
 }
@@ -339,6 +340,7 @@ function gameFrame(dt) {
   R.yawCam = yaw; const alpha = pausedSP ? 1 : acc / 50;
   // ondas del agua (estelas, salpicaduras, chorros): fuentes y un paso de simulación en GPU antes de dibujar
   if (typeof ripUpdate === 'function') { if (!pausedSP) ripSources(w, dt); ripUpdate(pausedSP ? 0 : dt); }
+  if (typeof flUpdate === 'function') flUpdate(pausedSP ? 0 : dt, w); // fluido continuo (partículas en GPU)
   renderWorld(w, eye, yaw, pitch, {
     fov: G.fovCur, under, roll, bob, biome: w.biomeAt(Math.floor(p.x), Math.floor(p.z)),
     drawEntities: () => { drawAllEntities(p.dim, alpha, perspective > 0 && G.gameMode !== 'spectator'); },

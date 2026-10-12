@@ -39,6 +39,7 @@ function fluidTick(w, x, y, z) {
   const meta = w.getMeta(x, y, z);
   if (liq === 1 && w.dim === 'nether') { w.set(x, y, z, 0); fizz(w, x, y, z); return; }
   if (liq === 2 && lavaReact(w, x, y, z, meta)) return;
+  if (typeof flCanSim === 'function' && flCanSim(w, x, y, z)) return flContTick(w, x, y, z, id, liq, meta); // fluido continuo: el volumen que se mueve pasa a partículas
   if (liq === 1 && (meta & LIQ_OCEAN)) return oceanTick(w, x, y, z);
   if (!fluidCfg().finite) return legacyFlow(w, x, y, z, id, liq, meta);
   let a = liqAmt(meta); const delay = fluidDelay(w, liq, false);
@@ -161,13 +162,17 @@ function bucketTake(w, x, y, z) {
 }
 function bucketPour(w, x, y, z, liq) {
   const id = liq === 1 ? ID.water : ID.lava; const cur = w.get(x, y, z);
+  if (cur !== id && typeof flCanSim === 'function' && flCanSim(w, x, y, z)) { // fluido continuo: el cubo vierte partículas
+    const b = w.get(x, y, z); if (b > 0 && REG[b].replace) w.set(x, y, z, 0);
+    const d = G.player ? lookDir(G.player) : [0, 0, 0]; flSpawnCell(w, x, y, z, 8, liq === 1 ? 3 : 2, d[0] * 1.5, d[1] * 1.5, d[2] * 1.5); if (liq === 1) splashFX(w, x, y, z, 8); return;
+  }
   if (cur === id) { const v = liqAmt(w.getMeta(x, y, z)); const add = Math.min(8 - v, 8); setBlockNet(w, x, y, z, id, liqMeta(v + add, false, false)); const left = 8 - add; if (left > 0 && cellVol(w, x, y + 1, z, liq) === 0) setBlockNet(w, x, y + 1, z, id, liqMeta(left, false, false)); }
   else setBlockNet(w, x, y, z, id, 0);
   if (liq === 1) splashFX(w, x, y, z, 8);
 }
 // altura de la superficie del líquido dentro de su celda (0..1), para nadar/flotar con volúmenes parciales
 function liquidSurface(world, x, y, z) {
-  const b = world.get(x, y, z); if (b <= 0) return 0; const d = REG[b]; if (d.inWater) return 1; if (!d.liquid) return 0;
+  const b = world.get(x, y, z); const d = b > 0 ? REG[b] : null; if (d && d.inWater) return 1; if (!d || !d.liquid) return typeof flSurfIn === 'function' ? flSurfIn(world, x, y, z) : 0;
   const up = world.get(x, y + 1, z); if (up > 0 && REG[up] && REG[up].liquid === d.liquid) return 1;
   const m = world.getMeta(x, y, z); if (m & LIQ_FALL) return 1; return liqAmt(m) / 8 * 0.92; // igual que la superficie dibujada (liqTopH)
 }

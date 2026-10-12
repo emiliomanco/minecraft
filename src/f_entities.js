@@ -43,14 +43,14 @@ function moveEntity(world, e, dx, dy, dz) {
   if (dx !== odx) e.vx = 0; if (dz !== odz) e.vz = 0; if (dy !== ody) e.vy = 0;
 }
 function blockAt(world, x, y, z) { return world.get(Math.floor(x), Math.floor(y), Math.floor(z)); }
-function liquidAt(world, x, y, z) { const b = blockAt(world, x, y, z); if (b <= 0) return 0; const d = REG[b]; const l = d.liquid || (d.inWater ? 1 : 0); if (!l) return 0; return (y - Math.floor(y)) < liquidSurface(world, Math.floor(x), Math.floor(y), Math.floor(z)) ? l : 0; } // con volumen parcial solo cuenta por debajo de la superficie
+function liquidAt(world, x, y, z) { const b = blockAt(world, x, y, z); const d = b > 0 ? REG[b] : null; const l = d ? d.liquid || (d.inWater ? 1 : 0) : 0; if (!l) return typeof flLiquidAt === 'function' ? flLiquidAt(world, x, y, z) : 0; return (y - Math.floor(y)) < liquidSurface(world, Math.floor(x), Math.floor(y), Math.floor(z)) ? l : 0; } // con volumen parcial solo cuenta por debajo de la superficie
 function entityInBlock(world, e, pred) {
   const hw = e.w / 2 - 0.001;
   for (let x = Math.floor(e.x - hw); x <= Math.floor(e.x + hw); x++) for (let z = Math.floor(e.z - hw); z <= Math.floor(e.z + hw); z++) for (let y = Math.floor(e.y); y <= Math.floor(e.y + e.h - 0.01); y++) { const b = world.get(x, y, z); if (b > 0 && pred(REG[b], x, y, z)) return { x, y, z, b }; }
   return null;
 }
 function flowVec(world, x, y, z) { // corriente: del lado con más volumen hacia el que tiene menos (o hacia una caída)
-  const b = world.get(x, y, z); if (b !== ID.water && b !== ID.lava) return [0, 0]; const liq = REG[b].liquid;
+  const b = world.get(x, y, z); if (b !== ID.water && b !== ID.lava) { const f = typeof flFlowAt === 'function' ? flFlowAt(world, x, y, z) : null; return f ? [f[0] * 0.6, f[2] * 0.6] : [0, 0]; } const liq = REG[b].liquid;
   const m0 = world.getMeta(x, y, z); if (m0 & LIQ_OCEAN) return [0, 0]; const a = liqAmt(m0); let fx = 0, fz = 0;
   for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const v = cellVol(world, x + dx, y, z + dz, liq); if (v < 0) continue; let d = a - v; if (v === 0 && cellVol(world, x + dx, y - 1, z + dz, liq) >= 0) d += 4; fx += dx * d; fz += dz * d; }
   const l = Math.hypot(fx, fz); return l > 0.5 ? [fx / l, fz / l] : [0, 0];
