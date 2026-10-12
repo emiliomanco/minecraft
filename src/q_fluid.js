@@ -771,3 +771,19 @@ function flAdvance(n) {
   for (let i = 0; i < n; i++) flStep();
   gl.bindVertexArray(null); gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.depthMask(true); gl.enable(gl.DEPTH_TEST); gl.enable(gl.CULL_FACE); return FL.steps;
 }
+// cubo vacío sobre líquido en movimiento: recoge 64 partículas (un bloque) alrededor del primer punto con líquido del rayo
+function flBucketTake(w, ox, oy, oz, d, maxT) {
+  if (!FL.ok || w !== FL.world || !FL.occ.size) return 0;
+  for (let t = 0.3; t < Math.min(5, maxT + 0.3); t += 0.25) {
+    const x = ox + d[0] * t, y = oy + d[1] * t, z = oz + d[2] * t; const liq = flLiquidAt(w, x, y, z); if (!liq) continue;
+    // juntar índices de esa celda y sus vecinas, más cercanos primero
+    const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z); const cand = [];
+    for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) { const c = FL.occ.get(FLK(bx + dx, by + dy, bz + dz)); if (!c) continue;
+      for (const i of c.idx) if (FL.phase[i] && ((FL.phase[i] === 2) === (liq === 2))) cand.push([i, dx * dx + dy * dy + dz * dz]); }
+    if (cand.length < 48) return 0; // no llega a un cubo
+    cand.sort((a, b) => a[1] - b[1]); for (let k = 0; k < Math.min(64, cand.length); k++) flKill(cand[k][0]);
+    for (const c of FL.occ.values()) c.idx = c.idx.filter(i => FL.phase[i]);
+    return liq;
+  }
+  return 0;
+}

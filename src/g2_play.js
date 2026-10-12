@@ -454,7 +454,11 @@ function useItem(hit) {
   if (d.rocket) { if (p.gliding) { p.boost = 1.2; consumeHeld(p); playSound('firework', p.x, p.y, p.z, 0.8); return true; } if (hit && !hit.ent) { const x = hit.x + 0.5 + hit.n[0], y = hit.y + 0.5 + hit.n[1], z = hit.z + 0.5 + hit.n[2]; fireworkFX(p.dim, x, y, z); consumeHeld(p); return true; } return false; }
   if (d.bucket !== undefined) {
     const dir = lookDir(p);
-    if (d.bucket === 0) { const h = raycast(w, p.x, p.eye, p.z, dir[0], dir[1], dir[2], 5, true); if (h && REG[h.id].liquid) { const got = bucketTake(w, h.x, h.y, h.z); if (!got) { showActionMsg('No hay suficiente líquido para llenar el cubo'); return true; } if (G.gameMode !== 'creative') { consumeHeld(p); giveItem(p, { id: got === 1 ? ID.water_bucket : ID.lava_bucket, c: 1 }); } playSound('bucket', h.x, h.y, h.z, 0.8); return true; } return false; }
+    if (d.bucket === 0) { const h = raycast(w, p.x, p.eye, p.z, dir[0], dir[1], dir[2], 5, true); if (h && REG[h.id].liquid) { const got = bucketTake(w, h.x, h.y, h.z); if (!got) { showActionMsg('No hay suficiente líquido para llenar el cubo'); return true; } if (G.gameMode !== 'creative') { consumeHeld(p); giveItem(p, { id: got === 1 ? ID.water_bucket : ID.lava_bucket, c: 1 }); } playSound('bucket', h.x, h.y, h.z, 0.8); return true; }
+      // líquido en movimiento (partículas): llenar el cubo con las 64 más cercanas a donde se mira
+      const fl = typeof flBucketTake === 'function' ? flBucketTake(w, p.x, p.eye, p.z, dir, h ? h.t : 5) : 0;
+      if (fl) { if (G.gameMode !== 'creative') { consumeHeld(p); giveItem(p, { id: fl === 1 ? ID.water_bucket : ID.lava_bucket, c: 1 }); } playSound('bucket', p.x, p.eye, p.z, 0.8); return true; }
+      return false; }
     if (!hit || hit.ent) return false; const liq = d.bucket === 1 ? ID.water : ID.lava;
     let tx = hit.x, ty = hit.y, tz = hit.z; const tb = w.get(tx, ty, tz); if (!(REG[tb].replace && !REG[tb].liquid) && !(tb === liq && liqAmt(w.getMeta(tx, ty, tz)) < 8)) { tx += hit.n[0]; ty += hit.n[1]; tz += hit.n[2]; }
     const cur = w.get(tx, ty, tz); if (cur !== 0 && !REG[cur].replace && cur !== liq) return false;
