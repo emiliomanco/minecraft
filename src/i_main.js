@@ -130,7 +130,7 @@ function startWorld(data, isNew, netWelcome) {
   data = migrateWorld(data); resetGameState(); audioInit();
   G.worldName = data.name; G.seed = data.seed >>> 0; G.seedStr = data.seedStr; G.difficulty = data.difficulty ?? 2; G.cheats = data.cheats !== false; G.time = data.time ?? 1000; G.keepInventory = !!data.keepInventory; if (typeof flRestore === 'function') flRestore(data.fluid || null);
   G.defaultMode = data.gameMode || 'survival'; G.gameMode = data.curMode || data.gameMode || 'survival'; G.created = data.created || Date.now(); G.structures = data.structures !== false;
-  G.climate = data.climate ?? (isNew ? 2 : 1); // biomas por clima en mundos nuevos; los antiguos siguen con los clásicos
+  G.climate = data.climate ?? (isNew ? 3 : 1); // biomas por clima en mundos nuevos; los antiguos siguen con los clásicos
   G.worlds = { overworld: new World('overworld', G.seed, G.climate), nether: new World('nether', G.seed, G.climate), end: new World('end', G.seed, G.climate) };
   if (!G.structures) for (const d in G.worlds) { G.worlds[d].gen.genStructures = () => { }; G.worlds[d].noStruct = true; }
   if (data.dims) for (const d in data.dims) for (const k in data.dims[d]) G.worlds[d].saved[k] = data.dims[d][k];
@@ -271,7 +271,7 @@ function menuFrame(dt) {
   R.camSky = 1;
   if (!MENU.world) {
     const seeds = ['cerezos', 'montañas', 'aldea', 'taiga', 'atardecer']; const s = hashStr(seeds[Math.random() * seeds.length | 0] + (Date.now() % 7));
-    MENU.world = new World('overworld', s, 2); G.menuWorld = MENU.world;
+    MENU.world = new World('overworld', s, 3); G.menuWorld = MENU.world;
     let best = null; for (let r = 0; r < 600 && !best; r += 24) for (let a = 0; a < 6; a++) { const x = Math.round(Math.cos(a) * r), z = Math.round(Math.sin(a) * r); const c = MENU.world.gen.col(x, z); if (c.h > SEA + 3 && c.h < SEA + 40 && [BI.forest, BI.plains, BI.taiga, BI.birch_forest, BI.savanna, BI.jungle, BI.snowy_taiga, BI.dark_forest].includes(c.biome)) { best = { x, z, h: c.h }; break; } }
     MENU.pos = best || { x: 0, z: 0, h: SEA + 10 }; MENU.time = [11800, 1200, 23300, 6000][Math.random() * 4 | 0];
   }
