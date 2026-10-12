@@ -122,6 +122,33 @@ SETTINGS.keys = Object.assign({}, DEFAULT_KEYS, SETTINGS.keys || {});
 // v3: correr = Shift, agacharse = C, zoom = Z (si seguían con los valores por defecto anteriores)
 if (!SETTINGS.keysV3) { const K = SETTINGS.keys; if (['KeyR', 'ControlLeft', 'ControlRight'].includes(K.sprint)) K.sprint = 'ShiftLeft'; if (K.sneak === 'ShiftLeft' || /^Control/.test(K.sneak || '')) K.sneak = 'KeyC'; if (K.zoom === 'KeyC' || !K.zoom) K.zoom = 'KeyZ'; SETTINGS.keysV3 = true; SETTINGS.keysV2 = true; try { localStorage.setItem('mc2-settings', JSON.stringify(SETTINGS)); } catch (e) { } }
 if (!SETTINGS.keysV2) { for (const k of ['sprint', 'sneak']) if (/^Control/.test(SETTINGS.keys[k] || '')) SETTINGS.keys[k] = DEFAULT_KEYS[k]; SETTINGS.keysV2 = true; try { localStorage.setItem('mc2-settings', JSON.stringify(SETTINGS)); } catch (e) { } }
+// ---------------------------------------------------------------- submenús: gráficos, físicas, audio y controles
+// gráficos: -1 = «Auto» (sigue al preajuste de calidad)
+const GFX_DEF = { shadows: -1, shadowDist: 1, sunRays: true, bloom: 1, dlights: true, ssr: true, waving: true, render: 'auto', showFps: false };
+// físicas: cada apartado tiene modo 'real' (físicas de Minecraft 2) o 'vanilla' (como el juego original) y sus valores
+const PHYS_DEF = {
+  oceans: { mode: 'real', waves: 1, foam: true },
+  liquids: { mode: 'real', waterSpeed: 1, lavaVisc: 1, splash: true, continuous: true },
+  snow: { mode: 'real', depth: 1 },
+  ragdoll: { mode: 'real', corpse: 4, knock: 6, fall: 20, max: 20 },
+  fire: { mode: 'real', height: 1, spread: 1 },
+  smoke: { mode: 'real', amount: 1, life: 1 },
+  explosions: { mode: 'real', debris: 1, place: true, fireball: true, shock: 1 },
+  mobs: { mode: 'real' }
+};
+const AUDIO_DEF = { music: 0.6, weather: 1, blocks: 1, hostile: 1, friendly: 1, players: 1, ambient: 1, ui: 1, spatial: true };
+const CTL_DEF = { toggleSneak: false, toggleSprint: false, zoomMag: 4 };
+SETTINGS.gfx = Object.assign({}, GFX_DEF, SETTINGS.gfx || {});
+SETTINGS.audio = Object.assign({}, AUDIO_DEF, SETTINGS.audio || {});
+SETTINGS.ctl = Object.assign({}, CTL_DEF, SETTINGS.ctl || {});
+SETTINGS.physics = SETTINGS.physics || {};
+for (const k in PHYS_DEF) {
+  const o = SETTINGS.physics[k] = Object.assign({}, PHYS_DEF[k], SETTINGS.physics[k] || {});
+  // ajustes antiguos (on/finite/prints = false) → modo vanilla
+  if (o.on === false || o.finite === false || o.prints === false) o.mode = 'vanilla'; delete o.on; delete o.finite; delete o.prints; delete o.infinite;
+}
+// valores efectivos de un apartado de físicas; real = false si está en modo vanilla
+function physCfg(sec) { const o = Object.assign({}, PHYS_DEF[sec], (SETTINGS.physics || {})[sec] || {}); o.real = o.mode !== 'vanilla'; return o; }
 function saveSettings() { try { localStorage.setItem('mc2-settings', JSON.stringify(SETTINGS)); } catch (e) { } }
 function keyLabel(code) {
   if (!code) return '-';

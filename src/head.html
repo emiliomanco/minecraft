@@ -50,6 +50,21 @@ input.tf:focus{border-color:#fff}
 .krow .btn.wait{color:#ff0}
 /* HUD */
 #hud{position:fixed;inset:0;pointer-events:none;z-index:10;display:none}
+#optTabs{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;justify-content:center}
+#optTabs .btn{width:150px;height:36px;font-size:21px;margin:0}
+#optTabs .btn.on{color:#ffffa0;border-color:#fff;background-color:#8a8a8a}
+#optBody{width:720px;max-width:calc(100vw - 32px);height:58vh;overflow-y:auto;background:rgba(0,0,0,.5);padding:8px 10px;border:2px solid #000}
+#optBody .opt{grid-template-columns:repeat(2,minmax(0,1fr));width:100%;max-width:none}
+#optBody .osec{grid-column:1/-1;font-size:22px;color:#ffffa0;margin:12px 0 0;padding-bottom:2px;border-bottom:2px solid #555;text-shadow:2px 2px 0 #333}
+#optBody .osec:first-child{margin-top:2px}
+#optBody .note{grid-column:1/-1;max-width:none;margin:2px 0;font-size:17px;text-align:left}
+#optBody .krow{grid-column:1/-1}
+#optBody .off{opacity:.42}
+#optBody .btn,#optBody .slider{font-size:19px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 6px}
+#sOptions .row .btn{width:250px}
+#optHelp{width:720px;max-width:calc(100vw - 32px);min-height:44px;font-size:17px;line-height:1.3;color:#d0d0d0;text-align:center;margin-top:6px}
+#fpsBox{position:fixed;right:6px;top:6px;z-index:40;display:none;font-size:18px;color:#fff;text-shadow:2px 2px 0 #222;background:rgba(0,0,0,.35);padding:1px 6px;pointer-events:none}
+@media (max-width:720px){#optBody .opt{grid-template-columns:1fr}#optTabs .btn{width:calc(50vw - 24px)}}
 #gpuWarn{position:fixed;left:50%;top:6px;transform:translateX(-50%);max-width:92vw;z-index:60;display:none;background:rgba(120,0,0,.82);color:#fff;font-size:14px;line-height:1.35;padding:6px 12px;border:2px solid #f66;text-align:center;pointer-events:none;white-space:normal}
 #crosshair{position:absolute;left:50%;top:50%;width:20px;height:20px;transform:translate(-50%,-50%);mix-blend-mode:difference}
 #crosshair:before,#crosshair:after{content:'';position:absolute;background:#ddd}
@@ -171,6 +186,7 @@ img.glint{filter:drop-shadow(0 0 2px #b46bff) saturate(1.3);animation:glint 2s i
   <div class="row" style="margin-top:12px"><button class="btn small" data-go="options">Opciones...</button><button class="btn small" data-go="quit">Salir del juego</button></div>
 </div>
 <div id="gpuWarn"></div>
+<div id="fpsBox"></div>
 <div class="footer l" id="footL">Minecraft 2 v2.0 (HTML5 / WebGL2)</div>
 <div class="footer r" id="footR">Juego fan no oficial · No afiliado a Mojang ni Microsoft</div>
 
@@ -204,8 +220,10 @@ img.glint{filter:drop-shadow(0 0 2px #b46bff) saturate(1.3);animation:glint 2s i
 
 <div id="sOptions" class="screen dirt">
   <div class="title">Opciones</div>
-  <div class="opt" id="optGrid"></div>
-  <div class="row" style="margin-top:12px"><button class="btn small" id="oControls">Controles...</button><button class="btn small" id="oDone">Hecho</button></div>
+  <div id="optTabs"></div>
+  <div id="optBody"></div>
+  <div id="optHelp"></div>
+  <div class="row" style="margin-top:6px"><button class="btn small" id="oReset" title="Vuelve a los valores por defecto de la pestaña abierta">Restablecer</button><button class="btn small" id="oDone">Hecho</button></div>
 </div>
 
 <div id="sControls" class="screen dirt">

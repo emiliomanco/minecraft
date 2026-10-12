@@ -9,9 +9,9 @@
 // pareja por un canal en vez de quedar en rampa. Cada movimiento baja la energía, así que siempre se detiene.
 // La lava es muy viscosa: actualiza cada ~1,5 s, solo fluye con diferencias ≥ 2, nunca queda más fina de 2/8
 // (salvo cayendo) y reacciona con el agua (obsidiana/roca), con lo inflamable (fuego) y con la nieve/hielo.
-function fluidCfg() { const o = SETTINGS.physics || {}; return { finite: (o.liquids && o.liquids.finite) !== false, lavaVisc: (o.liquids && o.liquids.lavaVisc) || 1, ocean: (o.oceans && o.oceans.infinite) !== false }; }
+function fluidCfg() { const o = physCfg('liquids'); return { finite: o.real, lavaVisc: o.lavaVisc || 1, waterSpeed: o.waterSpeed || 1, splash: o.splash !== false, ocean: true }; }
 const FLU = { budget: 2500, used: 0, tick: -1, moved: 0 };
-function fluidDelay(w, liq, falling) { if (liq === 1) return falling ? 2 : 4; return Math.round((w.dim === 'nether' ? 8 : 26) * fluidCfg().lavaVisc); }
+function fluidDelay(w, liq, falling) { if (liq === 1) return Math.max(1, Math.round((falling ? 2 : 4) / fluidCfg().waterSpeed)); return Math.round((w.dim === 'nether' ? 8 : 26) * fluidCfg().lavaVisc); }
 function isLiq(id) { return id > 0 && REG[id] && REG[id].liquid; }
 // volumen de una celda del líquido liq (0 si está vacía y se puede llenar, -1 si es sólida o de otro líquido)
 function cellVol(w, x, y, z, liq) {
@@ -131,7 +131,7 @@ function lavaReact(w, x, y, z, meta) {
 }
 // salpicaduras: gotas que caen (partículas de líquido)
 function splashFX(w, x, y, z, amt) {
-  if (G.net && G.net.role === 'client') return; const n = [2, 5, 9][SETTINGS.particles ?? 2];
+  if (G.net && G.net.role === 'client') return; if (!fluidCfg().splash) return; const n = [2, 5, 9][SETTINGS.particles ?? 2];
   for (let i = 0; i < n; i++) { const a = Math.random() * 6.28, s = 1 + Math.random() * 2.5; P_({ x: x + 0.5 + Math.cos(a) * 0.3, y: y + Math.min(0.95, amt / 8), z: z + 0.5 + Math.sin(a) * 0.3, vx: Math.cos(a) * s, vy: 2 + Math.random() * 3, vz: Math.sin(a) * s, life: 0.7 + Math.random() * 0.4, size: 0.07 + Math.random() * 0.07, r: 0.75, g: 0.88, b: 1, a: 0.75, grav: 18, collide: true, layer: TEX.drip, fluid: 1 }); }
 }
 // modo clásico (opción «Líquidos: como el original»): fuentes infinitas al estilo Minecraft
@@ -196,7 +196,7 @@ function oceanTide() { return 0.28 * Math.sin(((G.time || 0) % 24000) / 12000 * 
 const _OWV = { h: 0, ux: 0, uz: 0 };
 // desplazamiento de la superficie respecto al nivel quieto (h) y velocidad orbital horizontal del agua (ux, uz)
 function oceanWaveAt(x, z) {
-  const t = (typeof R !== 'undefined' && R.time) ? R.time : performance.now() / 1000; const A = 0.16 + (G.rainLevel || 0) * 0.55; let h = 0, ux = 0, uz = 0;
+  const t = (typeof R !== 'undefined' && R.time) ? R.time : performance.now() / 1000; const A = (0.16 + (G.rainLevel || 0) * 0.55) * (typeof R !== 'undefined' && R.gfxU ? R.gfxU[0] : 1); let h = 0, ux = 0, uz = 0;
   for (let i = 0; i < 5; i++) { const W = OCEAN_W[i]; const k = 6.2832 / W[2], c = Math.sqrt(9.8 / k); const ph = k * (W[0] * x + W[1] * z - c * t * 0.55) + i * 1.7; const a = A * W[3] * 2.2; const s = Math.sin(ph);
     h += a * (Math.pow(s * 0.5 + 0.5, 1.6) * 2 - 1); const om = k * c * 0.55; ux += a * om * s * W[0]; uz += a * om * s * W[1]; }
   _OWV.h = h * 0.85 - A * 1.1 - 0.05 + oceanTide(); _OWV.ux = ux; _OWV.uz = uz; return _OWV;

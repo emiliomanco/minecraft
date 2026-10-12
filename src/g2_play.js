@@ -314,6 +314,8 @@ function onKeyDown(e) {
   if (G.mode !== 'game') return;
   if ($('chatIn').classList.contains('on')) { if (e.code === 'Escape') { closeChat(); e.preventDefault(); } return; }
   const a = actionFor(e.code);
+  // agacharse / correr en modo «alternar» (Opciones → Controles)
+  if (!e.repeat && !UI.open && !G.paused) { if (a === 'sneak' && SETTINGS.ctl.toggleSneak) INPUT.tSneak = !INPUT.tSneak; if (a === 'sprint' && SETTINGS.ctl.toggleSprint) INPUT.tSprint = !INPUT.tSprint; }
   if (e.code === 'F3' || a === 'debug') { e.preventDefault(); if (!e.repeat && !INPUT.keys.F3) { F3 = !F3; setF3Display(); } INPUT.keys.F3 = true; INPUT.f3used = false; return; }
   if (INPUT.keys.F3 && !INPUT.f3used && /^Key[BGNQ]$/.test(e.code)) { F3 = !F3; setF3Display(); }
   if (INPUT.keys.F3) { if (e.code === 'KeyB') { F3B = !F3B; INPUT.f3used = true; chatMsg('Cajas de colisión: ' + (F3B ? 'visibles' : 'ocultas')); } if (e.code === 'KeyG') { F3G = !F3G; INPUT.f3used = true; chatMsg('Bordes de chunk: ' + (F3G ? 'visibles' : 'ocultos')); } if (e.code === 'KeyN') { INPUT.f3used = true; setGameMode(G.gameMode === 'spectator' ? 'creative' : 'spectator'); } if (e.code === 'KeyQ') { INPUT.f3used = true; chatMsg('F3+B: cajas  F3+G: chunks  F3+N: espectador'); } e.preventDefault(); return; }

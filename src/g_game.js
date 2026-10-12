@@ -294,13 +294,14 @@ function fireTick(w, x, y, z) {
   if (typeof emberEmit === 'function' && Math.random() < 0.12 + nbF * 0.04) emberEmit(w, x, y, z, 1 + nbF * 0.1);
   if (fuel && nbF >= 4 && Math.random() < 0.04 + nbF * 0.006) { const n = below > 0 && REG[below].flammable ? [0, -1, 0] : null; if (n) w.set(x, y - 1, z, Math.random() < 0.5 ? ID.fire : 0); }
   // propagar a vecinos inflamables
+  const sp = physCfg('fire').spread; // × opción «Propagación del fuego»
   for (let i = 0; i < 3 + (nbF >> 2); i++) {
     const dx = (Math.random() * 3 | 0) - 1, dy = (Math.random() * 4 | 0) - 1, dz = (Math.random() * 3 | 0) - 1;
     const b = w.get(x + dx, y + dy, z + dz);
-    if (b > 0 && REG[b].flammable && Math.random() < 0.4) { w.set(x + dx, y + dy, z + dz, Math.random() < 0.5 ? ID.fire : 0); }
-    else if (b === 0) { let near = false; for (const [ax, ay, az] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) { const n = w.get(x + dx + ax, y + dy + ay, z + dz + az); if (n > 0 && REG[n].flammable) near = true; } if (near && Math.random() < 0.3) w.set(x + dx, y + dy, z + dz, ID.fire); }
+    if (b > 0 && REG[b].flammable && Math.random() < 0.4 * sp) { w.set(x + dx, y + dy, z + dz, Math.random() < 0.5 ? ID.fire : 0); }
+    else if (b === 0) { let near = false; for (const [ax, ay, az] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) { const n = w.get(x + dx + ax, y + dy + ay, z + dz + az); if (n > 0 && REG[n].flammable) near = true; } if (near && Math.random() < 0.3 * sp) w.set(x + dx, y + dy, z + dz, ID.fire); }
   }
-  if (below > 0 && REG[below].flammable && Math.random() < 0.3) w.set(x, y - 1, z, ID.fire);
+  if (below > 0 && REG[below].flammable && Math.random() < 0.3 * sp) w.set(x, y - 1, z, ID.fire);
   w.scheduleTick(x, y, z, Math.max(12, 30 - nbF * 2) + Math.random() * 40 | 0, 4);
 }
 // adaptador para generar árboles directamente en el mundo
@@ -436,6 +437,7 @@ function spawnTick() {
   }
 }
 function onChunkGenerated(w, c) {
+  if (typeof tintUpload === 'function') tintUpload(w, c);
   if (G.net && G.net.role === 'client') return; if (G.mode !== 'game') return;
   const k = w.dim + ':' + c.cx + ',' + c.cz; if (G.spawned.has(k)) return; G.spawned.add(k);
   for (const s of c.spawns || []) { let y = s.y; if (y === undefined) { y = w.surfaceY(Math.floor(s.x), Math.floor(s.z)) + 1; if (y < 2) continue; } const m = spawnMob(s.type, w.dim, s.x, y, s.z); if (m && (MOB[s.type].hostile)) m.persist = true; }

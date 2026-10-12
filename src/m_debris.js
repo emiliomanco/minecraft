@@ -2,7 +2,7 @@
 //  Explosiones: bloques que salen volando como cuerpos rígidos y vuelven a ser
 //  bloques donde caen, y bola de fuego volumétrica (raymarching)
 // ============================================================================
-function boomCfg() { const o = SETTINGS.physics && SETTINGS.physics.explosions; return Object.assign({ on: true, debris: 1, place: true }, o || {}); }
+function boomCfg() { const o = physCfg('explosions'); return { on: o.real && o.debris > 0, debris: o.debris, place: o.place, fireball: o.real && o.fireball, shock: o.real ? o.shock : 0 }; }
 const DEB = { list: [], maxQ: [12, 40, 70, 90] };
 // ¿este bloque sale volando? (los líquidos, plantas, antorchas, fuego y contenedores no)
 function debrisOk(b) {
@@ -174,7 +174,7 @@ function drawBooms() {
 function boomShock() {
   const b = BOOM.list[BOOM.list.length - 1]; if (!b || R.q < 2 || !G.player || b.dim !== G.player.dim || b.t > 0.6) return [0, 0, 0, 0];
   const s = M4.xform(R.vp, b.x - R.cam[0], b.y + 0.5 - R.cam[1], b.z - R.cam[2]); if (s[3] <= 0) return [0, 0, 0, 0];
-  const dist = Math.max(1, s[3]); const rad = (b.t * 34) / dist * (R.proj[5] * 0.5); const str = 0.025 * (1 - b.t / 0.6) * Math.min(1, b.R / 4) * Math.min(1, 25 / dist);
+  const dist = Math.max(1, s[3]); const rad = (b.t * 34) / dist * (R.proj[5] * 0.5); const str = 0.025 * boomCfg().shock * (1 - b.t / 0.6) * Math.min(1, b.R / 4) * Math.min(1, 25 / dist);
   return [s[0] * 0.5 + 0.5, s[1] * 0.5 + 0.5, rad, str];
 }
 (R.restoreHooks = R.restoreHooks || []).push(() => { BOOM.prog = null; BOOM.gl = null; });

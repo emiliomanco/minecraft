@@ -14,11 +14,23 @@ function audioInit() {
   const rs = c.createBufferSource(); rs.buffer = b; rs.loop = true; const rf = c.createBiquadFilter(); rf.type = 'highpass'; rf.frequency.value = 900; const rg = c.createGain(); rg.gain.value = 0; rs.connect(rf); rf.connect(rg); rg.connect(AU.master); rs.start(); AU.rain = rg;
 }
 const MAT_SND = id => { const d = REG[id]; if (!d) return 'stone'; const n = d.name; if (/glass|ice/.test(n)) return 'glass'; if (/wool|carpet/.test(n)) return 'wool'; if (/sand|snow/.test(n)) return 'sand'; if (/gravel|dirt|farmland|path|mud|clay|soul/.test(n)) return 'gravel'; if (/grass|leaves|sapling|vine|fern|flower|kelp|moss|wart|roots|azalea/.test(n) || d.render === 'cross') return 'grass'; if (d.tool === 'axe' || /planks|log|wood|stem|bookshelf|chest|table|barrel/.test(n)) return 'wood'; return 'stone'; };
-function noiseHit(t, dur, freq, q, vol, type = 'bandpass', dest) { const c = AU.ctx; const s = c.createBufferSource(); s.buffer = AU.noise; s.playbackRate.value = 0.8 + Math.random() * 0.4; const f = c.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q; const g = c.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0008, t + dur); s.connect(f); f.connect(g); g.connect(dest || AU.master); s.start(t, Math.random() * 1.5); s.stop(t + dur + 0.05); return g; }
-function tone(t, dur, f0, f1, vol, type = 'sine', dest) { const c = AU.ctx; const o = c.createOscillator(); o.type = type; o.frequency.setValueAtTime(f0, t); if (f1) o.frequency.exponentialRampToValueAtTime(f1, t + dur); const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); o.connect(g); g.connect(dest || AU.master); o.start(t); o.stop(t + dur + 0.05); }
+function noiseHit(t, dur, freq, q, vol, type = 'bandpass', dest) { const c = AU.ctx; const s = c.createBufferSource(); s.buffer = AU.noise; s.playbackRate.value = 0.8 + Math.random() * 0.4; const f = c.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q; const g = c.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0008, t + dur); s.connect(f); f.connect(g); g.connect(dest || AU.out || AU.master); s.start(t, Math.random() * 1.5); s.stop(t + dur + 0.05); return g; }
+function tone(t, dur, f0, f1, vol, type = 'sine', dest) { const c = AU.ctx; const o = c.createOscillator(); o.type = type; o.frequency.setValueAtTime(f0, t); if (f1) o.frequency.exponentialRampToValueAtTime(f1, t + dur); const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); o.connect(g); g.connect(dest || AU.out || AU.master); o.start(t); o.stop(t + dur + 0.05); }
+// categorías de sonido (Opciones → Audio)
+const SND_CAT = { click: 'ui', dig: 'blocks', place: 'blocks', break: 'blocks', glass: 'blocks', chest_open: 'blocks', chest_close: 'blocks', bucket: 'blocks', bucket_empty: 'blocks', ignite: 'blocks', note: 'blocks', fizz: 'blocks', portal: 'blocks', portal_ignite: 'blocks', end_portal: 'blocks',
+  step: 'players', step_stone: 'players', hurt: 'players', eat: 'players', burp: 'players', drink: 'players', fall: 'players', bow: 'players', throw: 'players', break_item: 'players', levelup: 'players', hit: 'players', crit: 'players', arrow_hit: 'players', pop: 'players',
+  hurt_mob: 'friendly', hurt_hostile: 'hostile', ghast: 'hostile', enderman: 'hostile', sonic: 'hostile', fuse: 'hostile', explode: 'ambient', firework: 'ambient', thunder: 'weather' };
+function sndCat(type) { const c = SND_CAT[type]; if (c) return c; if (type.startsWith('mob_')) { const m = MOB[type.slice(4)]; return m && m.hostile ? 'hostile' : 'friendly'; } return 'ambient'; }
 function playSound(type, x, y, z, vol = 1, extra) {
   if (!AU.ctx || SETTINGS.vol <= 0) return; const c = AU.ctx; const t = c.currentTime;
+  vol *= SETTINGS.audio[sndCat(type)] ?? 1; if (vol <= 0.005) return;
   if (G.player && x !== 0 && G.mode === 'game') { const d = Math.hypot(G.player.x - x, G.player.y - y, G.player.z - z); vol *= Math.max(0, 1 - d / (type === 'explode' ? 80 : 24)); if (vol <= 0.01) return; }
+  // sonido direccional: paneo estéreo según de qué lado está la fuente respecto a la cámara
+  AU.out = null;
+  if (SETTINGS.audio.spatial !== false && G.player && x !== 0 && G.mode === 'game' && c.createStereoPanner) { const p = G.player; const dx = x - p.x, dz = z - p.z; const d = Math.hypot(dx, dz); if (d > 0.6) { const pn = c.createStereoPanner(); pn.pan.value = clamp((dx * Math.cos(p.yaw) - dz * Math.sin(p.yaw)) / d * 0.8, -1, 1); pn.connect(AU.master); AU.out = pn; setTimeout(() => { try { pn.disconnect(); } catch (e) { } }, 4000); } }
+  try { playSoundInner(type, c, t, vol, extra); } finally { AU.out = null; }
+}
+function playSoundInner(type, c, t, vol, extra) {
   const m = extra !== undefined && typeof extra === 'number' && extra < ITEM_BASE ? MAT_SND(extra) : 'stone';
   const mf = { stone: [1800, 2], wood: [700, 3], grass: [2600, 0.8], sand: [3800, 0.6], gravel: [1500, 0.9], glass: [4200, 5], wool: [500, 0.6] }[m];
   switch (type) {
@@ -27,7 +39,7 @@ function playSound(type, x, y, z, vol = 1, extra) {
     case 'place': noiseHit(t, 0.12, mf[0] * 0.7, mf[1], 0.45 * vol); break;
     case 'break': noiseHit(t, 0.22, mf[0], mf[1], 0.6 * vol); if (m === 'glass') for (let i = 0; i < 4; i++) tone(t + i * 0.03, 0.15, 2500 + Math.random() * 2000, 0, 0.05 * vol); break;
     case 'hurt': tone(t, 0.18, 220, 110, 0.4 * vol, 'square'); noiseHit(t, 0.1, 800, 1, 0.3 * vol); break;
-    case 'hurt_mob': tone(t, 0.15, 300, 150, 0.2 * vol, 'sawtooth'); break;
+    case 'hurt_mob': case 'hurt_hostile': tone(t, 0.15, 300, 150, 0.2 * vol, 'sawtooth'); break;
     case 'hit': case 'crit': noiseHit(t, 0.08, type === 'crit' ? 3000 : 1200, 1, 0.4 * vol); break;
     case 'pop': tone(t, 0.08, 900 + Math.random() * 500, 1600, 0.15 * vol); break;
     case 'explode': { const g = noiseHit(t, 2.2, 400, 0.4, 1.2 * vol, 'lowpass'); tone(t, 1.2, 60, 25, 0.9 * vol, 'sine'); noiseHit(t, 2.5, 1200, 0.5, 0.25 * vol, 'lowpass', AU.verb); break; }
@@ -68,7 +80,7 @@ function playSound(type, x, y, z, vol = 1, extra) {
 function musicTick() {
   if (!AU.ctx || SETTINGS.vol <= 0) return; if (--AU.music > 0) return; AU.music = 20 * (90 + Math.random() * 180);
   const c = AU.ctx; let t = c.currentTime + 0.5; const scale = G.world && G.world.dim === 'nether' ? [220, 233, 277, 294, 330, 349, 415] : [261.6, 293.7, 329.6, 392, 440, 523.3, 587.3, 659.3];
-  const g = c.createGain(); g.gain.value = 0.35; g.connect(AU.master); g.connect(AU.verb);
+  const mv = SETTINGS.audio.music ?? 1; if (mv <= 0) return; const g = c.createGain(); g.gain.value = 0.35 * mv; g.connect(AU.master); g.connect(AU.verb);
   for (let i = 0; i < 14; i++) { const f = scale[Math.random() * scale.length | 0] * (Math.random() < 0.3 ? 0.5 : 1); tone(t, 2.8, f, 0, 0.06, 'sine', g); if (Math.random() < 0.4) tone(t, 3.2, f * 0.5, 0, 0.04, 'triangle', g); t += 0.6 + Math.random() * 1.2; }
 }
 // ------------------------------------------------------------ GUARDADO (IndexedDB + archivos)
@@ -85,7 +97,7 @@ function serializeWorld() {
   const players = Object.assign({}, G.playerStates || {}); players.__local = playerState(G.player); players.__local.name = G.player.name;
   if (G.net && G.net.role === 'host') for (const c of G.net.conns.values()) if (c.ent && c.ent.state) players[c.ent.name] = c.ent.state;
   const ents = []; for (const e of G.entities.values()) { if (e.proxy || e.remotePlayer || e.removed || e.dead) continue; if (e instanceof Mob && (e.persist || !e.def.hostile)) ents.push({ k: 'mob', ty: e.type, d: e.dim, x: e.x, y: e.y, z: e.z, hp: e.hp, c: e.color, p: e.persist, n: e.name }); else if (e.type === 'item') ents.push({ k: 'item', d: e.dim, x: e.x, y: e.y, z: e.z, s: e.stack }); }
-  return { format: 'minecraft2-world', version: 3, name: G.worldName, seed: G.seed, seedStr: G.seedStr, gameMode: G.defaultMode || G.gameMode, curMode: G.gameMode, difficulty: G.difficulty, cheats: G.cheats, time: G.time, rain: G.rain, rainTimer: G.rainTimer, worldSpawn: G.worldSpawn, dragonKilled: G.dragonKilled, endInit: G.endInit, gateway: G.gateway, keepInventory: G.keepInventory, containers: G.containers, spawned: [...G.spawned], dims, players, entities: ents, created: G.created || Date.now(), lastPlayed: Date.now(), structures: G.structures !== false, fluid: typeof flSerialize === 'function' ? flSerialize() : null };
+  return { format: 'minecraft2-world', version: 3, name: G.worldName, seed: G.seed, seedStr: G.seedStr, gameMode: G.defaultMode || G.gameMode, curMode: G.gameMode, difficulty: G.difficulty, cheats: G.cheats, time: G.time, rain: G.rain, rainTimer: G.rainTimer, worldSpawn: G.worldSpawn, dragonKilled: G.dragonKilled, endInit: G.endInit, gateway: G.gateway, keepInventory: G.keepInventory, containers: G.containers, spawned: [...G.spawned], dims, players, entities: ents, created: G.created || Date.now(), lastPlayed: Date.now(), structures: G.structures !== false, climate: G.climate || 1, fluid: typeof flSerialize === 'function' ? flSerialize() : null };
 }
 function worldIcon() { try { const c = document.createElement('canvas'); c.width = 64; c.height = 64; c.getContext('2d').drawImage($('gl'), ($('gl').width - $('gl').height) / 2, 0, $('gl').height, $('gl').height, 0, 0, 64, 64); return c.toDataURL('image/jpeg', 0.7); } catch (e) { return null; } }
 async function saveWorld(silent) {
@@ -118,7 +130,8 @@ function startWorld(data, isNew, netWelcome) {
   data = migrateWorld(data); resetGameState(); audioInit();
   G.worldName = data.name; G.seed = data.seed >>> 0; G.seedStr = data.seedStr; G.difficulty = data.difficulty ?? 2; G.cheats = data.cheats !== false; G.time = data.time ?? 1000; G.keepInventory = !!data.keepInventory; if (typeof flRestore === 'function') flRestore(data.fluid || null);
   G.defaultMode = data.gameMode || 'survival'; G.gameMode = data.curMode || data.gameMode || 'survival'; G.created = data.created || Date.now(); G.structures = data.structures !== false;
-  G.worlds = { overworld: new World('overworld', G.seed), nether: new World('nether', G.seed), end: new World('end', G.seed) };
+  G.climate = data.climate ?? (isNew ? 2 : 1); // biomas por clima en mundos nuevos; los antiguos siguen con los clásicos
+  G.worlds = { overworld: new World('overworld', G.seed, G.climate), nether: new World('nether', G.seed, G.climate), end: new World('end', G.seed, G.climate) };
   if (!G.structures) for (const d in G.worlds) { G.worlds[d].gen.genStructures = () => { }; G.worlds[d].noStruct = true; }
   if (data.dims) for (const d in data.dims) for (const k in data.dims[d]) G.worlds[d].saved[k] = data.dims[d][k];
   G.containers = data.containers || {}; G.spawned = new Set(data.spawned || []); G.dragonKilled = !!data.dragonKilled; G.endInit = !!data.endInit; G.gateway = data.gateway || null; G.rain = data.rain || 0; G.rainTimer = data.rainTimer || G.rainTimer;
@@ -228,7 +241,7 @@ function frame(now) {
   const tJs = performance.now();
   if (SETTINGS.fpsCap > 0 && now - lastT < 1000 / SETTINGS.fpsCap - 1) return;
   let dt = (now - lastT) / 1000; lastT = now; if (dt > 0.1) dt = 0.1; if (dt <= 0) dt = 0.001;
-  fpsN++; fpsT += dt; if (fpsT >= 1) { FPS = Math.round(fpsN / fpsT); fpsN = 0; fpsT = 0; CHUNK_STATS.updates = CHUNK_STATS.acc; CHUNK_STATS.acc = 0; dynResTick(); }
+  fpsN++; fpsT += dt; if (fpsT >= 1) { FPS = Math.round(fpsN / fpsT); fpsN = 0; fpsT = 0; CHUNK_STATS.updates = CHUNK_STATS.acc; CHUNK_STATS.acc = 0; dynResTick(); fpsBoxTick(); }
   try {
     if (G.mode === 'menu') menuFrame(dt);
     else if (G.mode === 'loading') loadingFrame(dt);
@@ -239,6 +252,8 @@ function frame(now) {
     gpuWarnTick();
   } catch (e) { console.error(e); if (!frame.errShown) { frame.errShown = true; chatMsg('Error: ' + e.message, '#f66'); } }
 }
+// contador de FPS opcional (Opciones → Gráficos → Mostrar FPS)
+function fpsBoxTick() { const el = $('fpsBox'); if (!el) return; const on = SETTINGS.gfx.showFps && G.mode === 'game' && !F3; el.style.display = on ? 'block' : 'none'; if (on) el.textContent = FPS + ' FPS · ' + (R.frameMs || 0).toFixed(1) + ' ms'; }
 // aviso fijo si el navegador no usa la GPU (se oculta tras 25 s en partida; siempre visible en el menú)
 function gpuWarnTick() {
   const el = $('gpuWarn'); if (!el) return; const show = R.software && (G.mode !== 'game' || (performance.now() - (G.startedAt || 0)) < 25000 || G.paused);
@@ -256,7 +271,7 @@ function menuFrame(dt) {
   R.camSky = 1;
   if (!MENU.world) {
     const seeds = ['cerezos', 'montañas', 'aldea', 'taiga', 'atardecer']; const s = hashStr(seeds[Math.random() * seeds.length | 0] + (Date.now() % 7));
-    MENU.world = new World('overworld', s); G.menuWorld = MENU.world;
+    MENU.world = new World('overworld', s, 2); G.menuWorld = MENU.world;
     let best = null; for (let r = 0; r < 600 && !best; r += 24) for (let a = 0; a < 6; a++) { const x = Math.round(Math.cos(a) * r), z = Math.round(Math.sin(a) * r); const c = MENU.world.gen.col(x, z); if (c.h > SEA + 3 && c.h < SEA + 40 && [BI.forest, BI.plains, BI.taiga, BI.birch_forest, BI.savanna, BI.jungle, BI.snowy_taiga, BI.dark_forest].includes(c.biome)) { best = { x, z, h: c.h }; break; } }
     MENU.pos = best || { x: 0, z: 0, h: SEA + 10 }; MENU.time = [11800, 1200, 23300, 6000][Math.random() * 4 | 0];
   }
@@ -313,7 +328,7 @@ function gameFrame(dt) {
   const pausedSP = G.paused && !G.net;
   if (!pausedSP) { acc += dt * 1000; let n = 0; while (acc >= 50 && n < 4) { gameTick(); acc -= 50; n++; } if (n >= 4) acc = 0; }
   const typing = $('chatIn').classList.contains('on');
-  const input = (UI.open || typing || G.paused || p.dead) ? {} : { f: held('forward'), b: held('back'), l: held('left'), r: held('right'), jump: held('jump'), sneak: held('sneak'), sprint: held('sprint'), useHeld: p.eatT > 0 || p.bowT > 0 };
+  const input = (UI.open || typing || G.paused || p.dead) ? {} : { f: held('forward'), b: held('back'), l: held('left'), r: held('right'), jump: held('jump'), sneak: SETTINGS.ctl.toggleSneak ? !!INPUT.tSneak : held('sneak'), sprint: SETTINGS.ctl.toggleSprint ? (held('forward') ? !!INPUT.tSprint : (INPUT.tSprint = false)) : held('sprint'), useHeld: p.eatT > 0 || p.bowT > 0 };
   if (!pausedSP && !p.dead && !p.ragdoll) { p.savePrev(); const steps = dt > 0.034 ? 2 : 1; for (let i = 0; i < steps; i++) updatePlayerPhysics(p, dt / steps, input); }
   if (!pausedSP && p.ragdoll && input.jump && p.ragdoll.alive && p.ragdoll.t > 0.5) p.ragdoll.dur = 0; // saltar = levantarse
   if (!pausedSP && typeof ragUpdate === 'function') ragUpdate(dt);
@@ -334,7 +349,7 @@ function gameFrame(dt) {
   { const cl = w.dim === 'overworld' ? Math.min(1, w.light(Math.floor(eye[0]), Math.floor(eye[1]), Math.floor(eye[2]))[0] / 12) : 1; R.camSky = lerp(R.camSky ?? 1, cl, Math.min(1, dt * 3)); }
   const camB = blockAt(w, eye[0], eye[1], eye[2]); const under = liquidAt(w, eye[0], eye[1], eye[2]) === 1;
   // zoom (mantener la tecla; la rueda cambia el aumento entre 2x y 12x)
-  const zoomOn = held('zoom') && !UI.open && !G.paused && !$('chatIn').classList.contains('on'); G.zoomCur = lerp(G.zoomCur || 1, zoomOn ? (G.zoomMag || 4) : 1, Math.min(1, dt * 12));
+  const zoomOn = held('zoom') && !UI.open && !G.paused && !$('chatIn').classList.contains('on'); G.zoomCur = lerp(G.zoomCur || 1, zoomOn ? (G.zoomMag || SETTINGS.ctl.zoomMag || 4) : 1, Math.min(1, dt * 12));
   const tfov = SETTINGS.fov * (p.sprinting && !zoomOn ? 1.12 : 1) * (p.spy ? 0.14 : 1) * (p.bowT > 0 ? 1 - Math.min(1, p.bowT) * 0.15 : 1) * (p.gliding ? 1.1 : 1) / G.zoomCur;
   G.fovCur = lerp(G.fovCur || tfov, tfov, Math.min(1, dt * 10));
   R.yawCam = yaw; const alpha = pausedSP ? 1 : acc / 50;
@@ -390,7 +405,7 @@ function emitterFX(w, dt) {
   G._fires = fires; G._flames = flames; G._fireCells = cells; G._lavas = lavas;
 }
 function weatherFX(w, dt) {
-  const p = G.player; const rl = G.rainLevel || 0; if (AU.rain) AU.rain.gain.value = w.dim === 'overworld' ? rl * 0.12 * SETTINGS.vol : 0;
+  const p = G.player; const rl = G.rainLevel || 0; if (AU.rain) AU.rain.gain.value = w.dim === 'overworld' ? rl * 0.12 * (SETTINGS.audio.weather ?? 1) : 0;
   if (w.dim === 'overworld' && rl > 0.05) {
     const n = Math.floor(rl * [40, 120, 260][SETTINGS.particles ?? 2] * dt * 10);
     for (let i = 0; i < n; i++) {
@@ -486,29 +501,167 @@ async function refreshWorlds() {
 function updWBtns() { $('wPlay').disabled = $('wExport').disabled = $('wDelete').disabled = !selWorld; }
 async function playWorld(id) { const rec = await DB.get(id); if (!rec) return; G.worldId = id; G.iconURL = rec.icon; startWorld(rec.data, false); G.pendingHost = G.hostAfterLoad; G.hostAfterLoad = false; }
 const CREATE = { mode: 'survival', diff: 2, cheats: true, structs: true };
+// ------------------------------------------------------------ OPCIONES: pestañas de gráficos, físicas, audio y controles
+const OPT = { tab: 'gfx', keepScroll: false };
+const OPT_TABS = [['gfx', 'Gráficos'], ['phys', 'Físicas'], ['audio', 'Audio'], ['ctl', 'Controles']];
+const pct = v => Math.round(v * 100) + '%';
+function optReload() { if (confirm('Este cambio necesita recargar la página. ¿Recargar ahora?')) { if (G.mode === 'game') saveWorld(true).then(() => location.reload()); else location.reload(); } }
 function buildOptions() {
-  const box = $('optGrid'); box.innerHTML = '';
-  const slider = (label, key, min, max, step, fmt, onch) => { const d = document.createElement('div'); d.className = 'slider'; const knob = document.createElement('div'); knob.className = 'knob'; const sp = document.createElement('span'); const inp = document.createElement('input'); inp.type = 'range'; inp.min = min; inp.max = max; inp.step = step; inp.value = SETTINGS[key]; const upd = () => { const v = +inp.value; sp.textContent = label + ': ' + fmt(v); knob.style.left = `calc(${(v - min) / (max - min) * 100}% - ${(v - min) / (max - min) * 16}px)`; }; inp.oninput = () => { SETTINGS[key] = +inp.value; upd(); saveSettings(); onch && onch(+inp.value); }; upd(); d.append(knob, sp, inp); box.appendChild(d); };
-  const toggle = (label, key, vals, names, onch) => { const b = document.createElement('button'); b.className = 'btn'; const upd = () => b.textContent = label + ': ' + names[vals.indexOf(SETTINGS[key])]; b.onclick = () => { SETTINGS[key] = vals[(vals.indexOf(SETTINGS[key]) + 1) % vals.length]; upd(); saveSettings(); onch && onch(SETTINGS[key]); }; upd(); box.appendChild(b); };
-  slider('Campo de visión', 'fov', 30, 110, 1, v => v === 70 ? 'Normal' : v >= 110 ? 'Quake Pro' : v);
-  slider('Distancia de chunks', 'rd', 2, 24, 1, v => v + ' chunks' + (v > 12 ? ' (exigente)' : ''));
-  toggle('Gráficos', 'quality', [0, 1, 2, 3], ['Rápidos (PC de bajos recursos)', 'Equilibrados (sombras+bloom)', 'Realistas (shaders completos)', 'Ultra (reflejos SSR+4K sombras)'], v => setQuality(v));
-  toggle('Partículas', 'particles', [0, 1, 2], ['Mínimas', 'Reducidas', 'Todas']);
-  toggle('Procesador gráfico', 'gpuPref', ['high-performance', 'default', 'low-power'], ['GPU dedicada (rendimiento)', 'Automático', 'GPU integrada (ahorro)'], () => { if (confirm('Este cambio necesita recargar la página. ¿Recargar ahora?')) { if (G.mode === 'game') saveWorld(true).then(() => location.reload()); else location.reload(); } });
-  toggle('Límite de FPS', 'fpsCap', [0, 30, 60, 120], ['Sin límite (VSync)', '30', '60', '120']);
-  toggle('Hilos de CPU para chunks', 'threads', [0, 1, 2, 3, 4, 6], ['Automático', '1', '2', '3', '4', '6'], () => { if (confirm('Este cambio necesita recargar la página. ¿Recargar ahora?')) { if (G.mode === 'game') saveWorld(true).then(() => location.reload()); else location.reload(); } });
-  toggle('Exposición automática', 'autoExp', [true, false], ['Sí (evita deslumbrar)', 'No']);
-  toggle('Resolución dinámica', 'dynres', [true, false], ['Sí (recomendado)', 'No'], v => { R.dyn = 1; resize(); });
-  slider('Escala de resolución', 'resScale', 0.5, 1, 0.05, v => Math.round(v * 100) + '%', () => resize());
-  slider('Sensibilidad', 'sens', 0.05, 1.5, 0.01, v => Math.round(v * 100) + '%');
-  slider('Volumen', 'vol', 0, 1, 0.01, v => v === 0 ? 'Silencio' : Math.round(v * 100) + '%', v => { if (AU.master) AU.master.gain.value = v; });
-  slider('Brillo', 'brightness', 0, 1, 0.01, v => v === 0 ? 'Oscuro' : v === 1 ? 'Brillante' : Math.round(v * 100) + '%');
-  toggle('Nubes', 'clouds', [true, false], ['Sí', 'No']);
-  toggle('Balanceo de vista', 'bob', [true, false], ['Sí', 'No']);
-  toggle('Invertir ratón', 'invertY', [false, true], ['No', 'Sí']);
-  slider('Escala de interfaz', 'gui', 1, 3, 0.25, v => v + 'x', applyGui);
-  const gi = document.createElement('div'); gi.className = 'note'; gi.style.gridColumn = '1/-1'; gi.innerHTML = 'Dibujando con: <b>' + esc(R.gpu || '?') + '</b>' + (R.gpuKind ? ' (' + ({ cpu: 'CPU, sin GPU', integrada: 'GPU integrada', dedicada: 'GPU dedicada' })[R.gpuKind] + ')' : '') + (gpuHelpText() ? '<br><span style="color:' + (R.software ? '#f66' : '#fc8') + '">⚠ ' + esc(gpuHelpText()) + '</span>' : ''); box.appendChild(gi);
-  const n = document.createElement('div'); n.className = 'note'; n.style.gridColumn = '1/-1'; n.textContent = 'Consejo: en computadoras de bajos recursos usa gráficos «Rápidos», 4-6 chunks y partículas reducidas. El juego usa culling de caras ocultas, de frustum y por distancia.'; box.appendChild(n);
+  const tabs = $('optTabs'); tabs.innerHTML = '';
+  for (const [k, n] of OPT_TABS) { const b = document.createElement('button'); b.className = 'btn' + (OPT.tab === k ? ' on' : ''); b.textContent = n; b.onclick = () => { playSound('click', 0, 0, 0, 1); OPT.tab = k; waitingKey = null; buildOptions(); $('optBody').scrollTop = 0; }; tabs.appendChild(b); }
+  const body = $('optBody'); const st = body.scrollTop; body.innerHTML = ''; const box = document.createElement('div'); box.className = 'opt'; body.appendChild(box);
+  if (!OPT.keepScroll) $('optHelp').textContent = 'Pasa el ratón por encima de una opción para ver qué hace.';
+  const ui = optUI(box);
+  ({ gfx: optGraphics, phys: optPhysics, audio: optAudio, ctl: optControls })[OPT.tab](ui);
+  if (OPT.keepScroll) body.scrollTop = st; OPT.keepScroll = false;
+}
+function optRebuild() { OPT.keepScroll = true; buildOptions(); }
+// constructores de controles: get/set permiten guardar en objetos anidados (SETTINGS.gfx, SETTINGS.physics...)
+function optUI(box) {
+  const help = (el, h) => { if (!h) return; el.title = h; el.addEventListener('mouseenter', () => { $('optHelp').textContent = h; }); };
+  const done = (o, v) => { saveSettings(); o.onch && o.onch(v); if (o.rebuild) optRebuild(); };
+  return {
+    sec(t) { const d = document.createElement('div'); d.className = 'osec'; d.textContent = t; box.appendChild(d); },
+    note(html, color) { const d = document.createElement('div'); d.className = 'note'; d.innerHTML = html; if (color) d.style.color = color; box.appendChild(d); },
+    slider(label, get, set, min, max, step, fmt, h, o = {}) {
+      const d = document.createElement('div'); d.className = 'slider' + (o.off ? ' off' : ''); const knob = document.createElement('div'); knob.className = 'knob'; const sp = document.createElement('span'); const inp = document.createElement('input');
+      inp.type = 'range'; inp.min = min; inp.max = max; inp.step = step; inp.value = get();
+      const upd = () => { const v = +inp.value; sp.textContent = label + ': ' + fmt(v); const f = (v - min) / (max - min); knob.style.left = `calc(${f * 100}% - ${f * 16}px)`; };
+      inp.oninput = () => { set(+inp.value); upd(); saveSettings(); o.onch && o.onch(+inp.value); }; inp.onchange = () => { if (o.rebuild) optRebuild(); };
+      upd(); d.append(knob, sp, inp); help(d, h); box.appendChild(d); return d;
+    },
+    cycle(label, get, set, vals, names, h, o = {}) {
+      const b = document.createElement('button'); b.className = 'btn' + (o.off ? ' off' : ''); const cur = () => { const i = vals.indexOf(get()); return i < 0 ? 0 : i; };
+      const upd = () => b.textContent = label + ': ' + names[cur()];
+      b.onclick = () => { playSound('click', 0, 0, 0, 1); const v = vals[(cur() + 1) % vals.length]; set(v); upd(); done(o, v); };
+      upd(); help(b, h); box.appendChild(b); return b;
+    },
+    button(label, fn, h, wide) { const b = document.createElement('button'); b.className = 'btn'; b.textContent = label; b.onclick = () => { playSound('click', 0, 0, 0, 1); fn(); }; if (wide) b.style.gridColumn = '1/-1'; help(b, h); box.appendChild(b); return b; },
+    el(node) { box.appendChild(node); return node; }
+  };
+}
+const SK = k => [() => SETTINGS[k], v => { SETTINGS[k] = v; }];
+const GK = k => [() => SETTINGS.gfx[k], v => { SETTINGS.gfx[k] = v; }];
+function optGraphics(ui) {
+  ui.sec('Preajuste');
+  ui.cycle('Calidad', ...SK('quality'), [0, 1, 2, 3], ['Rápida', 'Equilibrada', 'Realista', 'Ultra'], 'Rápida: sin sombras ni postproceso (PCs de bajos recursos). Equilibrada: sombras del sol y resplandor. Realista: agua con refracción, fuego, humo y explosiones volumétricos. Ultra: reflejos en el agua y sombras más nítidas.', { onch: v => { if (SETTINGS.cpuMode) SETTINGS.cpuMode.quality = v; setQuality(v); }, rebuild: true });
+  ui.cycle('Modo de dibujo', ...GK('render'), ['auto', 'gpu', 'cpu'], ['Automático', 'Siempre GPU', 'Modo CPU'], 'Automático: si el navegador no está usando la tarjeta gráfica, baja la calidad sola para que el juego vaya fluido. Siempre GPU: nunca la baja. Modo CPU: gráficos mínimos y menos resolución para equipos sin tarjeta gráfica.', { onch: () => applyRenderMode(false), rebuild: true });
+  ui.note('Las opciones en «Auto» siguen al preajuste de calidad.' + (SETTINGS.cpuMode ? ' <span style="color:#fc8">Modo CPU activo: calidad, resolución y chunks reducidos.</span>' : ''));
+  ui.sec('Procesador (CPU y GPU)');
+  ui.cycle('Tarjeta gráfica', ...SK('gpuPref'), ['high-performance', 'default', 'low-power'], ['Dedicada', 'Automática', 'Integrada'], 'Qué tarjeta gráfica pedirle al navegador en equipos que tienen dos (portátiles): la dedicada rinde más, la integrada gasta menos batería. Necesita recargar.', { onch: optReload });
+  ui.cycle('Hilos de CPU', ...SK('threads'), [0, 1, 2, 3, 4, 6], ['Automático', '1', '2', '3', '4', '6'], 'Núcleos del procesador que generan el terreno y construyen los chunks en segundo plano. Más hilos = el mundo carga antes. Necesita recargar.', { onch: optReload });
+  ui.note('Dibujando con: <b>' + esc(R.gpu || '?') + '</b>' + (R.gpuKind ? ' (' + ({ cpu: 'CPU, sin GPU', integrada: 'GPU integrada', dedicada: 'GPU dedicada' })[R.gpuKind] + ')' : '') + ' · ' + (navigator.hardwareConcurrency || '?') + ' núcleos de CPU');
+  if (gpuHelpText()) ui.note('⚠ ' + esc(gpuHelpText()), R.software ? '#f88' : '#fc8');
+  ui.sec('Mundo');
+  ui.slider('Distancia de chunks', ...SK('rd'), 2, 24, 1, v => v + ' chunks' + (v > 12 ? ' (exigente)' : ''), 'Cuántos chunks se ven alrededor del jugador. Más distancia exige más a la CPU y a la GPU.', { onch: v => { if (SETTINGS.cpuMode) SETTINGS.cpuMode.rd = v; } });
+  ui.cycle('Nubes', ...SK('clouds'), [true, false], ['Sí', 'No'], 'Nubes volumétricas en el cielo.');
+  ui.cycle('Partículas', ...SK('particles'), [0, 1, 2], ['Mínimas', 'Reducidas', 'Todas'], 'Cantidad de partículas: chispas, polvo, salpicaduras, humo de partículas...', { onch: v => { if (SETTINGS.cpuMode) SETTINGS.cpuMode.particles = v; } });
+  ui.cycle('Plantas con viento', ...GK('waving'), [true, false], ['Sí', 'No'], 'Las hojas, la hierba y las flores se mueven con el viento (más con lluvia).');
+  ui.sec('Shaders');
+  const q0 = R.q === 0;
+  ui.cycle('Sombras', ...GK('shadows'), [-1, 0, 1, 2, 3], ['Auto (' + ['No', 'Bajas', 'Medias', 'Altas'][q0 ? 0 : R.q] + ')', 'No', 'Bajas', 'Medias', 'Altas'], 'Sombras del sol en tiempo real. Bajas: solo cerca. Medias y altas: también lejanas y más nítidas. Necesita calidad Equilibrada o mejor.', { off: q0, onch: () => setQuality(R.q), rebuild: true });
+  ui.slider('Distancia de sombras', ...GK('shadowDist'), 0.5, 2, 0.05, pct, 'Hasta dónde llegan las sombras. Más distancia = sombras algo menos nítidas.', { off: q0 || shadowLevel() === 0 });
+  ui.cycle('Sol realista', ...GK('sunRays'), [true, false], ['Sí', 'No'], 'Rayos de luz (god rays) y resplandor del sol, que se tapan con los bloques. Necesita calidad Realista o mejor.', { off: R.q < 2 });
+  ui.slider('Resplandor (bloom)', ...GK('bloom'), 0, 1.5, 0.05, v => v === 0 ? 'No' : pct(v), 'Halo de luz alrededor de antorchas, lava, fuego y el sol.', { off: q0 });
+  ui.cycle('Luces dinámicas', ...GK('dlights'), [true, false], ['Sí', 'No'], 'La antorcha en la mano, las explosiones, el fuego y los mobs en llamas iluminan lo que tienen alrededor.');
+  ui.cycle('Reflejos en el agua', ...GK('ssr'), [true, false], ['Sí', 'No'], 'Reflejos de pantalla (SSR) en el agua. Solo en calidad Ultra.', { off: R.q < 3, onch: () => setQuality(R.q) });
+  ui.cycle('Exposición automática', () => SETTINGS.autoExp !== false, v => { SETTINGS.autoExp = v; }, [true, false], ['Sí', 'No'], 'El ojo se adapta: al salir de una cueva la luz deslumbra un momento y en la oscuridad se ve mejor poco a poco.', { off: q0 });
+  ui.sec('Pantalla');
+  ui.slider('Brillo', ...SK('brightness'), 0, 1, 0.01, v => v === 0 ? 'Oscuro' : v === 1 ? 'Brillante' : pct(v), 'Brillo general de la imagen.');
+  ui.slider('Campo de visión', ...SK('fov'), 30, 110, 1, v => v === 70 ? 'Normal' : v >= 110 ? 'Quake Pro' : v, 'Ángulo de visión (FOV).');
+  ui.slider('Escala de interfaz', ...SK('gui'), 1, 3, 0.25, v => v + 'x', 'Tamaño de la barra de objetos, el inventario y los menús del juego.', { onch: applyGui });
+  ui.cycle('Límite de FPS', ...SK('fpsCap'), [0, 30, 60, 120], ['Sin límite (VSync)', '30', '60', '120'], 'Limitar los FPS reduce el calor y el consumo.');
+  ui.cycle('Mostrar FPS', ...GK('showFps'), [false, true], ['No', 'Sí'], 'Contador de FPS en la esquina superior derecha.');
+  ui.cycle('Resolución dinámica', ...SK('dynres'), [true, false], ['Sí', 'No'], 'Baja la resolución interna cuando los FPS caen y la sube cuando sobran.', { onch: () => { R.dyn = 1; resize(); } });
+  ui.slider('Escala de resolución', ...SK('resScale'), 0.5, 1, 0.05, pct, 'Resolución interna del dibujo. Menos = más FPS pero imagen más pixelada.', { onch: v => { if (SETTINGS.cpuMode) SETTINGS.cpuMode.resScale = v; resize(); } });
+  ui.cycle('Balanceo de vista', ...SK('bob'), [true, false], ['Sí', 'No'], 'La cámara se balancea al caminar.');
+}
+const PK = (sec, k) => [() => SETTINGS.physics[sec][k], v => { SETTINGS.physics[sec][k] = v; }];
+function optPhysics(ui) {
+  ui.note('Cada apartado puede ir en modo <b>Realista</b> (físicas de Minecraft 2) o <b>Vanilla</b> (como el juego original). En multijugador mandan los ajustes del anfitrión.');
+  ui.button('Todo realista', () => { for (const k in PHYS_DEF) SETTINGS.physics[k].mode = 'real'; saveSettings(); optRebuild(); }, 'Pone todos los apartados en modo realista.');
+  ui.button('Todo vanilla', () => { for (const k in PHYS_DEF) SETTINGS.physics[k].mode = 'vanilla'; saveSettings(); optRebuild(); }, 'Pone todos los apartados como en el Minecraft original.');
+  const mode = (sec, hr, hv) => { ui.cycle('Modo', ...PK(sec, 'mode'), ['real', 'vanilla'], ['Realista', 'Vanilla'], 'Realista: ' + hr + ' Vanilla: ' + hv, { rebuild: true }); return SETTINGS.physics[sec].mode === 'vanilla'; };
+  let v;
+  ui.sec('Océanos');
+  v = mode('oceans', 'oleaje con olas que crecen con la lluvia y espuma en las crestas.', 'agua del mar plana.');
+  ui.slider('Altura de las olas', ...PK('oceans', 'waves'), 0, 2, 0.05, v2 => v2 === 0 ? 'Mar en calma' : pct(v2), 'Tamaño del oleaje en el mar.', { off: v });
+  ui.cycle('Espuma', ...PK('oceans', 'foam'), [true, false], ['Sí', 'No'], 'Espuma blanca en las crestas de las olas y en las orillas.', { off: v });
+  ui.sec('Líquidos (agua y lava)');
+  v = mode('liquids', 'el agua y la lava tienen volumen fijo: no hay fuentes infinitas y un cubo recoge solo lo que hay.', 'fuentes infinitas y corrientes de 7 bloques como en el original.');
+  ui.slider('Velocidad del agua', ...PK('liquids', 'waterSpeed'), 0.5, 2, 0.05, pct, 'Lo rápido que fluye y se nivela el agua.');
+  ui.slider('Viscosidad de la lava', ...PK('liquids', 'lavaVisc'), 0.5, 3, 0.05, pct, 'Más viscosidad = la lava avanza más despacio.');
+  ui.cycle('Fluido continuo (partículas)', ...PK('liquids', 'continuous'), [true, false], ['Sí', 'No'], 'Calidad Alta o Ultra: el agua y la lava se mueven como fluido real (partículas en la GPU) en vez de por celdas.', { off: v });
+  ui.cycle('Salpicaduras', ...PK('liquids', 'splash'), [true, false], ['Sí', 'No'], 'Gotas al caer agua y al moverse los líquidos.', { off: v });
+  ui.sec('Nieve');
+  v = mode('snow', 'la nieve está suelta y se compacta solo donde pisan el jugador y los mobs (huellas y rastros).', 'capas de nieve sólidas, sin huellas.');
+  ui.slider('Profundidad de las huellas', ...PK('snow', 'depth'), 0.25, 1.5, 0.05, pct, 'Cuánto se hunde la nieve al pisarla.', { off: v });
+  ui.sec('Ragdolls');
+  v = mode('ragdoll', 'los mobs y el jugador caen como muñecos de trapo al morir, con golpes fuertes y caídas grandes (tecla ' + keyLabel(SETTINGS.keys.ragdoll) + ' para activarlo tú).', 'animación de muerte clásica.');
+  ui.slider('Duración del cuerpo', ...PK('ragdoll', 'corpse'), 1, 20, 0.5, x => x + ' s', 'Cuánto tiempo queda el cuerpo en el suelo antes de desaparecer.', { off: v });
+  ui.slider('Golpe mínimo', ...PK('ragdoll', 'knock'), 3, 15, 0.5, x => x, 'Fuerza de empuje necesaria para tumbar a alguien (explosiones, golpes fuertes). Menos = se tumban con más facilidad.', { off: v });
+  ui.slider('Caída mínima', ...PK('ragdoll', 'fall'), 10, 40, 1, x => x + ' m/s', 'Velocidad de caída a partir de la cual se pierde el equilibrio.', { off: v });
+  ui.slider('Máximo de ragdolls', ...PK('ragdoll', 'max'), 2, 40, 1, x => x, 'Ragdolls a la vez (más = más carga de CPU).', { off: v });
+  ui.sec('Fuego');
+  v = mode('fire', 'llamas volumétricas que se pegan a la superficie que arde y se funden entre ellas (calidad Realista o mejor).', 'llamas clásicas.');
+  ui.slider('Altura de las llamas', ...PK('fire', 'height'), 0.5, 1.5, 0.05, pct, 'Tamaño de las llamas volumétricas.', { off: v });
+  ui.slider('Propagación del fuego', ...PK('fire', 'spread'), 0, 2, 0.05, x => x === 0 ? 'No se propaga' : pct(x), 'Lo rápido que el fuego salta a bloques inflamables cercanos.');
+  ui.sec('Humo');
+  v = mode('smoke', 'humo volumétrico que se queda dentro de las casas y sale por puertas y ventanas (calidad Realista o mejor).', 'humo de partículas.');
+  ui.slider('Cantidad de humo', ...PK('smoke', 'amount'), 0.25, 2, 0.05, pct, 'Cuánto humo sueltan el fuego, las explosiones y el vapor.', { off: v });
+  ui.slider('Duración del humo', ...PK('smoke', 'life'), 0.25, 2, 0.05, pct, 'Cuánto tarda el humo en disiparse.', { off: v });
+  ui.sec('Explosiones');
+  v = mode('explosions', 'los bloques salen volando y vuelven a ser bloques donde caen, con bola de fuego volumétrica y onda expansiva.', 'los bloques rotos caen como objetos.');
+  ui.slider('Bloques que vuelan', ...PK('explosions', 'debris'), 0, 2, 0.05, x => x === 0 ? 'Ninguno' : pct(x), 'Proporción de bloques que salen despedidos como cuerpos físicos.', { off: v });
+  ui.cycle('Recolocar bloques', ...PK('explosions', 'place'), [true, false], ['Sí', 'No (objetos)'], 'Si los bloques despedidos vuelven a colocarse donde caen o se convierten en objetos.', { off: v });
+  ui.cycle('Bola de fuego volumétrica', ...PK('explosions', 'fireball'), [true, false], ['Sí', 'No'], 'Bola de fuego y humo volumétricos (calidad Realista o mejor).', { off: v });
+  ui.slider('Onda expansiva', ...PK('explosions', 'shock'), 0, 2, 0.05, x => x === 0 ? 'No' : pct(x), 'Distorsión del aire y temblor de cámara.', { off: v });
+  ui.sec('Mobs');
+  mode('mobs', 'los mobs buscan caminos (A*) para rodear muros, cruzar puertas y evitar la lava.', 'los mobs van en línea recta hacia su objetivo.');
+}
+const AK = k => [() => SETTINGS.audio[k], v => { SETTINGS.audio[k] = v; }];
+function optAudio(ui) {
+  const vol = x => x === 0 ? 'Silencio' : pct(x);
+  ui.sec('Volumen');
+  ui.slider('Volumen general', ...SK('vol'), 0, 1, 0.01, vol, 'Volumen de todo el juego.', { onch: x => { if (AU.master) AU.master.gain.value = x; } });
+  ui.slider('Música', ...AK('music'), 0, 1, 0.01, vol, 'Música de fondo.');
+  ui.slider('Clima', ...AK('weather'), 0, 1, 0.01, vol, 'Lluvia y truenos.');
+  ui.slider('Bloques', ...AK('blocks'), 0, 1, 0.01, vol, 'Romper, colocar y usar bloques (cofres, puertas, cubos...).');
+  ui.slider('Criaturas hostiles', ...AK('hostile'), 0, 1, 0.01, vol, 'Zombis, esqueletos, creepers, ghasts...');
+  ui.slider('Criaturas pacíficas', ...AK('friendly'), 0, 1, 0.01, vol, 'Animales y aldeanos.');
+  ui.slider('Jugadores', ...AK('players'), 0, 1, 0.01, vol, 'Pasos, golpes, comer, arcos y daño.');
+  ui.slider('Ambiente y efectos', ...AK('ambient'), 0, 1, 0.01, vol, 'Explosiones, fuegos artificiales y sonidos del entorno.');
+  ui.slider('Interfaz', ...AK('ui'), 0, 1, 0.01, vol, 'Clics de los menús.');
+  ui.sec('Sonido');
+  ui.cycle('Sonido direccional', ...AK('spatial'), [true, false], ['Sí (estéreo)', 'No'], 'Los sonidos se oyen por el lado del que vienen.');
+  if (!AU.ctx) ui.note('El sonido se activa al hacer clic en el juego (el navegador lo exige).');
+}
+const CK = k => [() => SETTINGS.ctl[k], v => { SETTINGS.ctl[k] = v; }];
+function optControls(ui) {
+  ui.sec('Ratón');
+  ui.slider('Sensibilidad', ...SK('sens'), 0.05, 1.5, 0.01, pct, 'Velocidad de giro de la cámara con el ratón.');
+  ui.cycle('Invertir ratón', ...SK('invertY'), [false, true], ['No', 'Sí'], 'Invierte el eje vertical del ratón.');
+  ui.sec('Movimiento');
+  ui.cycle('Agacharse', ...CK('toggleSneak'), [false, true], ['Mantener', 'Alternar'], 'Mantener: te agachas mientras tienes la tecla pulsada. Alternar: una pulsación para agacharte y otra para levantarte.', { onch: () => { INPUT.tSneak = false; } });
+  ui.cycle('Correr', ...CK('toggleSprint'), [false, true], ['Mantener', 'Alternar'], 'Mantener: corres mientras tienes la tecla pulsada. Alternar: una pulsación activa correr hasta que te detienes.', { onch: () => { INPUT.tSprint = false; } });
+  ui.slider('Aumento del zoom', ...CK('zoomMag'), 2, 12, 0.5, x => x + 'x', 'Cuánto acerca la tecla de zoom (' + keyLabel(SETTINGS.keys.zoom) + '). Con la rueda del ratón se ajusta mientras haces zoom.', { onch: x => { G.zoomMag = x; } });
+  ui.sec('Teclas');
+  for (const a in KEY_NAMES) {
+    const r = document.createElement('div'); r.className = 'krow'; const l = document.createElement('span'); l.textContent = KEY_NAMES[a]; const b = document.createElement('button'); b.className = 'btn'; b.textContent = keyLabel(SETTINGS.keys[a]);
+    const dup = Object.keys(SETTINGS.keys).some(o => o !== a && SETTINGS.keys[o] === SETTINGS.keys[a]); if (dup) b.style.color = '#f66';
+    b.onclick = e => { e.stopPropagation(); if (waitingKey) waitingKey.b.classList.remove('wait'); waitingKey = { a, b }; b.textContent = '> ? <'; b.classList.add('wait'); $('optHelp').textContent = 'Pulsa una tecla o un botón del ratón para «' + KEY_NAMES[a] + '» (Esc para cancelar).'; };
+    r.append(l, b); ui.el(r);
+  }
+  if (['forward', 'back', 'left', 'right', 'jump', 'sneak', 'sprint'].some(a => /^(Control|Meta)/.test(SETTINGS.keys[a] || ''))) ui.note('Aviso: Ctrl + W cierra la pestaña del navegador (no se puede bloquear). En pantalla completa (F11) sí se bloquea.', '#ff6');
+  ui.button('Restablecer teclas', () => { SETTINGS.keys = Object.assign({}, DEFAULT_KEYS); saveSettings(); optRebuild(); }, 'Vuelve a poner todas las teclas por defecto.', true);
+}
+// «Restablecer pestaña»: valores por defecto de la pestaña abierta
+function optResetTab() {
+  if (OPT.tab === 'gfx') { Object.assign(SETTINGS.gfx, GFX_DEF); Object.assign(SETTINGS, { fov: 70, gui: 2, brightness: 0.5, clouds: true, particles: 2, fpsCap: 0, bob: true, dynres: true, resScale: 1, autoExp: true }); delete SETTINGS.cpuMode; applyGui(); applyRenderMode(false); }
+  else if (OPT.tab === 'phys') { for (const k in PHYS_DEF) SETTINGS.physics[k] = Object.assign({}, PHYS_DEF[k]); }
+  else if (OPT.tab === 'audio') { Object.assign(SETTINGS.audio, AUDIO_DEF); SETTINGS.vol = 0.7; if (AU.master) AU.master.gain.value = 0.7; }
+  else if (OPT.tab === 'ctl') { Object.assign(SETTINGS.ctl, CTL_DEF); SETTINGS.keys = Object.assign({}, DEFAULT_KEYS); SETTINGS.sens = 0.5; SETTINGS.invertY = false; }
+  saveSettings(); optRebuild();
 }
 function applyGui() { document.documentElement.style.setProperty('--ui', (SETTINGS.gui / 2).toFixed(2)); }
 let waitingKey = null;
@@ -517,7 +670,7 @@ function buildControls() {
   for (const a in KEY_NAMES) { const r = document.createElement('div'); r.className = 'krow'; const l = document.createElement('span'); l.textContent = KEY_NAMES[a]; const b = document.createElement('button'); b.className = 'btn'; b.textContent = keyLabel(SETTINGS.keys[a]); b.onclick = e => { e.stopPropagation(); if (waitingKey) waitingKey.b.classList.remove('wait'); waitingKey = { a, b }; b.textContent = '> ? <'; b.classList.add('wait'); }; r.append(l, b); box.appendChild(r); }
   if (['forward', 'back', 'left', 'right', 'jump', 'sneak', 'sprint'].some(a => /^(Control|Meta)/.test(SETTINGS.keys[a] || ''))) { const w = document.createElement('div'); w.className = 'krow'; w.style.color = '#ff6'; w.textContent = 'Aviso: Ctrl + W cierra la pestaña del navegador (no se puede bloquear). En pantalla completa (F11) sí se bloquea.'; box.appendChild(w); }
 }
-function bindKey(code) { if (!waitingKey) return false; if (code !== 'Escape') SETTINGS.keys[waitingKey.a] = code; saveSettings(); waitingKey = null; buildControls(); return true; }
+function bindKey(code) { if (!waitingKey) return false; if (code !== 'Escape') SETTINGS.keys[waitingKey.a] = code; saveSettings(); waitingKey = null; if ($('sOptions').classList.contains('on')) optRebuild(); else buildControls(); return true; }
 function setupMenus() {
   document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => { audioInit(); playSound('click', 0, 0, 0, 1); const g = b.dataset.go; if (g === 'single') { showScreen('sWorlds'); refreshWorlds(); } else if (g === 'multi') { showScreen('sMulti'); $('mName').value = SETTINGS.name; $('mErr').textContent = ''; } else if (g === 'options') { optReturn = 'sMain'; buildOptions(); showScreen('sOptions'); } else if (g === 'quit') { showScreen('sQuit'); } else if (g === 'realms') { b.textContent = 'Próximamente...'; setTimeout(() => b.textContent = 'Reinos de Minecraft 2', 1500); } });
   $('wBack').onclick = () => goMenu(); $('wNew').onclick = () => { $('cName').value = 'Nuevo mundo'; $('cSeed').value = ''; showScreen('sCreate'); };
@@ -535,12 +688,12 @@ function setupMenus() {
   $('cGo').onclick = () => { const [seed, seedStr] = seedFromString($('cSeed').value); G.worldId = 'w' + Date.now(); G.iconURL = null; startWorld({ name: $('cName').value.trim() || 'Nuevo mundo', seed, seedStr, gameMode: CREATE.mode, difficulty: CREATE.diff, cheats: CREATE.cheats, structures: CREATE.structs }, true); G.pendingHost = G.hostAfterLoad; G.hostAfterLoad = false; };
   // multijugador
   $('mBack').onclick = () => goMenu(); $('mHost').onclick = () => { G.hostAfterLoad = true; showScreen('sWorlds'); refreshWorlds(); };
-  const join = async lan => { const name = $('mName').value.trim() || SETTINGS.name; SETTINGS.name = name; saveSettings(); const code = $('mCode').value.trim(); if (code.length < 4) { $('mErr').textContent = 'Escribe el código del mundo.'; return; } $('mErr').textContent = 'Conectando...'; try { const wl = await joinGame(code, lan, name); G.worldId = null; startWorld({ name: wl.worldName, seed: wl.seed, seedStr: wl.seedStr, gameMode: wl.gm, difficulty: wl.diff, time: wl.time, dragonKilled: wl.dk, endInit: wl.ei, gateway: wl.gw, worldSpawn: wl.spawn, keepInventory: wl.keep }, false, wl); } catch (e) { stopNet(); $('mErr').textContent = 'Error: ' + e.message; } };
+  const join = async lan => { const name = $('mName').value.trim() || SETTINGS.name; SETTINGS.name = name; saveSettings(); const code = $('mCode').value.trim(); if (code.length < 4) { $('mErr').textContent = 'Escribe el código del mundo.'; return; } $('mErr').textContent = 'Conectando...'; try { const wl = await joinGame(code, lan, name); G.worldId = null; startWorld({ name: wl.worldName, seed: wl.seed, climate: wl.climate || 1, seedStr: wl.seedStr, gameMode: wl.gm, difficulty: wl.diff, time: wl.time, dragonKilled: wl.dk, endInit: wl.ei, gateway: wl.gw, worldSpawn: wl.spawn, keepInventory: wl.keep }, false, wl); } catch (e) { stopNet(); $('mErr').textContent = 'Error: ' + e.message; } };
   $('mJoin').onclick = () => join(false); $('mJoinLan').onclick = () => join(true);
   $('mCode').addEventListener('keydown', e => e.stopPropagation()); $('mName').addEventListener('keydown', e => e.stopPropagation());
   // opciones
   $('oDone').onclick = () => { if (optReturn === 'sPause') showScreen('sPause'); else goMenu(); };
-  $('oControls').onclick = () => { buildControls(); showScreen('sControls'); };
+  $('oReset').onclick = () => { playSound('click', 0, 0, 0, 1); optResetTab(); };
   $('kDone').onclick = () => { waitingKey = null; buildOptions(); showScreen('sOptions'); }; $('kReset').onclick = () => { SETTINGS.keys = Object.assign({}, DEFAULT_KEYS); saveSettings(); buildControls(); };
   // pausa
   $('pResume').onclick = () => pauseGame(false); $('pOptions').onclick = () => { optReturn = 'sPause'; buildOptions(); showScreen('sOptions'); };

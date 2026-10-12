@@ -9,7 +9,7 @@
 const RAG_H = 0.25, RAG_G = 26;
 const RAG = { list: [] };
 // opciones (el menú de físicas las podrá cambiar): activado, duración del cadáver, umbral de empujón y de caída
-function ragCfg() { const o = SETTINGS.physics && SETTINGS.physics.ragdoll; return Object.assign({ on: true, corpse: 4, knock: 6, fall: 20, max: 20 }, o || {}); }
+function ragCfg() { const o = physCfg('ragdoll'); return { on: o.real, corpse: o.corpse, knock: o.knock, fall: o.fall, max: o.max }; }
 function ragdollsOn() { return R.q > 0 && ragCfg().on; }
 
 // ---- vectores pequeños

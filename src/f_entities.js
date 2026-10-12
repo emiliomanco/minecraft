@@ -216,9 +216,9 @@ function explosionFX(dim, x, y, z, power) {
   playSound('explode', x, y, z, 1);
   if (!G.player || G.player.dim !== dim) return;
   const q = SETTINGS.particles ?? 2; const m = [0.35, 0.7, 1][q];
-  const d = Math.hypot(G.player.x - x, G.player.y - y, G.player.z - z); G.shake = Math.max(G.shake, clamp(power * 2.5 / (d + 1), 0, 1.5));
+  const d = Math.hypot(G.player.x - x, G.player.y - y, G.player.z - z); G.shake = Math.max(G.shake, clamp(power * 2.5 / (d + 1), 0, 1.5) * (typeof boomCfg === 'function' ? Math.min(1.5, boomCfg().shock) : 1));
   R.plights.push({ x, y: y + 1, z, r: power * 5, c: [3.5, 1.7, 0.6], life: 0.6, max: 0.6, kind: 'flash' });
-  const vol = typeof boomVolumetric === 'function' && boomVolumetric(); if (vol) boomAdd(dim, x, y, z, power); // bola de fuego volumétrica
+  const vol = typeof boomVolumetric === 'function' && boomVolumetric() && boomCfg().fireball; if (vol) boomAdd(dim, x, y, z, power); // bola de fuego volumétrica
   const smk = typeof smokeOn === 'function' && smokeOn();
   if (smk) { for (let i = 0; i < 14; i++) { const a = Math.random() * 6.28, r = Math.random() * power * 0.5; vfxSmokeEmit(x + Math.cos(a) * r, y + 0.5 + Math.random() * power * 0.5, z + Math.sin(a) * r, power * 0.9, 1.2, 0); } }
   // bola de fuego central (partículas; con la volumétrica solo unas lenguas sueltas)
@@ -239,7 +239,7 @@ function explosionFX(dim, x, y, z, power) {
 }
 function fireFX(world, x, y, z, dt) {
   // las llamas en sí son volumétricas (drawFlames); aquí solo chispas, lenguas sueltas y humo
-  const q = SETTINGS.particles ?? 2; const k = [0.3, 0.7, 1][q]; const vol = typeof vfxVolumetric === 'function' && vfxVolumetric();
+  const q = SETTINGS.particles ?? 2; const k = [0.3, 0.7, 1][q]; const vol = typeof fireVolOn === 'function' && fireVolOn();
   if (!vol && Math.random() < 1.2 * dt * k) flame(x + 0.25 + Math.random() * 0.5, y + 0.5 + Math.random() * 0.5, z + 0.25 + Math.random() * 0.5, { size: 0.18 + Math.random() * 0.15, vy: 1.6 + Math.random(), life: 0.35, emis: 3 });
   if (!(typeof smokeOn === 'function' && smokeOn()) && Math.random() < 2.2 * dt * k) smoke(x + 0.3 + Math.random() * 0.4, y + 1.3, z + 0.3 + Math.random() * 0.4, { r: 0.07, g: 0.065, b: 0.06, a: 0.5, size: 0.5 + Math.random() * 0.5, grow: 0.9, life: 3 + Math.random() * 3, vy: 1.4 + Math.random(), wind: true });
   if (Math.random() < 3 * dt * k) P_({ x: x + 0.2 + Math.random() * 0.6, y: y + 0.3 + Math.random() * 0.6, z: z + 0.2 + Math.random() * 0.6, vx: (Math.random() - 0.5) * 1.2, vy: 1.5 + Math.random() * 2.5, vz: (Math.random() - 0.5) * 1.2, life: 0.8 + Math.random() * 1.2, size: 0.035 + Math.random() * 0.03, add: true, emis: 10, r: 1, g: 0.55 + Math.random() * 0.3, b: 0.15, layer: TEX.ember, grav: -0.8, drag: 0.6, collide: true });
@@ -316,7 +316,7 @@ function hurtEntity(e, amount, attacker, kx = 0, ky = 0, kz = 0, cause) {
     if (attacker && (e.def.ai === 'neutral' || e.def.ai === 'enderman' || e.def.ai === 'golem' || e.def.ai === 'piglin' || e.def.hostile)) { e.target = attacker; e.angry = 600; }
     if (e.def.ai === 'neutral' && attacker) for (const o of G.entities.values()) if (o.type === e.type && Math.hypot(o.x - e.x, o.z - e.z) < 20) { o.target = attacker; o.angry = 600; }
     if (e.def.ai === 'enderman' && Math.random() < 0.6) endermanTeleport(e);
-    playSound('hurt_mob', e.x, e.y, e.z, 0.6);
+    playSound(e.def && e.def.hostile ? 'hurt_hostile' : 'hurt_mob', e.x, e.y, e.z, 0.6);
   }
   if (e.hp <= 0) { e.dead = true; e.deathTime = 0; e.killer = attacker; }
   return true;
@@ -755,7 +755,7 @@ function initEnd() {
 // que caminan dejan huellas con forma (botas alternando izquierda/derecha, patas, surcos), más hondas al caer.
 const SNOWST = { dirty: new Map(), decayT: 0 };
 const BIPED_MODELS = new Set(['steve', 'zombie', 'drowned', 'skeleton', 'villager', 'illager', 'piglin', 'enderman', 'golem', 'warden']);
-function snowCfg() { const o = SETTINGS.physics && SETTINGS.physics.snow; return Object.assign({ prints: true, depth: 1 }, o || {}); }
+function snowCfg() { const o = physCfg('snow'); return { prints: o.real, depth: o.depth }; }
 // bloque de nieve donde pisa una entidad (null si no pisa nieve)
 function snowUnder(w, x, y, z) { const bx = Math.floor(x), bz = Math.floor(z); for (const yy of [Math.floor(y - 0.02), Math.floor(y - 0.2)]) if (w.get(bx, yy, bz) === ID.snow) return yy; return null; }
 // hunde una elipse (centro cx,cz; dirección a; largo/ancho en bloques; profundidad en bloques)

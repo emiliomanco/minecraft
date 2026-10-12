@@ -46,6 +46,24 @@ BI.basalt_deltas = defBiome('basalt_deltas');
 BI.the_end = defBiome('the_end');
 BI.end_highlands = defBiome('end_highlands');
 BI.small_end_islands = defBiome('small_end_islands');
+BI.windswept_savanna = defBiome('windswept_savanna', { grass: [0.72, 0.7, 0.4], foliage: [0.64, 0.62, 0.3], temp: 1.1 });
+BI.sparse_jungle = defBiome('sparse_jungle', { grass: [0.42, 0.78, 0.24], foliage: [0.34, 0.72, 0.18], temp: 0.95 });
+// ---------------------------------------------------------------- clima (mundos nuevos: climate = 2)
+// Temperatura y humedad son campos continuos y muy suaves (no se ven en el juego): los biomas se eligen por bandas,
+// así que de un clima a otro siempre se pasa por los intermedios (desierto → sabana → llanuras → bosque → taiga → nieve).
+const CLT = [-0.40, -0.22, -0.04, 0.14, 0.32]; // límites: helado | frío | fresco | templado | cálido | caluroso
+const CLH = [-0.37, -0.10, 0.15, 0.37];       // límites: muy seco | seco | normal | húmedo | muy húmedo
+const CLIMATE_TABLE = [
+  [BI.snowy_plains, BI.snowy_plains, BI.snowy_plains, BI.snowy_taiga, BI.snowy_taiga], // helado
+  [BI.plains, BI.plains, BI.taiga, BI.taiga, BI.taiga],                                  // frío
+  [BI.plains, BI.plains, BI.forest, BI.birch_forest, BI.dark_forest],                    // fresco
+  [BI.plains, BI.plains, BI.forest, BI.forest, BI.dark_forest],                          // templado
+  [BI.savanna, BI.plains, BI.forest, BI.sparse_jungle, BI.jungle],                       // cálido
+  [BI.desert, BI.desert, BI.savanna, BI.sparse_jungle, BI.jungle]                        // caluroso
+];
+const bandOf = (v, edges) => { let i = 0; while (i < edges.length && v >= edges[i]) i++; return i; };
+// color de pasto/hojas de un bioma tal como lo usa el shader (algo menos saturado y más oscuro; /0.59 compensa el gris de la textura)
+function biomeTintRGB(b, foliage) { const B = BIOMES[b] || BIOMES[0]; const c = foliage ? B.foliage : B.grass; const g = (c[0] + c[1] + c[2]) / 3; return c.map(v => lerp(v, g, 0.3) * 0.78 / 0.59); }
 const OCEAN_BIOMES = new Set([BI.ocean, BI.deep_ocean, BI.frozen_ocean, BI.warm_ocean, BI.beach, BI.snowy_beach]);
 
 // ======================================================================= Chunk
@@ -53,7 +71,7 @@ class Chunk {
   constructor(world, cx, cz) {
     this.world = world; this.cx = cx; this.cz = cz; this.H = world.H;
     this.blocks = new Uint16Array(256 * this.H); this.meta = new Uint8Array(256 * this.H);
-    this.light = null; this.biomes = new Uint8Array(256); this.loot = {}; this.spawners = {};
+    this.light = null; this.biomes = new Uint8Array(256); this.tint = null; this.loot = {}; this.spawners = {};
     this.dirty = true; this.modified = false; this.mesh = null; this.top = 0; this.spawns = null;
   }
   calcTop() { const b = this.blocks; let y = this.H - 1; for (; y > 0; y--) { const o = y << 8; let any = false; for (let i = 0; i < 256; i++) if (b[o + i]) { any = true; break; } if (any) break; } this.top = y; }
@@ -62,9 +80,9 @@ const ckey = (cx, cz) => (cx + 32768) * 65536 + (cz + 32768);
 
 // ======================================================================= World
 class World {
-  constructor(dim, seed) {
-    this.dim = dim; this.seed = seed >>> 0; this.H = DIMS[dim].H; this.yOff = DIMS[dim].yOff;
-    this.chunks = new Map(); this.gen = new Generator(dim, this.seed);
+  constructor(dim, seed, climate) {
+    this.dim = dim; this.seed = seed >>> 0; this.H = DIMS[dim].H; this.yOff = DIMS[dim].yOff; this.climate = climate || 1;
+    this.chunks = new Map(); this.gen = new Generator(dim, this.seed, this.climate);
     this.ticks = []; this.tickSet = new Set(); this.saved = {}; // saved: key -> {b,m}
   }
   chunk(cx, cz) { return this.chunks.get(ckey(cx, cz)); }
@@ -106,12 +124,12 @@ class World {
 
 // ============================================================ Generador
 class Generator {
-  constructor(dim, seed) {
-    this.dim = dim; this.seed = seed; this.H = DIMS[dim].H;
+  constructor(dim, seed, climate) {
+    this.dim = dim; this.seed = seed; this.H = DIMS[dim].H; this.climate = climate || 1; // 1 = biomas clásicos (mundos antiguos), 2 = por clima
     const n = s => new Noise((seed ^ hashStr(dim + s)) >>> 0);
     this.nC = n('cont'); this.nE = n('ero'); this.nP = n('peaks'); this.nD = n('detail'); this.nT = n('temp'); this.nHm = n('hum');
     this.nR = n('river'); this.nL = n('lake'); this.nC1 = n('cave1'); this.nC2 = n('cave2'); this.nC3 = n('cave3'); this.nCB = n('cavebiome'); this.nCB2 = n('cavebiome2');
-    this.nV = n('variety'); this.nS = n('snow'); this.nDS = n('deepslate'); this.nW = n('weird');
+    this.nV = n('variety'); this.nS = n('snow'); this.nDS = n('deepslate'); this.nW = n('weird'); this.nWX = n('warpx'); this.nWZ = n('warpz');
     this.structCache = new Map(); this.colCache = new Map();
   }
   // ------------------------------------------------------------ overworld columna
@@ -134,13 +152,14 @@ class Generator {
     const key = x * 100003 + z; let r = this.colCache.get(key); if (r) return r;
     if (this.colCache.size > 60000) this.colCache.clear();
     const R = this.rawHeight(x, z); let h = R.h; const c = R.c;
-    const T = this.nT.fbm2(x * 0.0008, z * 0.0008, 3) * 1.6 + this.nW.n2(x * 0.01, z * 0.01) * 0.04;
-    const Hm = this.nHm.fbm2(x * 0.0009, z * 0.0009, 3) * 1.6;
+    const v2 = this.climate >= 2; let T, Hm;
+    if (v2) { const cl = this.climateAt(x, z); T = cl[0]; Hm = cl[1]; }
+    else { T = this.nT.fbm2(x * 0.0008, z * 0.0008, 3) * 1.6 + this.nW.n2(x * 0.01, z * 0.01) * 0.04; Hm = this.nHm.fbm2(x * 0.0009, z * 0.0009, 3) * 1.6; }
     // ríos
     let river = false; const rv = Math.abs(this.nR.fbm2(x * 0.0013, z * 0.0013, 3));
     if (c > -0.18 && rv < 0.065 && R.mountain < 40) { const t = smooth(clamp((rv - 0.018) / 0.047, 0, 1)); const rh = SEA - 3 - (1 - t) * 2.5; if (h > rh) h = lerp(rh, h, t * t); if (rv < 0.032) river = true; }
     // pantano de manglares: aplanar
-    let swamp = Hm > 0.32 && T > 0.05 && T < 0.5 && h > SEA - 4 && h < SEA + 9 && R.mountain < 2;
+    let swamp = (v2 ? Hm >= CLH[3] && T >= CLT[2] && T < CLT[4] : Hm > 0.32 && T > 0.05 && T < 0.5) && h > SEA - 4 && h < SEA + 9 && R.mountain < 2;
     if (swamp) h = lerp(h, SEA - 0.6 + R.d * 3, 0.85);
     // lagos
     let lake = 0; if (!river && R.mountain < 6 && c > -0.04) {
@@ -154,8 +173,9 @@ class Generator {
       }
     }
     h = Math.floor(clamp(h, 8, this.H - 20));
-    let b;
-    if (h < SEA - 1 && !river) {
+    let b, Te = T;
+    if (v2) b = this.biomeV2(x, z, h, c, T, Hm, river, swamp, R.mountain), Te = T - Math.max(0, h - SEA - 35) * 0.0075;
+    else if (h < SEA - 1 && !river) {
       if (h < SEA - 16) b = T < -0.45 ? BI.frozen_ocean : BI.deep_ocean; else b = T < -0.45 ? BI.frozen_ocean : T > 0.55 ? BI.warm_ocean : BI.ocean;
     } else if (river) b = T < -0.45 ? BI.frozen_river : BI.river;
     else if (swamp) b = BI.mangrove_swamp;
@@ -167,8 +187,48 @@ class Generator {
     else if (T < 0.5) b = Hm < -0.15 ? BI.plains : Hm < 0.2 ? BI.forest : BI.dark_forest;
     else b = Hm < -0.12 ? BI.desert : Hm < 0.18 ? BI.savanna : BI.jungle;
     if (b === BI.plains && this.nV.n2(x * 0.004, z * 0.004) > 0.55) b = BI.sunflower_plains;
-    r = { h, biome: b, river, lake, swamp, T, Hm, mountain: R.mountain };
+    r = { h, biome: b, river, lake, swamp, T, Hm, Te, mountain: R.mountain };
     this.colCache.set(key, r); return r;
+  }
+  // clima continuo con bordes orgánicos (dominio deformado); valores ~[-0.7, 0.7] con mediana 0
+  climateAt(x, z) {
+    const wx = x + this.nWX.fbm2(x * 0.0021, z * 0.0021, 2) * 90, wz = z + this.nWZ.fbm2(x * 0.0021, z * 0.0021, 2) * 90;
+    const T = this.nT.fbm2(wx * 0.00042, wz * 0.00042, 2) + this.nW.n2(x * 0.02, z * 0.02) * 0.015;
+    const Hm = this.nHm.fbm2(wx * 0.00055 + 31.7, wz * 0.00055 - 12.3, 2);
+    return [T, Hm];
+  }
+  biomeV2(x, z, h, c, T, Hm, river, swamp, mountain) {
+    const cold = T < CLT[0];
+    if (h < SEA - 1 && !river) return h < SEA - 16 ? (cold ? BI.frozen_ocean : BI.deep_ocean) : cold ? BI.frozen_ocean : T >= CLT[4] ? BI.warm_ocean : BI.ocean;
+    if (river) return cold ? BI.frozen_river : BI.river;
+    if (swamp) return BI.mangrove_swamp;
+    if (h <= SEA + 2 && c < -0.02 && mountain < 2) return cold ? BI.snowy_beach : BI.beach;
+    if (mountain > 30) {
+      // la temperatura baja con la altura; los picos nevados solo en climas templados o fríos (nunca junto a desiertos)
+      const Te = T - Math.max(0, h - SEA - 35) * 0.0075;
+      if (Te < CLT[0] && T < CLT[3]) return h > SEA + 90 ? BI.jagged_peaks : BI.snowy_peaks;
+      return T >= CLT[3] ? BI.windswept_savanna : BI.mountains;
+    }
+    return CLIMATE_TABLE[bandOf(T, CLT)][bandOf(Hm, CLH)];
+  }
+  // bioma de una columna en cualquier dimensión (para mezclar colores entre biomas)
+  biomeAtCol(x, z) { if (this.dim === 'overworld') return this.col(x, z).biome; if (this.dim === 'nether') return this.netherBiome(x, z); return BI.the_end; }
+  // colores de pasto y hojas mezclados entre biomas vecinos (radio ~6 bloques): transiciones suaves en vez de cortes
+  // salida: 256 × [r,g,b,255 (pasto)] seguido de 256 × [r,g,b,255 (hojas)], con el valor/2 en 0..255
+  tintChunk(ch) {
+    const RAD = this.dim === 'overworld' ? 6 : 0, W = 16 + RAD * 2, x0 = ch.cx * 16 - RAD, z0 = ch.cz * 16 - RAD;
+    const ids = new Uint8Array(W * W);
+    for (let z = 0; z < W; z++) for (let x = 0; x < W; x++) { const ix = x - RAD, iz = z - RAD; ids[x + z * W] = (ix >= 0 && ix < 16 && iz >= 0 && iz < 16) ? ch.biomes[ix | iz << 4] : this.biomeAtCol(x0 + x, z0 + z); }
+    const out = new Uint8Array(256 * 8); const pal = {};
+    const col = (b, f) => { const k = b * 2 + f; return pal[k] || (pal[k] = biomeTintRGB(b, f)); };
+    for (let f = 0; f < 2; f++) {
+      // desenfoque de caja separable: primero en x (solo las filas necesarias), luego en z
+      const tmp = new Float32Array(16 * W * 3);
+      for (let z = 0; z < W; z++) for (let x = 0; x < 16; x++) { let r = 0, g = 0, b = 0; for (let k = 0; k <= RAD * 2; k++) { const c = col(ids[x + k + z * W], f); r += c[0]; g += c[1]; b += c[2]; } const o = (x + z * 16) * 3; tmp[o] = r; tmp[o + 1] = g; tmp[o + 2] = b; }
+      const n = (RAD * 2 + 1) ** 2;
+      for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) { let r = 0, g = 0, b = 0; for (let k = 0; k <= RAD * 2; k++) { const o = (x + (z + k) * 16) * 3; r += tmp[o]; g += tmp[o + 1]; b += tmp[o + 2]; } const o = (f * 256 + (x | z << 4)) * 4; out[o] = clamp(r / n / 2 * 255, 0, 255); out[o + 1] = clamp(g / n / 2 * 255, 0, 255); out[o + 2] = clamp(b / n / 2 * 255, 0, 255); out[o + 3] = 255; }
+    }
+    return out;
   }
   caveBiome(x, y, z) {
     if (this.dim !== 'overworld') return -1;
@@ -185,6 +245,7 @@ class Generator {
     else this.genEnd(ch);
     this.genStructures(ch);
     ch.calcTop();
+    ch.tint = this.tintChunk(ch);
   }
   // ------------------------------------------------------------ OVERWORLD
   genOverworld(ch) {
@@ -223,7 +284,7 @@ class Generator {
         if (ci.biome === BI.desert && y <= h - fillDepth && y > h - fillDepth - 4) id = ID.sandstone;
         if ((ci.biome === BI.beach || ci.biome === BI.ocean) && y <= h - 3 && y > h - 6) id = ID.sandstone;
         if (cliff && y > h - 4) id = ID.stone;
-        if ((ci.biome === BI.mountains) && y === h && h > SEA + 70) id = ID.snowy_grass;
+        if ((ci.biome === BI.mountains) && y === h && (this.climate >= 2 ? ci.Te < CLT[1] : h > SEA + 70)) id = ID.snowy_grass;
         if ((ci.biome === BI.snowy_peaks || ci.biome === BI.jagged_peaks) && y > h - 3) id = (y === h && cliff) ? ID.stone : (ci.biome === BI.jagged_peaks && y < h ? ID.packed_ice : ID.snow_block);
         // variedades de piedra
         if (id === ID.stone) { const v = this.nV.n3(wx * 0.05, y * 0.05, wz * 0.05); if (v > 0.55) id = ID.granite; else if (v < -0.58) id = ID.diorite; else if (v > 0.42 && v < 0.46) id = ID.andesite; }

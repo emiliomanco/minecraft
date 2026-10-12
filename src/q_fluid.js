@@ -26,7 +26,8 @@ uniform ivec3 u_vdim; uniform int u_M; uniform float u_dt, u_kp, u_ks, u_eps;
 const float H=0.4, H2=0.16, RAD=0.08;
 uniform float u_time, u_rain, u_tide; uniform vec3 u_org;
 // oleaje del mar (el mismo que dibuja VS_CHUNK): x = desplazamiento de la superficie, yz = velocidad orbital horizontal
-vec3 seaWave(vec2 p){ float A=0.16+u_rain*0.55; float h=0.0; vec2 u=vec2(0.0);
+uniform float u_waveK;
+vec3 seaWave(vec2 p){ float A=(0.16+u_rain*0.55)*u_waveK; float h=0.0; vec2 u=vec2(0.0);
   const vec4 W[5]=vec4[5](vec4(0.81,0.59,22.0,0.42),vec4(0.97,-0.24,13.0,0.26),vec4(0.45,0.89,8.5,0.16),vec4(-0.2,0.98,5.2,0.09),vec4(0.7,-0.71,3.4,0.05));
   for(int i=0;i<5;i++){ vec2 d=W[i].xy; float k=6.2832/W[i].z; float c=sqrt(9.8/k); float ph=k*(dot(d,p)-c*u_time*0.55)+float(i)*1.7; float a=A*W[i].w*2.2; float s=sin(ph);
     h+=a*(pow(s*0.5+0.5,1.6)*2.0-1.0); u+=a*k*c*0.55*s*d; }
@@ -308,6 +309,7 @@ function flBindTex(P, name, unit, t, target) { const gl = R.gl; if (P.u[name] ==
 function flCommon(P) { const gl = R.gl; const u = P.u;
   if (u.u_vdim) gl.uniform3i(u.u_vdim, FL.vdim[0], FL.vdim[1], FL.vdim[2]); if (u.u_M) gl.uniform1i(u.u_M, FL.M); if (u.u_dt) gl.uniform1f(u.u_dt, FL.dt);
   if (u.u_time) { gl.uniform1f(u.u_time, R.time || performance.now() / 1000); gl.uniform1f(u.u_rain, G.rainLevel || 0); gl.uniform1f(u.u_tide, oceanTide()); }
+  if (u.u_waveK) gl.uniform1f(u.u_waveK, R.gfxU ? R.gfxU[0] : 1);
   if (u.u_org) gl.uniform3f(u.u_org, FL.org[0], FL.org[1], FL.org[2]);
   if (u.u_kp) gl.uniform1f(u.u_kp, FL.kp); if (u.u_ks) gl.uniform1f(u.u_ks, FL.ks); if (u.u_eps) gl.uniform1f(u.u_eps, FL.eps);
   flBindTex(P, 'u_vox', 8, FL.vox, gl.TEXTURE_3D); }
