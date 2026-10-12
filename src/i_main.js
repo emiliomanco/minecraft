@@ -299,6 +299,7 @@ function gameTick() {
     const pls = [p, ...[...G.entities.values()].filter(e => e.remotePlayer)];
     for (const pl of pls) { const w = G.worlds[pl.dim]; const cx = Math.floor(pl.x) >> 4, cz = Math.floor(pl.z) >> 4; for (let dx = -4; dx <= 4; dx++) for (let dz = -4; dz <= 4; dz++) randomTicks(w, cx + dx, cz + dz); if (G.tick % 20 === 0) spawnerTick(w, pl); }
     if (G.tick % 20 === 0) spawnTick();
+    if (G.tick % 20 === 10 && typeof heatMeltTick === 'function') heatMeltTick(G.world); // el calor derrite nieve y hielo
     furnaceTick();
   }
   runTickTimers();

@@ -557,7 +557,9 @@ function breakBlock(t) {
   blockParticles(w, t.x, t.y, t.z, id, 18, 3); playSound('break', t.x, t.y, t.z, 0.9, id);
   let repl = 0; if (id === ID.ice && G.gameMode !== 'creative') repl = ID.water; const bd = REG[id];
   if (bd.inWater) repl = ID.water;
+  const meta0 = w.getMeta(t.x, t.y, t.z);
   setBlockNet(w, t.x, t.y, t.z, repl, 0);
+  if ((id === ID.snow || id === ID.snow_block) && typeof snowFragments === 'function') { const d = lookDir(p); snowFragments(w, t.x, t.y, t.z, id, meta0, d[0] * 1.5, 0, d[2] * 1.5); } // la nieve se desmorona en terrones
   if (id === ID.nether_portal) return;
   dropBlockItems(w, t.x, t.y, t.z, id, s);
   if (s && REG[s.id].dur && bd.hard > 0) damageItem(p.inv, p.sel, REG[s.id].tool && REG[s.id].tool.type === 'sword' ? 2 : 1);

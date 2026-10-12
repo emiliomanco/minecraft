@@ -26,6 +26,7 @@ function spawnDebris(dim, b, meta, x, y, z, vx, vy, vz, wx, wy, wz, visual) {
 }
 // llamado desde explode(): decide qué bloques salen volando (devuelve true si se encarga del bloque)
 function debrisFromExplosion(world, bx, by, bz, b, x, y, z, power, n) {
+  if ((b === ID.snow || b === ID.snow_block) && typeof snowFragments === 'function' && DEB.list.length < 400) { const cx = bx + 0.5 - x, cy = by + 0.5 - y, cz = bz + 0.5 - z; const d = Math.hypot(cx, cy, cz) || 0.5; const sp = clamp(power * 6 / (0.6 + d * 0.55), 3, 20); snowFragments(world, bx, by, bz, b, world.getMeta(bx, by, bz), cx / d * sp, Math.max(cy / d, 0.2) * sp + 2, cz / d * sp); return true; }
   if (!boomCfg().on || !debrisOk(b)) return false;
   const max = Math.round(DEB.maxQ[R.q] * boomCfg().debris); if (n >= max || DEB.list.length > 260) return false;
   const cx = bx + 0.5, cy = by + 0.5, cz = bz + 0.5; let dx = cx - x, dy = cy - y, dz = cz - z; const d = Math.hypot(dx, dy, dz) || 0.5;
@@ -76,12 +77,13 @@ function debrisUpdate(dt) {
     // girar
     const wl = Math.hypot(e.wx, e.wy, e.wz); if (wl > 0.01) { e.rot = mul3(rotAxis(e.wx / wl, e.wy / wl, e.wz / wl, wl * dt), e.rot); if (((e.age * 60) | 0) % 30 === 0) e.rot = ortho3(e.rot); }
     const sp = Math.hypot(e.vx, e.vy, e.vz);
-    if (host && sp > 9 && !e.hitT && ((e.age * 20) | 0) % 2 === 0) debrisHitEntities(e, sp);
+    if (host && sp > 9 && !e.snow && !e.hitT && ((e.age * 20) | 0) % 2 === 0) debrisHitEntities(e, sp);
     // en reposo → vuelve a ser bloque
     if (e.onGround && sp < 0.8 && wl < 2.5) e.rest += dt; else e.rest = 0;
     const done = e.rest > 0.35 || e.age > 12 || e.y < -10;
     if (done) {
       DEB.list.splice(i, 1);
+      if (e.snow) { if (host && !e.visual) snowFragRest(w, e); continue; }
       if (!e.visual && host) { if (!(boomCfg().place && debrisPlace(w, e))) dropBlockItems(w, Math.floor(e.x), Math.floor(e.y), Math.floor(e.z), e.b, null, true); }
     }
   }
@@ -93,7 +95,7 @@ function drawDebris(dim) {
   for (const e of DEB.list) {
     if (e.dim !== dim) continue; const r = e.rot; const d = REG[e.b]; if (!d || !d.faces) continue;
     const L = G.worlds[dim].light(Math.floor(e.x), Math.floor(e.y + 0.5), Math.floor(e.z));
-    const s = 0.98; m[0] = r[0] * s; m[1] = r[1] * s; m[2] = r[2] * s; m[3] = 0; m[4] = r[3] * s; m[5] = r[4] * s; m[6] = r[5] * s; m[7] = 0; m[8] = r[6] * s; m[9] = r[7] * s; m[10] = r[8] * s; m[11] = 0;
+    const s = e.sz || 0.98; m[0] = r[0] * s; m[1] = r[1] * s; m[2] = r[2] * s; m[3] = 0; m[4] = r[3] * s; m[5] = r[4] * s; m[6] = r[5] * s; m[7] = 0; m[8] = r[6] * s; m[9] = r[7] * s; m[10] = r[8] * s; m[11] = 0;
     m[12] = e.x - cam[0] - (m[0] + m[4] + m[8]) * 0.5; m[13] = e.y - cam[1] - (m[1] + m[5] + m[9]) * 0.5; m[14] = e.z - cam[2] - (m[2] + m[6] + m[10]) * 0.5; m[15] = 1;
     drawBox(m, d.faces, L, d.tint || d.tintTop ? [0.55, 0.72, 0.36, 1] : null, null, d.emissive ? 0.6 : 0);
   }
