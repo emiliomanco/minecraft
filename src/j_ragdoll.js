@@ -34,6 +34,17 @@ function ragPartFrame(pt, e, x, y, z, yaw, scale, t) {
 }
 // límites de giro de cada articulación respecto del torso (radianes)
 const RAG_LIMIT = { head: 0.9, dhead: 0.9, legR: 1.5, legL: 1.5, legFR: 1.3, legFL: 1.3, legBR: 1.3, legBL: 1.3, wingR: 1.6, wingL: 1.6 };
+// límites anatómicos [adelante, atrás, hacia fuera, hacia dentro, torsión] (radianes): rodillas/caderas casi bisagra,
+// hombros con mucho juego, cuello que gira pero no se dobla del todo hacia atrás
+let RAG_TWIST = true, RAG_SELF = true, RAG_INTER = true, RAG_ANISO = true;
+function ragJointLimits(role) {
+  if (role === 'head' || role === 'dhead') return [0.85, 0.6, 0.55, 0.55, 1.1];
+  if (role.startsWith('arm')) return [2.8, 1.0, 1.7, 0.3, 1.2];
+  if (role === 'legR' || role === 'legL') return [1.6, 0.45, 0.6, 0.12, 0.35];
+  if (role.startsWith('leg')) return [1.2, 1.0, 0.35, 0.1, 0.25];
+  if (role.startsWith('wing')) return [1.0, 1.0, 1.6, 0.3, 0.6];
+  return [1.0, 1.0, 1.0, 1.0, 0.5];
+}
 
 function startRagdoll(e, imp, alive, dur) {
   if (!ragdollsOn() || e.ragdoll || e.removed) return null;
@@ -59,6 +70,15 @@ function startRagdoll(e, imp, alive, dur) {
     }
     bodies.push(b);
   }
+  // colisionador de cada cuerpo: una cápsula a lo largo de su eje más largo (para chocar entre huesos y con otros cuerpos)
+  for (const b of bodies) {
+    const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
+    for (const P of b.parts) { const h = P.half; for (let sx = -1; sx <= 1; sx += 2) for (let sy = -1; sy <= 1; sy += 2) for (let sz = -1; sz <= 1; sz += 2) for (let a = 0; a < 3; a++) { const v = P.off[a] + P.rot[0][a] * h[0] * sx + P.rot[1][a] * h[1] * sy + P.rot[2][a] * h[2] * sz; if (v < lo[a]) lo[a] = v; if (v > hi[a]) hi[a] = v; } }
+    const ext = [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]]; const k = ext[0] >= ext[1] && ext[0] >= ext[2] ? 0 : ext[1] >= ext[2] ? 1 : 2;
+    const r = Math.max(0.04, Math.min(...ext.filter((v, i) => i !== k)) * 0.5 * 0.85); const mid = [(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2];
+    const half = Math.max(0, ext[k] / 2 - r); const a0 = mid.slice(), a1 = mid.slice(); a0[k] -= half; a1[k] += half;
+    b.cap = { w0: ragW(a0), w1: ragW(a1), r };
+  }
   let root = bodies.find(b => b.role === 'body') || bodies[0];
   // articulaciones: cada cuerpo se une al torso en su pivote (hombro, cadera, cuello...)
   const joints = [];
@@ -68,7 +88,12 @@ function startRagdoll(e, imp, alive, dur) {
     const lim = RAG_LIMIT[b.role] ?? (b.role.startsWith('arm') ? 2.7 : b.role === 'body' ? 0.25 : 1.2);
     // dirección de reposo del cuerpo (pivote → centro) en el marco del torso, para limitar el ángulo
     const dir = rv.norm(rv.sub(ragCenter(b), b.pivot)); const ra = ragAxes(root);
-    joints.push({ a: root, b, la: pa, lb: pb, lim, rest: [rv.dot(dir, ra[0]), rv.dot(dir, ra[1]), rv.dot(dir, ra[2])], len: rv.len(rv.sub(ragCenter(b), b.pivot)) });
+    // adelante del cuerpo (mirada de la entidad) y lado hacia fuera, en el marco del torso; eje x del miembro como referencia de torsión
+    const fw = [-Math.sin(yaw), 0, -Math.cos(yaw)]; const restW = dir; let side = rv.cross(restW, fw); if (rv.len(side) < 1e-3) side = rv.cross(restW, [0, 1, 0]); side = rv.norm(side);
+    if (rv.dot(side, rv.sub(b.pivot, ragCenter(root))) < 0) side = rv.mul(side, -1);
+    const fwd = rv.norm(rv.cross(side, restW)); const fsign = rv.dot(fwd, fw) < 0 ? -1 : 1; const bx = ragAxes(b)[0];
+    const toR = v => [rv.dot(v, ra[0]), rv.dot(v, ra[1]), rv.dot(v, ra[2])];
+    joints.push({ a: root, b, la: pa, lb: pb, lim, L: ragJointLimits(b.role), rest: toR(dir), fwd: toR(rv.mul(fwd, fsign)), side: toR(side), tw: toR(bx), len: rv.len(rv.sub(ragCenter(b), b.pivot)) });
   }
   // velocidad inicial: la de la entidad + el impulso del golpe, con un poco de giro
   const v = [(e.vx || 0) + (imp ? imp[0] : 0), (e.vy || 0) + (imp ? imp[1] : 0), (e.vz || 0) + (imp ? imp[2] : 0)];
@@ -110,7 +135,7 @@ function ragHit(w, q) {
     // salir por la cara más cercana que dé a un hueco (preferir hacia arriba)
     const opts = [[q[1] - bb[1], 0, -1, 0], [bb[4] - q[1] - 0.02, 0, 1, 0], [q[0] - bb[0], -1, 0, 0], [bb[3] - q[0], 1, 0, 0], [q[2] - bb[2], 0, 0, -1], [bb[5] - q[2], 0, 0, 1]];
     let best = null;
-    for (const o of opts) { const nb = w.get(bx + o[1], by + o[2], bz + o[3]); const free = !(nb > 0 && REG[nb] && REG[nb].solid && !REG[nb].shape && !REG[nb].box && REG[nb].render !== 'snow'); const cost = o[0] + (free ? 0 : 0.6); if (!best || cost < best[0]) best = [cost, o]; }
+    for (const o of opts) { const nb = w.get(bx + o[1], by + o[2], bz + o[3]); const free = !(nb > 0 && REG[nb] && REG[nb].solid && !REG[nb].shape && !REG[nb].box && REG[nb].render !== 'snow'); const cost = o[0] + (free ? 0 : 0.6) + (o[2] < 0 ? 0.45 : 0); /* salir hacia abajo solo si es mucho más corto: no atravesar suelos finos */ if (!best || cost < best[0]) best = [cost, o]; }
     const o = best[1]; return [[o[1], o[2], o[3]], o[0] + 0.001];
   }
   return null;
@@ -133,16 +158,26 @@ function ragStep(rd, dt) {
     for (const J of rd.joints) {
       const wa = ragW(J.la), wb = ragW(J.lb); const pa = ragPoint(J.a, wa), pb = ragPoint(J.b, wb); const d = rv.sub(pb, pa); const s = RAG_W2(wa) + RAG_W2(wb);
       ragMove(J.a, wa, d, 1 / s); ragMove(J.b, wb, d, -1 / s);
-      // límite de ángulo: la dirección pivote→centro del cuerpo no puede alejarse más de J.lim de la de reposo
-      const ra = ragAxes(J.a), rest = rv.add(rv.add(rv.mul(ra[0], J.rest[0]), rv.mul(ra[1], J.rest[1])), rv.mul(ra[2], J.rest[2]));
-      const piv = ragPoint(J.b, wb), cb = ragCenter(J.b), dir = rv.norm(rv.sub(cb, piv)); const cos = rv.dot(dir, rest);
-      if (cos < Math.cos(J.lim)) {
-        const axis = rv.norm(rv.cross(rest, dir)); const tgt = rv.add(rv.mul(rest, Math.cos(J.lim)), rv.mul(rv.cross(axis, rest), Math.sin(J.lim)));
-        const want = rv.add(piv, rv.mul(tgt, J.len)); const dd = rv.mul(rv.sub(want, cb), 0.5);
-        for (let i = 0; i < 4; i++) { J.b.p[i * 3] += dd[0]; J.b.p[i * 3 + 1] += dd[1]; J.b.p[i * 3 + 2] += dd[2]; }
-        // el giro hay que aplicarlo al cuerpo entero: se reajusta la articulación en la siguiente iteración
+      // límite anatómico: el giro de la dirección pivote→centro respecto de la de reposo cabe en una elipse
+      // (adelante/atrás/fuera/dentro distintos) y la torsión del miembro sobre su eje está acotada
+      const ra = ragAxes(J.a); const fromR = v => rv.add(rv.add(rv.mul(ra[0], v[0]), rv.mul(ra[1], v[1])), rv.mul(ra[2], v[2]));
+      const rest = fromR(J.rest), fw = fromR(J.fwd), sd = fromR(J.side);
+      const piv = ragPoint(J.b, wb), cb = ragCenter(J.b), dir = rv.norm(rv.sub(cb, piv)); const cos = clamp(rv.dot(dir, rest), -1, 1); const sw = Math.acos(cos);
+      if (sw > 1e-3) {
+        const pf = rv.dot(dir, fw), ps = rv.dot(dir, sd); const th = Math.atan2(ps, pf); const L = J.L;
+        const a = Math.max(0.3, pf >= 0 ? L[0] : L[1]), bb = Math.max(0.3, ps >= 0 ? L[2] : L[3]); const ct = Math.cos(th), st = Math.sin(th); const lim = RAG_ANISO ? 1 / Math.sqrt((ct / a) ** 2 + (st / bb) ** 2) : J.lim;
+        if (sw > lim) {
+          const ax0 = rv.cross(rest, dir); const al = rv.len(ax0);
+          if (al > 1e-4) ragRotate(J.b, piv, rv.mul(ax0, 1 / al), -Math.min(0.25, (sw - lim) * 0.6)); // girar el hueso alrededor del pivote (la articulación no se mueve)
+        }
       }
+      // torsión: el eje x del miembro, visto en el plano perpendicular al miembro, frente al de reposo
+      if (RAG_TWIST) { const bax = ragAxes(J.b); const ref = fromR(J.tw); const pr = v => rv.sub(v, rv.mul(dir, rv.dot(v, dir)));
+        const u = pr(bax[0]), r0 = pr(ref); if (rv.len(u) > 1e-3 && rv.len(r0) > 1e-3) { const un = rv.norm(u), rn = rv.norm(r0); const ang = Math.atan2(rv.dot(rv.cross(rn, un), dir), rv.dot(rn, un));
+          const ex = Math.abs(ang) - J.L[4]; if (ex > 0) ragRotate(J.b, piv, dir, -Math.sign(ang) * Math.min(0.2, ex * 0.5)); } }
     }
+    // los huesos del mismo cuerpo no se atraviesan (salvo los unidos por una articulación)
+    if (RAG_SELF) ragSelfCollide(rd);
     // colisión con bloques + fricción en el punto de contacto
     for (const b of rd.bodies) {
       b.contact = Math.max(0, b.contact - 1);
@@ -158,6 +193,56 @@ function ragStep(rd, dt) {
           for (let i = 0; i < 4; i++) { b.q[i * 3] += cw[i] * (tx * mu + n[0] * nn); b.q[i * 3 + 1] += cw[i] * (ty * mu + n[1] * nn); b.q[i * 3 + 2] += cw[i] * (tz * mu + n[2] * nn); }
         }
       }
+    }
+  }
+}
+// gira las 4 partículas de un cuerpo alrededor del punto o, eje unitario k, ángulo a (Rodrigues); también las previas
+// para no convertir la corrección en velocidad
+function ragRotate(b, o, k, a) {
+  const c = Math.cos(a), s = Math.sin(a);
+  for (const arr of [b.p, b.q]) for (let i = 0; i < 4; i++) { const v = [arr[i * 3] - o[0], arr[i * 3 + 1] - o[1], arr[i * 3 + 2] - o[2]]; const kv = rv.cross(k, v), kd = rv.dot(k, v);
+    arr[i * 3] = o[0] + v[0] * c + kv[0] * s + k[0] * kd * (1 - c); arr[i * 3 + 1] = o[1] + v[1] * c + kv[1] * s + k[1] * kd * (1 - c); arr[i * 3 + 2] = o[2] + v[2] * c + kv[2] * s + k[2] * kd * (1 - c); }
+}
+// ---- cápsulas: puntos más cercanos entre dos segmentos
+function segClosest(p1, q1, p2, q2) {
+  const d1 = rv.sub(q1, p1), d2 = rv.sub(q2, p2), r = rv.sub(p1, p2); const a = rv.dot(d1, d1), e = rv.dot(d2, d2), f = rv.dot(d2, r); let s, t;
+  if (a < 1e-9 && e < 1e-9) return [0, 0]; if (a < 1e-9) { s = 0; t = clamp(f / e, 0, 1); }
+  else { const c = rv.dot(d1, r); if (e < 1e-9) { t = 0; s = clamp(-c / a, 0, 1); } else { const b = rv.dot(d1, d2), den = a * e - b * b; s = den > 1e-9 ? clamp((b * f - c * e) / den, 0, 1) : 0; t = (b * s + f) / e; if (t < 0) { t = 0; s = clamp(-c / a, 0, 1); } else if (t > 1) { t = 1; s = clamp((b - c) / a, 0, 1); } } }
+  return [s, t];
+}
+const lerpW = (w0, w1, s) => [w0[0] + (w1[0] - w0[0]) * s, w0[1] + (w1[1] - w0[1]) * s, w0[2] + (w1[2] - w0[2]) * s, w0[3] + (w1[3] - w0[3]) * s];
+// separa dos cápsulas de cuerpos (de este u otro ragdoll); devuelve true si chocaban
+function ragCapPair(A, B, k) {
+  const ca = A.cap, cb = B.cap; if (!ca || !cb) return false;
+  const a0 = ragPoint(A, ca.w0), a1 = ragPoint(A, ca.w1), b0 = ragPoint(B, cb.w0), b1 = ragPoint(B, cb.w1);
+  const [s, t] = segClosest(a0, a1, b0, b1); const pa = rv.add(a0, rv.mul(rv.sub(a1, a0), s)), pb = rv.add(b0, rv.mul(rv.sub(b1, b0), t));
+  let d = rv.sub(pa, pb); const L = rv.len(d); const R2 = ca.r + cb.r; if (L >= R2) return false;
+  const n = L > 1e-5 ? rv.mul(d, 1 / L) : [0, 1, 0]; const pen = Math.min(0.04, (R2 - L) * k);
+  const wa = lerpW(ca.w0, ca.w1, s), wb = lerpW(cb.w0, cb.w1, t); const sw = RAG_W2(wa) + RAG_W2(wb);
+  ragMove(A, wa, n, pen / sw); ragMove(B, wb, n, -pen / sw); return true;
+}
+function ragSelfCollide(rd) {
+  const B = rd.bodies; for (let i = 0; i < B.length; i++) for (let j = i + 1; j < B.length; j++) {
+    const a = B[i], b = B[j]; if (a === rd.root || b === rd.root) continue; // el torso está unido a todos
+    ragCapPair(a, b, 0.5); }
+}
+// entre ragdolls distintos y contra entidades que no lo son (nadie se atraviesa; un golpe despierta al dormido)
+function ragInterCollide() {
+  const L = RAG.list; if (!L.length || !RAG_INTER) return;
+  for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length; j++) {
+    const A = L[i], B = L[j]; if (A.dim !== B.dim) continue; const ca = ragCenter(A.root), cb = ragCenter(B.root); if (rv.len(rv.sub(ca, cb)) > 4) continue;
+    let hit = false; for (const x of A.bodies) for (const y of B.bodies) if (ragCapPair(x, y, 0.5)) hit = true;
+    if (hit) { A.still = 0; B.still = 0; }
+  }
+  for (const rd of L) {
+    const c = ragCenter(rd.root); const dim = rd.dim;
+    const ents = [G.player, ...G.entities.values()]; for (const e of ents) {
+      if (!e || e.dim !== dim || e.ragdoll || e.dead || e.removed || e.type === 'item' || e === rd.entity) continue; if (Math.abs(e.x - c[0]) > 3 || Math.abs(e.z - c[2]) > 3 || Math.abs(e.y - c[1]) > 3) continue;
+      const er = (e.w || 0.6) * 0.5, p0 = [e.x, e.y + er, e.z], p1 = [e.x, e.y + Math.max(er, (e.h || 1.8) - er), e.z];
+      for (const b of rd.bodies) { if (!b.cap) continue; const b0 = ragPoint(b, b.cap.w0), b1 = ragPoint(b, b.cap.w1); const [s, t] = segClosest(b0, b1, p0, p1);
+        const pb = rv.add(b0, rv.mul(rv.sub(b1, b0), s)), pe = rv.add(p0, rv.mul(rv.sub(p1, p0), t)); const d = rv.sub(pb, pe); const Ld = rv.len(d); const R2 = b.cap.r + er; if (Ld >= R2) continue;
+        const n = Ld > 1e-5 ? rv.mul(d, 1 / Ld) : [0, 1, 0]; const pen = Math.min(0.05, R2 - Ld); const wb = lerpW(b.cap.w0, b.cap.w1, s); ragMove(b, wb, n, pen * 0.8 / RAG_W2(wb)); rd.still = 0;
+        e.vx = (e.vx || 0) - n[0] * pen * 4; e.vz = (e.vz || 0) - n[2] * pen * 4; } // quien camina empuja el cuerpo (y se frena un poco)
     }
   }
 }
@@ -184,6 +269,7 @@ function ragUpdate(dt) {
     }
     if (!rd.alive && rd.t > rd.dur) { for (let k = 0; k < 6; k++) smoke(c[0] + (Math.random() - 0.5), c[1] + Math.random() * 0.6, c[2] + (Math.random() - 0.5), { r: 0.75, g: 0.75, b: 0.75, a: 0.5, size: 0.5, life: 1.2 }); if (e && e.ragdoll === rd) e.ragdoll = null; RAG.list.splice(i, 1); }
   }
+  ragInterCollide();
 }
 // altura del suelo bajo un punto (para dejar a la entidad de pie donde quedó el torso)
 function ragGround(w, c) { let y = Math.floor(c[1]); for (let k = 0; k < 6; k++, y--) { const b = w.get(Math.floor(c[0]), y, Math.floor(c[2])); if (b > 0 && REG[b] && REG[b].solid) return y + 1; } return c[1] - 0.6; }
