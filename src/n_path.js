@@ -108,7 +108,7 @@ function navGoalY(w, e, tx, tz) {
 }
 // sustituye a ir en línea recta: devuelve true si se encargó del movimiento
 function navWalk(e, tx, tz, speed, dt) {
-  const d = e.def; if (!d || d.noGrav || d.climb || d.swim && e.inWater || SETTINGS.pathfinding === false) return false;
+  const d = e.def; if (!d || d.noGrav || d.climb || d.swim && e.inWater || SETTINGS.physics.mobs.mode === 'vanilla') return false;
   const w = e.world; if (!w) return false;
   const p = typeof nearestPlayerAny === 'function' ? nearestPlayerAny(e) : G.player; if (!p || Math.abs(p.x - e.x) > 56 || Math.abs(p.z - e.z) > 56) return false; // lejos de los jugadores: movimiento simple
   const nav = e.nav || (e.nav = { path: null, i: 0, stuck: 0 });
@@ -168,7 +168,6 @@ function debugPath(e) { const n = e && e.nav; if (!n || !n.path) return null; re
 const MOB_FOOD = { cow: ['wheat'], sheep: ['wheat'], goat: ['wheat'], mooshroom: ['wheat'], pig: ['carrot', 'potato', 'beetroot'], chicken: ['wheat_seeds', 'melon_seeds', 'pumpkin_seeds', 'beetroot_seeds'], rabbit: ['carrot', 'dandelion', 'golden_carrot'], horse: ['wheat', 'apple', 'golden_carrot'], cat: ['cod', 'salmon'] };
 const VILLAGER_FEAR = new Set(['zombie', 'husk', 'drowned', 'zombie_villager', 'pillager', 'vindicator', 'evoker', 'ravager', 'vex']);
 function passiveGoal(e, w) {
-  if (SETTINGS.pathfinding === false) return null;
   if (e.type === 'villager') {
     if (e.age % 10 === 0 || e._fear === undefined) { // amenaza más cercana (cada medio segundo)
       let best = null, bd = 64; for (const o of G.entities.values()) if (o instanceof Mob && VILLAGER_FEAR.has(o.type) && !o.dead && o.dim === e.dim) { const dd = (o.x - e.x) ** 2 + (o.z - e.z) ** 2; if (dd < bd) { bd = dd; best = o; } }

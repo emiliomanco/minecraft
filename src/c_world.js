@@ -6,6 +6,8 @@ const DIMS = {
   nether: { H: 128, yOff: 0, name: 'minecraft:the_nether' },
   end: { H: 128, yOff: 0, name: 'minecraft:the_end' }
 };
+// mundos con terreno realista (clima 3): 384 de alto (de −64 a 320 visibles) para montañas de ~240 bloques sobre el mar
+function worldH(dim, climate) { return dim === 'overworld' && climate >= 3 ? 384 : DIMS[dim].H; }
 const SEA = 126;          // nivel del mar interno (y=62 visible)
 const DEEP = 64;          // y=0 visible: límite deepslate
 // Biomas -----------------------------------------------------------------
@@ -46,6 +48,24 @@ BI.basalt_deltas = defBiome('basalt_deltas');
 BI.the_end = defBiome('the_end');
 BI.end_highlands = defBiome('end_highlands');
 BI.small_end_islands = defBiome('small_end_islands');
+BI.windswept_savanna = defBiome('windswept_savanna', { grass: [0.72, 0.7, 0.4], foliage: [0.64, 0.62, 0.3], temp: 1.1 });
+BI.sparse_jungle = defBiome('sparse_jungle', { grass: [0.42, 0.78, 0.24], foliage: [0.34, 0.72, 0.18], temp: 0.95 });
+// ---------------------------------------------------------------- clima (mundos nuevos: climate = 2)
+// Temperatura y humedad son campos continuos y muy suaves (no se ven en el juego): los biomas se eligen por bandas,
+// así que de un clima a otro siempre se pasa por los intermedios (desierto → sabana → llanuras → bosque → taiga → nieve).
+const CLT = [-0.40, -0.22, -0.04, 0.14, 0.32]; // límites: helado | frío | fresco | templado | cálido | caluroso
+const CLH = [-0.37, -0.10, 0.15, 0.37];       // límites: muy seco | seco | normal | húmedo | muy húmedo
+const CLIMATE_TABLE = [
+  [BI.snowy_plains, BI.snowy_plains, BI.snowy_plains, BI.snowy_taiga, BI.snowy_taiga], // helado
+  [BI.plains, BI.plains, BI.taiga, BI.taiga, BI.taiga],                                  // frío
+  [BI.plains, BI.plains, BI.forest, BI.birch_forest, BI.dark_forest],                    // fresco
+  [BI.plains, BI.plains, BI.forest, BI.forest, BI.dark_forest],                          // templado
+  [BI.savanna, BI.plains, BI.forest, BI.sparse_jungle, BI.jungle],                       // cálido
+  [BI.desert, BI.desert, BI.savanna, BI.sparse_jungle, BI.jungle]                        // caluroso
+];
+const bandOf = (v, edges) => { let i = 0; while (i < edges.length && v >= edges[i]) i++; return i; };
+// color de pasto/hojas de un bioma tal como lo usa el shader (algo menos saturado y más oscuro; /0.59 compensa el gris de la textura)
+function biomeTintRGB(b, foliage) { const B = BIOMES[b] || BIOMES[0]; const c = foliage ? B.foliage : B.grass; const g = (c[0] + c[1] + c[2]) / 3; return c.map(v => lerp(v, g, 0.3) * 0.78 / 0.59); }
 const OCEAN_BIOMES = new Set([BI.ocean, BI.deep_ocean, BI.frozen_ocean, BI.warm_ocean, BI.beach, BI.snowy_beach]);
 
 // ======================================================================= Chunk
@@ -53,7 +73,7 @@ class Chunk {
   constructor(world, cx, cz) {
     this.world = world; this.cx = cx; this.cz = cz; this.H = world.H;
     this.blocks = new Uint16Array(256 * this.H); this.meta = new Uint8Array(256 * this.H);
-    this.light = null; this.biomes = new Uint8Array(256); this.loot = {}; this.spawners = {};
+    this.light = null; this.biomes = new Uint8Array(256); this.tint = null; this.loot = {}; this.spawners = {};
     this.dirty = true; this.modified = false; this.mesh = null; this.top = 0; this.spawns = null;
   }
   calcTop() { const b = this.blocks; let y = this.H - 1; for (; y > 0; y--) { const o = y << 8; let any = false; for (let i = 0; i < 256; i++) if (b[o + i]) { any = true; break; } if (any) break; } this.top = y; }
@@ -62,9 +82,9 @@ const ckey = (cx, cz) => (cx + 32768) * 65536 + (cz + 32768);
 
 // ======================================================================= World
 class World {
-  constructor(dim, seed) {
-    this.dim = dim; this.seed = seed >>> 0; this.H = DIMS[dim].H; this.yOff = DIMS[dim].yOff;
-    this.chunks = new Map(); this.gen = new Generator(dim, this.seed);
+  constructor(dim, seed, climate) {
+    this.dim = dim; this.seed = seed >>> 0; this.climate = climate || 1; this.H = worldH(dim, this.climate); this.yOff = DIMS[dim].yOff;
+    this.chunks = new Map(); this.gen = new Generator(dim, this.seed, this.climate);
     this.ticks = []; this.tickSet = new Set(); this.saved = {}; // saved: key -> {b,m}
   }
   chunk(cx, cz) { return this.chunks.get(ckey(cx, cz)); }
@@ -106,16 +126,17 @@ class World {
 
 // ============================================================ Generador
 class Generator {
-  constructor(dim, seed) {
-    this.dim = dim; this.seed = seed; this.H = DIMS[dim].H;
+  constructor(dim, seed, climate) {
+    this.dim = dim; this.seed = seed; this.climate = climate || 1; this.H = worldH(dim, this.climate); // 1 = biomas clásicos (mundos antiguos), 2 = por clima
     const n = s => new Noise((seed ^ hashStr(dim + s)) >>> 0);
     this.nC = n('cont'); this.nE = n('ero'); this.nP = n('peaks'); this.nD = n('detail'); this.nT = n('temp'); this.nHm = n('hum');
     this.nR = n('river'); this.nL = n('lake'); this.nC1 = n('cave1'); this.nC2 = n('cave2'); this.nC3 = n('cave3'); this.nCB = n('cavebiome'); this.nCB2 = n('cavebiome2');
-    this.nV = n('variety'); this.nS = n('snow'); this.nDS = n('deepslate'); this.nW = n('weird');
+    this.nV = n('variety'); this.nS = n('snow'); this.nDS = n('deepslate'); this.nW = n('weird'); this.nWX = n('warpx'); this.nWZ = n('warpz');
     this.structCache = new Map(); this.colCache = new Map();
   }
   // ------------------------------------------------------------ overworld columna
   rawHeight(x, z) {
+    if (this.climate >= 3) return this.rawHeight3(x, z);
     const c = this.nC.fbm2(x * 0.0011, z * 0.0011, 4) * 1.3;
     const e = this.nE.fbm2(x * 0.0021, z * 0.0021, 3);
     const pk = 1 - Math.abs(this.nP.fbm2(x * 0.0032, z * 0.0032, 4));
@@ -130,17 +151,60 @@ class Generator {
     const mh = mountain * Math.pow(pk, 2.2) * 100;
     return { h: base + d * (2.5 + 7 * hill) + mh, c, e, d, mountain: mh };
   }
+  // ---- terreno realista (al estilo de los grandes generadores de mods): continentalidad (dónde hay mar, costa,
+  // llanuras o tierras altas, a escala de miles de bloques), erosión (llano frente a abrupto) y crestas (cordilleras
+  // con valles entre ellas). Unas curvas convierten esos ruidos lentos en alturas: las llanuras son enormes y casi
+  // planas, las montañas suben de forma progresiva (colinas → estribaciones → picos) y nunca hay muros de golpe.
+  rawHeight3(x, z) {
+    const wx = x + this.nWX.fbm2(x * 0.0006, z * 0.0006, 3) * 260, wz = z + this.nWZ.fbm2(x * 0.0006, z * 0.0006, 3) * 260;
+    const c = this.nC.fbm2(wx * 0.00026, wz * 0.00026, 5) * 1.45 + 0.16;
+    const e = this.nE.fbm2(wx * 0.0005 + 17.3, wz * 0.0005 - 4.1, 4) * 1.3;
+    // crestas: ruido "ridged" (1-|n|)² en 5 octavas, cada una modulada por la anterior (cumbres afiladas y valles en V)
+    let rid = 0, amp = 1, fq = 0.0013, wgt = 1, tot = 0;
+    for (let o = 0; o < 5; o++) { let n = 1 - Math.abs(this.nP.n2(wx * fq + o * 13.1, wz * fq - o * 7.7)); n *= n; n *= wgt; wgt = clamp(n * 1.6, 0, 1); rid += n * amp; tot += amp; amp *= 0.5; fq *= 2.03; }
+    rid /= tot;
+    // curva continental
+    const K = [[-1.6, SEA - 62], [-0.5, SEA - 55], [-0.22, SEA - 20], [-0.1, SEA - 7], [-0.04, SEA - 1], [0.02, SEA + 3], [0.12, SEA + 7], [0.3, SEA + 13], [0.55, SEA + 30], [0.85, SEA + 46], [1.6, SEA + 60]];
+    let base = K[0][1]; for (let i = 0; i + 1 < K.length; i++) if (c >= K[i][0] && c <= K[i + 1][0]) { const t = smooth((c - K[i][0]) / (K[i + 1][0] - K[i][0])); base = K[i][1] + (K[i + 1][1] - K[i][1]) * t; break; } else if (c > K[K.length - 1][0]) base = K[K.length - 1][1];
+    // montaña: tierra adentro y poca erosión; la altura crece deprisa con las crestas (curva empinada)
+    const mf = smooth(clamp((c + 0.02) / 0.4, 0, 1)) * smooth(clamp((0.12 - e) / 0.6, 0, 1));
+    // detalle de erosión en las laderas: crestas finas (aristas y canales) que crecen con la altura de la montaña
+    let rf = 0; { let a2 = 1, f2 = 0.0062; for (let o = 0; o < 3; o++) { const q = 1 - Math.abs(this.nE.n2(wx * f2 - 31.7, wz * f2 + 8.9)); rf += q * q * a2; a2 *= 0.45; f2 *= 2.1; } rf /= 1.65; }
+    const mh = mf * Math.pow(rid, 1.7) * 235 + mf * mf * 18 + mf * rid * (rf - 0.35) * 34;
+    // detalle: casi nada en las llanuras erosionadas, más en colinas
+    const flat = smooth(clamp((e + 0.1) / 0.5, 0, 1));
+    const d = this.nD.fbm2(x * 0.007, z * 0.007, 4);
+    const coast = clamp(Math.abs(base - SEA) / 7, 0.3, 1); // costa limpia: sin islotes de ruido al nivel del mar
+    const det = d * (2.2 * coast + 9 * (1 - flat) * (1 - mf)) + this.nD.n2(x * 0.045, z * 0.045) * 0.8 * (1 - flat);
+    return { h: base + det + mh, c, e, d, mountain: mh };
+  }
   col(x, z) {
     const key = x * 100003 + z; let r = this.colCache.get(key); if (r) return r;
     if (this.colCache.size > 60000) this.colCache.clear();
     const R = this.rawHeight(x, z); let h = R.h; const c = R.c;
-    const T = this.nT.fbm2(x * 0.0008, z * 0.0008, 3) * 1.6 + this.nW.n2(x * 0.01, z * 0.01) * 0.04;
-    const Hm = this.nHm.fbm2(x * 0.0009, z * 0.0009, 3) * 1.6;
+    const v2 = this.climate >= 2; let T, Hm;
+    if (v2) { const cl = this.climateAt(x, z); T = cl[0]; Hm = cl[1]; }
+    else { T = this.nT.fbm2(x * 0.0008, z * 0.0008, 3) * 1.6 + this.nW.n2(x * 0.01, z * 0.01) * 0.04; Hm = this.nHm.fbm2(x * 0.0009, z * 0.0009, 3) * 1.6; }
     // ríos
-    let river = false; const rv = Math.abs(this.nR.fbm2(x * 0.0013, z * 0.0013, 3));
-    if (c > -0.18 && rv < 0.065 && R.mountain < 40) { const t = smooth(clamp((rv - 0.018) / 0.047, 0, 1)); const rh = SEA - 3 - (1 - t) * 2.5; if (h > rh) h = lerp(rh, h, t * t); if (rv < 0.032) river = true; }
+    let river = false;
+    if (this.climate >= 3) {
+      // ríos de escala realista: menos y más largos, con un valle ancho de laderas suaves que se abre paso también
+      // entre montañas (el valle se estrecha y encaja según sube el relieve)
+      const rv = Math.abs(this.nR.fbm2(x * 0.00055, z * 0.00055, 3)), mt = clamp(R.mountain / 120, 0, 1);
+      const vw = 0.1 - 0.05 * mt, cw = 0.007 + 0.004 * (1 - mt), bw = cw * 1.5;
+      if (c > -0.12 && rv < vw) {
+        if (rv < bw) { // cauce y orillas
+          const t = smooth(clamp((rv - cw * 0.4) / (bw - cw * 0.4), 0, 1)), rh = SEA - 4 + t * 5;
+          if (h > rh) h = rh; if (rv < cw) river = true;
+        } else if (h > SEA + 1) { // valle: laderas que bajan hasta una llanura aluvial justo sobre el agua
+          const t = smooth((rv - bw) / (vw - bw));
+          h = lerp(SEA + 1, h, Math.pow(t, 1.5 - 0.7 * mt));
+        }
+      }
+    } else { const rv = Math.abs(this.nR.fbm2(x * 0.0013, z * 0.0013, 3));
+    if (c > -0.18 && rv < 0.065 && R.mountain < 40) { const t = smooth(clamp((rv - 0.018) / 0.047, 0, 1)); const rh = SEA - 3 - (1 - t) * 2.5; if (h > rh) h = lerp(rh, h, t * t); if (rv < 0.032) river = true; } }
     // pantano de manglares: aplanar
-    let swamp = Hm > 0.32 && T > 0.05 && T < 0.5 && h > SEA - 4 && h < SEA + 9 && R.mountain < 2;
+    let swamp = (v2 ? Hm >= CLH[3] && T >= CLT[2] && T < CLT[4] : Hm > 0.32 && T > 0.05 && T < 0.5) && h > SEA - 4 && h < SEA + 9 && R.mountain < 2;
     if (swamp) h = lerp(h, SEA - 0.6 + R.d * 3, 0.85);
     // lagos
     let lake = 0; if (!river && R.mountain < 6 && c > -0.04) {
@@ -154,8 +218,9 @@ class Generator {
       }
     }
     h = Math.floor(clamp(h, 8, this.H - 20));
-    let b;
-    if (h < SEA - 1 && !river) {
+    let b, Te = T;
+    if (v2) b = this.biomeV2(x, z, h, c, T, Hm, river, swamp, R.mountain), Te = T - Math.max(0, h - SEA - 35) * 0.0075;
+    else if (h < SEA - 1 && !river) {
       if (h < SEA - 16) b = T < -0.45 ? BI.frozen_ocean : BI.deep_ocean; else b = T < -0.45 ? BI.frozen_ocean : T > 0.55 ? BI.warm_ocean : BI.ocean;
     } else if (river) b = T < -0.45 ? BI.frozen_river : BI.river;
     else if (swamp) b = BI.mangrove_swamp;
@@ -167,8 +232,67 @@ class Generator {
     else if (T < 0.5) b = Hm < -0.15 ? BI.plains : Hm < 0.2 ? BI.forest : BI.dark_forest;
     else b = Hm < -0.12 ? BI.desert : Hm < 0.18 ? BI.savanna : BI.jungle;
     if (b === BI.plains && this.nV.n2(x * 0.004, z * 0.004) > 0.55) b = BI.sunflower_plains;
-    r = { h, biome: b, river, lake, swamp, T, Hm, mountain: R.mountain };
+    r = { h, biome: b, river, lake, swamp, T, Hm, Te, mountain: R.mountain };
     this.colCache.set(key, r); return r;
+  }
+  // acantilados y salientes: en las laderas de montaña la superficie se deforma con ruido 3D (paredes verticales,
+  // voladizos y repisas) en vez de ser una columna simple; luego se viste la nueva superficie (roca, pasto o nieve)
+  cliffs3D(B, x, z, wx, wz, ci, waterTop) {
+    const h = ci.h, amp = Math.min(16, (ci.mountain - 25) * 0.12); if (amp < 1) return;
+    const y0 = Math.max(waterTop + 2, h - 28), y1 = Math.min(this.H - 3, h + 22); let top = -1;
+    for (let y = y0; y <= y1; y++) {
+      const n = this.nW.fbm3(wx * 0.035, y * 0.05, wz * 0.035, 2) + this.nV.n3(wx * 0.09, y * 0.11, wz * 0.09) * 0.35;
+      const dens = (h - y) / amp + n * 1.6; const i = x | z << 4 | y << 8;
+      if (dens > 0) { if (!B[i]) B[i] = ID.stone; top = y; } else if (B[i] && y > h - 28) B[i] = 0;
+    }
+    if (top < 0) return;
+    // vestir: lo que queda al aire arriba de cada tramo sólido
+    const snowy = ci.Te < CLT[1];
+    for (let y = y1; y >= y0; y--) { const i = x | z << 4 | y << 8; if (!B[i] || B[i] === ID.bedrock) continue; const up = y + 1 < this.H ? B[x | z << 4 | (y + 1) << 8] : 0; if (up) continue;
+      const steep = Math.abs(this.col(wx + 1, wz).h - this.col(wx - 1, wz).h) + Math.abs(this.col(wx, wz + 1).h - this.col(wx, wz - 1).h) > 7;
+      B[i] = snowy ? ID.snow_block : steep ? ID.stone : (y > SEA + 150 ? ID.stone : ID.grass_block);
+      if (!snowy && !steep && y - 1 >= y0 && B[x | z << 4 | (y - 1) << 8] === ID.stone) B[x | z << 4 | (y - 1) << 8] = ID.dirt; }
+  }
+  // clima continuo con bordes orgánicos (dominio deformado); valores ~[-0.7, 0.7] con mediana 0
+  climateAt(x, z) {
+    const k = this.climate >= 3 ? 0.5 : 1; // terreno realista: biomas el doble de grandes
+    const wx = x + this.nWX.fbm2(x * 0.0021 * k, z * 0.0021 * k, 2) * 90 / k, wz = z + this.nWZ.fbm2(x * 0.0021 * k, z * 0.0021 * k, 2) * 90 / k;
+    const T = this.nT.fbm2(wx * 0.00042 * k, wz * 0.00042 * k, 2) + this.nW.n2(x * 0.02, z * 0.02) * 0.015;
+    const Hm = this.nHm.fbm2(wx * 0.00055 * k + 31.7, wz * 0.00055 * k - 12.3, 2);
+    return [T, Hm];
+  }
+  biomeV2(x, z, h, c, T, Hm, river, swamp, mountain) {
+    const cold = T < CLT[0];
+    if (h < SEA - 1 && !river) return h < SEA - 16 ? (cold ? BI.frozen_ocean : BI.deep_ocean) : cold ? BI.frozen_ocean : T >= CLT[4] ? BI.warm_ocean : BI.ocean;
+    if (river) return cold ? BI.frozen_river : BI.river;
+    if (swamp) return BI.mangrove_swamp;
+    if (h <= SEA + 2 && c < -0.02 && mountain < 2) return cold ? BI.snowy_beach : BI.beach;
+    if (mountain > 30) {
+      // la temperatura baja con la altura; los picos nevados solo en climas templados o fríos (nunca junto a desiertos)
+      const Te = T - Math.max(0, h - SEA - 35) * 0.0075;
+      if (Te < CLT[0] && T < CLT[3]) return h > SEA + 90 ? BI.jagged_peaks : BI.snowy_peaks;
+      return T >= CLT[3] ? BI.windswept_savanna : BI.mountains;
+    }
+    return CLIMATE_TABLE[bandOf(T, CLT)][bandOf(Hm, CLH)];
+  }
+  // bioma de una columna en cualquier dimensión (para mezclar colores entre biomas)
+  biomeAtCol(x, z) { if (this.dim === 'overworld') return this.col(x, z).biome; if (this.dim === 'nether') return this.netherBiome(x, z); return BI.the_end; }
+  // colores de pasto y hojas mezclados entre biomas vecinos (radio ~6 bloques): transiciones suaves en vez de cortes
+  // salida: 256 × [r,g,b,255 (pasto)] seguido de 256 × [r,g,b,255 (hojas)], con el valor/2 en 0..255
+  tintChunk(ch) {
+    const RAD = this.dim === 'overworld' ? 6 : 0, W = 16 + RAD * 2, x0 = ch.cx * 16 - RAD, z0 = ch.cz * 16 - RAD;
+    const ids = new Uint8Array(W * W);
+    for (let z = 0; z < W; z++) for (let x = 0; x < W; x++) { const ix = x - RAD, iz = z - RAD; ids[x + z * W] = (ix >= 0 && ix < 16 && iz >= 0 && iz < 16) ? ch.biomes[ix | iz << 4] : this.biomeAtCol(x0 + x, z0 + z); }
+    const out = new Uint8Array(256 * 8); const pal = {};
+    const col = (b, f) => { const k = b * 2 + f; return pal[k] || (pal[k] = biomeTintRGB(b, f)); };
+    for (let f = 0; f < 2; f++) {
+      // desenfoque de caja separable: primero en x (solo las filas necesarias), luego en z
+      const tmp = new Float32Array(16 * W * 3);
+      for (let z = 0; z < W; z++) for (let x = 0; x < 16; x++) { let r = 0, g = 0, b = 0; for (let k = 0; k <= RAD * 2; k++) { const c = col(ids[x + k + z * W], f); r += c[0]; g += c[1]; b += c[2]; } const o = (x + z * 16) * 3; tmp[o] = r; tmp[o + 1] = g; tmp[o + 2] = b; }
+      const n = (RAD * 2 + 1) ** 2;
+      for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) { let r = 0, g = 0, b = 0; for (let k = 0; k <= RAD * 2; k++) { const o = (x + (z + k) * 16) * 3; r += tmp[o]; g += tmp[o + 1]; b += tmp[o + 2]; } const o = (f * 256 + (x | z << 4)) * 4; out[o] = clamp(r / n / 2 * 255, 0, 255); out[o + 1] = clamp(g / n / 2 * 255, 0, 255); out[o + 2] = clamp(b / n / 2 * 255, 0, 255); out[o + 3] = 255; }
+    }
+    return out;
   }
   caveBiome(x, y, z) {
     if (this.dim !== 'overworld') return -1;
@@ -185,6 +309,7 @@ class Generator {
     else this.genEnd(ch);
     this.genStructures(ch);
     ch.calcTop();
+    ch.tint = this.tintChunk(ch);
   }
   // ------------------------------------------------------------ OVERWORLD
   genOverworld(ch) {
@@ -198,7 +323,8 @@ class Generator {
       const wx = x0 + gx * 4, wz = z0 + gz * 4, wy = gy * 4; const i = (gy * GX + gz) * GX + gx;
       const a = this.nC1.n3(wx * 0.022, wy * 0.035, wz * 0.022), b = this.nC2.n3(wx * 0.022 + 31, wy * 0.035, wz * 0.022);
       cave[i] = a * a + b * b;
-      cheese[i] = this.nC3.fbm3(wx * 0.011, wy * 0.018, wz * 0.011, 2) + (wy < 40 ? 0.08 : 0) - (wy > SEA - 30 ? (wy - SEA + 30) * 0.02 : 0);
+      cheese[i] = this.climate >= 3 ? this.nC3.fbm3(wx * 0.008, wy * 0.012, wz * 0.008, 3) + clamp((70 - wy) / 55, 0, 1) * 0.3 - (wy > SEA - 30 ? (wy - SEA + 30) * 0.03 : 0) // las profundidades: cavernas enormes
+        : this.nC3.fbm3(wx * 0.011, wy * 0.018, wz * 0.011, 2) + (wy < 40 ? 0.08 : 0) - (wy > SEA - 30 ? (wy - SEA + 30) * 0.02 : 0);
     }
     const sample = (arr, x, y, z) => {
       const fx = x / 4, fy = y / 4, fz = z / 4; const ix = Math.min(fx | 0, 3), iy = Math.min(fy | 0, GY - 2), iz = Math.min(fz | 0, 3);
@@ -223,19 +349,21 @@ class Generator {
         if (ci.biome === BI.desert && y <= h - fillDepth && y > h - fillDepth - 4) id = ID.sandstone;
         if ((ci.biome === BI.beach || ci.biome === BI.ocean) && y <= h - 3 && y > h - 6) id = ID.sandstone;
         if (cliff && y > h - 4) id = ID.stone;
-        if ((ci.biome === BI.mountains) && y === h && h > SEA + 70) id = ID.snowy_grass;
+        if ((ci.biome === BI.mountains) && y === h && (this.climate >= 2 ? ci.Te < CLT[1] : h > SEA + 70)) id = ID.snowy_grass;
         if ((ci.biome === BI.snowy_peaks || ci.biome === BI.jagged_peaks) && y > h - 3) id = (y === h && cliff) ? ID.stone : (ci.biome === BI.jagged_peaks && y < h ? ID.packed_ice : ID.snow_block);
         // variedades de piedra
         if (id === ID.stone) { const v = this.nV.n3(wx * 0.05, y * 0.05, wz * 0.05); if (v > 0.55) id = ID.granite; else if (v < -0.58) id = ID.diorite; else if (v > 0.42 && v < 0.46) id = ID.andesite; }
         if (id === ID.deepslate) { const v = this.nV.n3(wx * 0.06 + 99, y * 0.06, wz * 0.06); if (v > 0.6) id = ID.tuff; }
         B[i] = id;
       }
+      if (this.climate >= 3 && ci.mountain > 25) this.cliffs3D(B, x, z, wx, wz, ci, waterTop);
       // tallar cuevas
       const top = h - (h < SEA + 2 ? 6 : 0);
       for (let y = 5; y < top; y++) {
         const i = x | z << 4 | y << 8;
         const cv = sample(cave, x, y, z), chz = sample(cheese, x, y, z);
-        let carve = cv < 0.0065 + (y < DEEP ? 0.003 : 0) || (chz > 0.42 && y < SEA - 18);
+        const thin = this.climate >= 3 ? (y > SEA - 25 ? 0.0035 : y > DEEP ? 0.0065 : 0.011) : 0.0065 + (y < DEEP ? 0.003 : 0); // estrechas arriba, anchas abajo
+        let carve = cv < thin || (chz > 0.42 && y < SEA - 18);
         if (!carve) continue;
         if (y >= h - 1 && (ci.biome === BI.desert || h < SEA + 3)) continue;
         B[i] = y < 11 ? ID.lava : 0;
@@ -711,7 +839,7 @@ function villageBuild(S, pl, M, style, r) {
     return ddx ? [bx, z + sideSign * (hz - 1 - k)] : [x + sideSign * (hx - 1 - k), bz];
   };
   const [ax, az] = back(0, -1), [bx2, bz2] = back(0, 1);
-  S.set(ax, y, az, ID.bed);
+  { const f = DIR4.findIndex(d => d[0] === -ddx && d[1] === -ddz); S.set(ax, y, az, ID.bed, (f < 0 ? 0 : f) | 4); S.set(ax + ddx, y, az + ddz, ID.bed, f < 0 ? 0 : f); } // cabecera contra la pared del fondo
   const station = pl.type === 'smith' ? ID.blast_furnace : pl.type === 'library' ? ID.bookshelf : [ID.crafting_table, ID.smoker, ID.barrel, ID.smithing_table, ID.furnace][pl.n % 5];
   S.set(bx2, y, bz2, station);
   const [cx2, cz2] = back(1, 1); if (cx2 !== x || cz2 !== z) S.chest(cx2, y, cz2, 'village');

@@ -156,7 +156,7 @@ defB('vault', 'Bóveda', { tex: { top: 'vault_top', side: 'vault_side', front: '
 for (const [c, dn] of [['white', 'blanca'], ['orange', 'naranja'], ['yellow', 'amarilla'], ['lime', 'lima'], ['light_blue', 'azul claro'], ['blue', 'azul'], ['purple', 'morada'], ['red', 'roja'], ['black', 'negra'], ['green', 'verde']])
   defB(c + '_wool', 'Lana ' + dn, { hard: 0.8, flammable: true });
 defB('tnt', 'Dinamita', { tex: { top: 'tnt_top', bottom: 'tnt_bottom', side: 'tnt_side' }, hard: 0, tnt: true });
-defB('bed', 'Cama', { render: 'box', box: [0, 0, 0, 16, 9, 16], tex: { top: 'bed_top', side: 'bed_side', bottom: 'oak_planks' }, hard: 0.2, ui: 'bed' });
+defB('bed', 'Cama', { render: 'shape', shape: 'bed', solid: true, box: [0, 0, 0, 16, 9, 16], tex: { top: 'bed_top', side: 'bed_side', bottom: 'oak_planks' }, hard: 0.2, ui: 'bed' });
 defB('spawner', 'Generador de monstruos', { trans: 1, hard: 5, tool: 'pickaxe', lvl: 1, drop: null });
 defB('sponge', 'Esponja', { hard: 0.6 });
 defB('wet_sponge', 'Esponja mojada', { hard: 0.6 });
@@ -308,6 +308,7 @@ defI('turtle_helmet', 'Caparazón de tortuga', { stack: 1, armor: { slot: 0, pts
 defI('trident', 'Tridente', { stack: 1, dur: 250, dmg: 9, trident: true }); defI('crossbow', 'Ballesta', { stack: 1, dur: 465, bow: true, crossbow: true });
 defI('mace', 'Maza', { stack: 1, dur: 500, dmg: 6, mace: true }); defI('heavy_core', 'Núcleo denso');
 defI('experience_bottle', 'Frasco de experiencia', { throwable: 'xpbottle' }); defI('brush', 'Brocha', { stack: 1, dur: 64 }); defI('fishing_rod', 'Caña de pescar', { stack: 1, dur: 64 });
+defI('broom', 'Escoba', { stack: 1, broom: true }); defI('oak_boat', 'Bote', { stack: 1, boatItem: true });
 const TOOLMAT = { wooden: { lvl: 1, speed: 2, dur: 59, dmg: 0, n: 'madera', col: [137, 103, 59] }, stone: { lvl: 2, speed: 4, dur: 131, dmg: 1, n: 'piedra', col: [130, 130, 130] }, iron: { lvl: 3, speed: 6, dur: 250, dmg: 2, n: 'hierro', col: [220, 220, 220] }, golden: { lvl: 1, speed: 12, dur: 32, dmg: 0, n: 'oro', col: [250, 220, 70] }, diamond: { lvl: 4, speed: 8, dur: 1561, dmg: 3, n: 'diamante', col: [80, 230, 220] }, netherite: { lvl: 5, speed: 9, dur: 2031, dmg: 4, n: 'netherita', col: [80, 70, 75] } };
 const TOOLTYPE = { sword: ['Espada', 4], pickaxe: ['Pico', 2], axe: ['Hacha', 3], shovel: ['Pala', 1.5], hoe: ['Azada', 1] };
 for (const m in TOOLMAT) for (const t in TOOLTYPE) {
@@ -540,8 +541,8 @@ Object.assign(TEXGEN, {
   tnt_side: p => { p.noise([200, 40, 30], 10); p.rect(0, 5, 15, 10, [230, 230, 230]); p.rect(3, 6, 12, 9, [40, 40, 40]); for (let x = 0; x < 16; x += 4) p.rect(x, 0, x, 4, [170, 30, 25]); },
   tnt_top: p => { p.noise([200, 50, 40], 10); p.rect(6, 6, 9, 9, [60, 60, 60]); },
   tnt_bottom: p => { p.noise([190, 50, 40], 10); },
-  bed_top: p => { p.noise([170, 30, 30], 8); p.rect(0, 0, 15, 5, [230, 230, 230], 6); },
-  bed_side: p => { p.noise([170, 30, 30], 8); p.rect(0, 0, 4, 15, [230, 230, 230], 6); p.rect(0, 11, 15, 15, [140, 100, 60], 6); },
+  bed_top: p => { p.noise([170, 30, 30], 8); for (let x = 0; x < 16; x += 5) p.rect(x, 0, x, 15, [150, 24, 24], 4); },
+  bed_side: p => { p.noise([170, 30, 30], 8); p.rect(0, 11, 15, 15, [140, 100, 60], 6); },
   spawner: p => { p.clear(); p.border([30, 40, 50]); for (let i = 3; i < 16; i += 4) { p.rect(i, 0, i, 15, [30, 40, 50]); p.rect(0, i, 15, i, [30, 40, 50]); } p.rect(6, 6, 9, 9, [200, 60, 30]); },
   sponge: p => { p.noise([200, 190, 70], 10); for (let i = 0; i < 20; i++) p.set((p.r() * 16) | 0, (p.r() * 16) | 0, [150, 140, 40]); },
   wet_sponge: p => { p.noise([170, 170, 70], 10); for (let i = 0; i < 20; i++) p.set((p.r() * 16) | 0, (p.r() * 16) | 0, [110, 120, 40]); },
@@ -789,7 +790,7 @@ function itemTexAuto(p, name) {
     turtle_helmet: () => armorIcon(p, 0, [80, 160, 70]), trident: () => { for (let i = 0; i < 11; i++) p.set(2 + i, 13 - i, [80, 150, 140]); p.rect(11, 1, 14, 2, [80, 170, 160]); p.rect(13, 1, 14, 4, [80, 170, 160]); outline(p); },
     crossbow: () => { for (let i = 0; i < 10; i++) p.set(3 + i, 12 - i, [110, 80, 45]); for (let i = 0; i < 8; i++) { p.set(4 + i, 3 + (i >> 2), [80, 80, 85]); p.set(12 - (i >> 2), 4 + i, [80, 80, 85]); } outline(p); },
     mace: () => { for (let i = 0; i < 9; i++) p.set(3 + i, 12 - i, [120, 100, 80]); p.rect(9, 2, 13, 6, [90, 90, 100]); outline(p); }, heavy_core: () => blob([70, 70, 80], 5),
-    brush: () => { for (let i = 0; i < 7; i++) p.set(3 + i, 12 - i, [150, 110, 60]); p.rect(9, 2, 13, 6, [220, 200, 160]); outline(p); }, fishing_rod: () => { for (let i = 0; i < 12; i++) p.set(2 + i, 13 - i, [120, 90, 50]); for (let y = 2; y < 14; y++) p.set(13, y, [230, 230, 230]); },
+    brush: () => { for (let i = 0; i < 7; i++) p.set(3 + i, 12 - i, [150, 110, 60]); p.rect(9, 2, 13, 6, [220, 200, 160]); outline(p); }, oak_boat: () => { for (let x = 1; x < 15; x++) { const d = Math.abs(x - 7.5); const y0 = 8 + Math.max(0, d - 4.5) * 0.9; for (let y = Math.round(y0); y < 13; y++) p.set(x, y, [150, 115, 65].map(v => v + (p.r() - 0.5) * 18 - (y === 12 ? 30 : 0))); } p.rect(6, 6, 7, 11, [110, 80, 45]); outline(p); }, broom: () => { for (let i = 0; i < 9; i++) p.set(12 - i, 1 + i, [125, 90, 50]); for (let y = 9; y < 15; y++) for (let x = 1; x < 7; x++) if (x + (14 - y) * 0.5 < 8 && x - (y - 9) * 0.4 > 0) p.set(x, y, [205, 175, 80].map(v => v + (p.r() - 0.5) * 30)); p.rect(3, 9, 5, 10, [150, 60, 40]); outline(p); }, fishing_rod: () => { for (let i = 0; i < 12; i++) p.set(2 + i, 13 - i, [120, 90, 50]); for (let y = 2; y < 14; y++) p.set(13, y, [230, 230, 230]); },
     beetroot: () => { blob([170, 30, 50], 4.5); p.rect(7, 2, 8, 4, [60, 140, 40]); }, beetroot_seeds: () => { for (let i = 0; i < 6; i++) p.set(4 + ((p.r() * 8) | 0), 6 + ((p.r() * 6) | 0), [150, 110, 60]); }, beetroot_soup: () => { for (let y = 7; y < 13; y++) for (let x = 3; x < 13; x++) if (Math.hypot((x - 7.5) / 5, (y - 7) / 5.5) < 1) p.set(x, y, [140, 100, 60]); p.rect(4, 7, 11, 8, [170, 30, 50]); outline(p); },
     fire_extinguisher: () => { p.rect(5, 4, 10, 14, [200, 30, 30]); p.rect(6, 5, 7, 13, [240, 80, 70]); p.rect(9, 5, 9, 13, [140, 15, 15]); p.rect(5, 8, 10, 9, [230, 230, 230]); p.rect(6, 2, 9, 3, [40, 40, 40]); p.rect(9, 1, 12, 1, [60, 60, 60]); p.rect(3, 2, 5, 2, [40, 40, 40]); p.rect(2, 3, 2, 9, [30, 30, 30]); outline(p); },
     experience_bottle: () => { for (let y = 5; y < 15; y++) for (let x = 4; x < 12; x++) if (Math.hypot(x - 7.5, y - 10) < 4.2) p.set(x, y, [120, 230, 90]); p.rect(7, 2, 8, 5, [200, 220, 240]); outline(p); },

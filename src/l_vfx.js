@@ -9,7 +9,8 @@
 // los bloques sólidos lo frenan (se acumula bajo techos, llena habitaciones y sale por puertas y ventanas),
 // el viento lo arrastra al aire libre y se disipa. Se sube como textura 3D y se dibuja con raymarching
 // iluminado por el sol (con sombra propia), el cielo y el resplandor del fuego.
-function vfxCfg() { const o = SETTINGS.physics || {}; return { fire: Object.assign({ on: true, height: 1 }, o.fire || {}), smoke: Object.assign({ on: true, amount: 1, life: 1 }, o.smoke || {}) }; }
+function vfxCfg() { const f = physCfg('fire'), s = physCfg('smoke'); return { fire: { on: f.real, height: f.height, spread: f.spread }, smoke: { on: s.real, amount: s.amount, life: s.life } }; }
+function fireVolOn() { return vfxVolumetric() && vfxCfg().fire.on; }
 function vfxVolumetric() { return R.q >= 2 && !!R.fbo.copy && !!R.fbo.fl && !VFX.failed; }
 
 const VFX = { progs: null, noise: null, smokeTex: null, cube: null, fireVAO: null, fireBuf: null, fireData: new Float32Array(8 * 2048) };
@@ -279,9 +280,9 @@ function drawSmokeVolume() {
 function drawVFX(opts) {
   if (vfxVolumetric()) {
     if (VFX.q !== R.q || VFX.gl !== R.gl) { VFX.q = R.q; VFX.gl = R.gl; vfxInitGL(); }
-    if (VFX.progs) { if (opts.fireCells && opts.fireCells.length) drawFireVolumes(opts.fireCells); drawSmokeVolume(); return; }
+    if (VFX.progs) { if (opts.fireCells && opts.fireCells.length) drawFireVolumes(opts.fireCells); if (typeof efDraw === 'function') efDraw(); drawSmokeVolume(); return; }
   }
-  if (opts.flames && opts.flames.length) drawFlames(opts.flames);
+  if (opts.flames && opts.flames.length) drawFlames(opts.flames); // fuego clásico (calidad baja o modo vanilla)
 }
 // si la GPU se reinicia, recrear texturas y programas
 (R.restoreHooks = R.restoreHooks || []).push(() => { VFX.noiseGL = null; VFX.q = -1; VFX.progs = null; SMK.uploadAll = true; });
