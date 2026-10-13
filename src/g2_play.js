@@ -365,7 +365,7 @@ function currentTarget() {
 function attackEntity(e) {
   const p = G.player; const s = p.held(); const d = s ? REG[s.id] : null; let dmg = d && d.dmg ? d.dmg : 1; const sh = enchLvl(s, 'sharpness'); if (sh) dmg += 0.5 * sh + 0.5; const fa = enchLvl(s, 'fire_aspect'); if (fa && e.type !== 'player') e.fire = Math.max(e.fire || 0, 80 * fa);
   if (G.gameMode === 'spectator') return;
-  if (e.boat) { boatHit(e, p); p.swing = 1; return; }
+  if (e.isBoat) { boatHit(e, p); p.swing = 1; return; }
   const crit = !p.onGround && p.vy < 0 && !p.inWater; if (crit) { dmg *= 1.5; for (let i = 0; i < 12; i++) P_({ x: e.x, y: e.y + e.h * 0.7, z: e.z, vx: (Math.random() - 0.5) * 5, vy: Math.random() * 4, vz: (Math.random() - 0.5) * 5, life: 0.5, size: 0.1, layer: TEX.spark, add: true, emis: 2, r: 0.9, g: 0.9, b: 0.6, grav: 10 }); }
   if (s && s.id === ID.mace && p.fallDist > 1.5) { dmg += Math.floor(p.fallDist) * 2; p.fallDist = 0; p.vy = 4; explosionFX(p.dim, e.x, e.y, e.z, 0.5); }
   const kb = p.sprinting ? 9 : 5; const kx = -Math.sin(p.yaw) * kb, kz = -Math.cos(p.yaw) * kb;
@@ -413,7 +413,7 @@ function useItem(hit) {
     const e = hit.ent;
     if (s && s.id === ID.shears && e.type === 'sheep' && !e.sheared) { e.sheared = true; dropItem(e.dim, e.x, e.y + 1, e.z, { id: ID.white_wool, c: 1 + (Math.random() * 3 | 0) }); damageItem(p.inv, p.sel, 1); return true; }
     if (s && s.id === ID.bucket && (e.type === 'cow' || e.type === 'goat')) { consumeHeld(p); giveItem(p, { id: ID.milk_bucket, c: 1 }); return true; }
-    if (e.boat) { boatMount(p, e); return true; }
+    if (e.isBoat) { boatMount(p, e); return true; }
     if (e.type === 'villager') { openTrade(e); return true; }
     if (s && s.id === ID.name_tag) { e.persist = true; e.name = 'Mascota'; consumeHeld(p); return true; }
   }

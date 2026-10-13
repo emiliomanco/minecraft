@@ -20,41 +20,43 @@ function broomUse(p) {
   if (!p._brSnd || now - p._brSnd > 260 && Math.abs(Math.cos(BROOM.ph)) > 0.9) { p._brSnd = now; playSound('step', BROOM.head[0], BROOM.head[1], BROOM.head[2], 0.5, ID.sand); }
   p.swing = Math.max(p.swing || 0, 0.01);
   broomPush(p, base, dt);
+  // en multijugador las entidades las simula el anfitrión: se le manda el barrido (unas 20 veces por segundo)
+  if (G.net && G.net.role === 'client' && now - (BROOM.sent || 0) > 50) { BROOM.sent = now; netSend({ t: 'brm', h: BROOM.head.map(v => +v.toFixed(2)), v: BROOM.v.map(v => +v.toFixed(2)), dt: 0.05 }); }
 }
 function broomActive() { return BROOM.active && performance.now() - BROOM.t < 120; }
 // ¿esta altura (pies de la cosa) está al nivel del jugador?
 function broomLevel(y, base, p) { return y >= base - 0.05 && y < p.y + 1.8; }
 // ¿punto dentro de la zona barrida (cerca de la cabeza de la escoba, delante del jugador)?
-function broomHit(x, z, p) {
-  const hx = BROOM.head[0], hz = BROOM.head[2]; const d = Math.hypot(x - hx, z - hz); if (d > BROOM_R + 0.6) return 0;
+function broomHit(x, z, p, B = BROOM) {
+  const hx = B.head[0], hz = B.head[2]; const d = Math.hypot(x - hx, z - hz); if (d > BROOM_R + 0.6) return 0;
   const fx = -Math.sin(p.yaw), fz = -Math.cos(p.yaw); const rx = x - p.x, rz = z - p.z; const rl = Math.hypot(rx, rz) || 1;
   if ((rx * fx + rz * fz) / rl < -0.2) return 0; // detrás del jugador no
   return clamp(1 - d / (BROOM_R + 0.6), 0, 1);
 }
-function broomPush(p, base, dt) {
-  const V = BROOM.v; const k = 20;
+function broomPush(p, base, dt, B = BROOM) {
+  const V = B.v; const k = 20;
   // entidades (mobs, objetos tirados, botes): un empujón en la dirección del barrido
   for (const e of G.entities.values()) {
     if (e.removed || e.dead || e === p || e.dim !== p.dim || e instanceof Projectile) continue;
     if (e.ragdoll) continue; // el ragdoll se empuja por sus cuerpos
-    if (!broomLevel(e.y, base, p)) continue; const f = broomHit(e.x, e.z, p); if (!f) continue;
-    const m = e.type === 'item' ? 1 : e.boat ? 0.5 : (e instanceof Mob ? 0.35 : 0.5);
+    if (!broomLevel(e.y, base, p)) continue; const f = broomHit(e.x, e.z, p, B); if (!f) continue;
+    const m = e.type === 'item' ? 1 : e.isBoat ? 0.5 : (e instanceof Mob ? 0.35 : 0.5);
     e.vx = (e.vx || 0) + (V[0] - (e.vx || 0)) * Math.min(1, k * f * m * dt); e.vz = (e.vz || 0) + (V[2] - (e.vz || 0)) * Math.min(1, k * f * m * dt);
     if (e.type === 'item') { e.onGround = false; e.vy = Math.max(e.vy || 0, 1.6 * f); }
-    if (e.boat) { e.wy = (e.wy || 0) + (V[0] * (e.z - p.z) - V[2] * (e.x - p.x)) * 0.02 * f; }
+    if (e.isBoat) { e.wy = (e.wy || 0) + (V[0] * (e.z - p.z) - V[2] * (e.x - p.x)) * 0.02 * f; }
   }
   // ragdolls: se desplaza el punto anterior de cada cuerpo (verlet) → ganan velocidad
   if (typeof RAG !== 'undefined') for (const rd of RAG.list) {
     if (rd.dim !== p.dim) continue; let touched = false;
     for (const b of rd.bodies) for (let i = 0; i < 4; i++) {
-      const x = b.p[i * 3], y = b.p[i * 3 + 1], z = b.p[i * 3 + 2]; if (!broomLevel(y, base, p) || y > base + 1.2) continue; const f = broomHit(x, z, p); if (!f) continue;
+      const x = b.p[i * 3], y = b.p[i * 3 + 1], z = b.p[i * 3 + 2]; if (!broomLevel(y, base, p) || y > base + 1.2) continue; const f = broomHit(x, z, p, B); if (!f) continue;
       const s = f * 4 * dt / 60; b.q[i * 3] -= V[0] * s; b.q[i * 3 + 1] -= 0.5 * s; b.q[i * 3 + 2] -= V[2] * s; touched = true; // Δv = V·f·4·dt
     }
     if (touched) { rd.sleep = 0; rd.still = 0; }
   }
   // escombros de explosiones (bloques que vuelan o ya en el suelo)
   if (typeof DEB !== 'undefined') for (const e of DEB.list) {
-    if (e.dim !== p.dim || !broomLevel(e.y - 0.4, base, p)) continue; const f = broomHit(e.x, e.z, p); if (!f) continue;
+    if (e.dim !== p.dim || !broomLevel(e.y - 0.4, base, p)) continue; const f = broomHit(e.x, e.z, p, B); if (!f) continue;
     e.vx += (V[0] - e.vx) * Math.min(1, 3 * f * dt); e.vz += (V[2] - e.vz) * Math.min(1, 3 * f * dt); e.rest = 0; e.onGround = false; if (e.vy < 0.5) e.vy = 0.8 * f;
   }
   // nieve suelta (bolas y fragmentos) usa los escombros; el fluido continuo usa el colisionador de flEntities

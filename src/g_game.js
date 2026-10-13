@@ -160,7 +160,7 @@ function rayEntity(ox, oy, oz, dx, dy, dz, maxD, dim) {
   let best = null, bt = maxD;
   for (const e of G.entities.values()) {
     if (e.dim !== dim || e.removed || e.dead || e.type === 'item' || (e instanceof Projectile && e.type !== 'fireball')) continue;
-    const hw = e.w / 2 + 0.1; const y0 = e.boat && e.capsized ? e.y - e.h : e.y; const h = rayBox(ox, oy, oz, dx, dy, dz, e.x - hw, y0, e.z - hw, e.x + hw, y0 + e.h, e.z + hw);
+    const hw = e.w / 2 + 0.1; const y0 = e.isBoat && e.capsized ? e.y - e.h : e.y; const h = rayBox(ox, oy, oz, dx, dy, dz, e.x - hw, y0, e.z - hw, e.x + hw, y0 + e.h, e.z + hw);
     if (h && h.t < bt) { bt = h.t; best = e; }
   }
   return best ? { e: best, t: bt } : null;

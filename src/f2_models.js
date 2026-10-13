@@ -126,7 +126,7 @@ function drawEntity(e, alpha, t) {
   if (e.ragdoll) return; // lo dibuja drawRagdolls
   const x = lerp(e.px ?? e.x, e.x, alpha), y = lerp(e.py ?? e.y, e.y, alpha), z = lerp(e.pz ?? e.z, e.z, alpha), yaw = lerpAngle(e.pyaw ?? e.yaw, e.yaw, alpha);
   const light = entLight(e); const flash = e.hurtTime > 0 || (e.dead && e.deathTime) ? [0.7, 0, 0, 0.45] : e.fuse > 0 && (e.fuse >> 2) % 2 ? [1, 1, 1, 0.6] : null;
-  if (e.boat) return drawBoat(e, x, y, z, light, alpha);
+  if (e.isBoat) return drawBoat(e, x, y, z, light, alpha);
   if (e.type === 'item') return drawItemEnt(e, x, y, z, light, t);
   if (e instanceof Projectile || e.proxyProj) return drawProj(e, x, y, z, yaw, light, t);
   if (e.type === 'player') return drawPlayerModel(e, x, y, z, yaw, light, flash, t);

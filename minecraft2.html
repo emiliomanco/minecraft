@@ -4515,7 +4515,7 @@ function extinguishAt(world, q) {
 // ------------------------------------------------------------ daño
 function hurtEntity(e, amount, attacker, kx = 0, ky = 0, kz = 0, cause) {
   if (e.dead || e.removed) return false;
-  if (e.boat) return false; // los botes se rompen a golpes (boatHit), no por daño
+  if (e.isBoat) return false; // los botes se rompen a golpes (boatHit), no por daño
   if (e === G.player) return G.player.damage(amount, cause, attacker, kx, ky, kz);
   if (e.remotePlayer) { netSendTo(e.conn, { t: 'hurt', a: amount, kx, ky, kz, c: cause }); return true; }
   if (e.proxy) { netSend({ t: 'atk', id: e.hostId || e.id, a: amount, kx, ky, kz }); e.hurtTime = 10; return true; }
@@ -4739,7 +4739,7 @@ function entityTick(e, dt) {
   e.savePrev(); e.age++;
   const w = e.world; if (!w) { e.removed = true; return; }
   const cx = Math.floor(e.x) >> 4, cz = Math.floor(e.z) >> 4; if (!w.chunk(cx, cz)) return; // congelado fuera de zona cargada
-  if (e.boat) return boatTick(e, dt, w);
+  if (e.isBoat) return boatTick(e, dt, w);
   if (e.type === 'item') return itemTick(e, dt, w);
   if (e instanceof Projectile) return projTick(e, dt, w);
   if (!(e instanceof Mob)) return;
@@ -5168,7 +5168,7 @@ function drawEntity(e, alpha, t) {
   if (e.ragdoll) return; // lo dibuja drawRagdolls
   const x = lerp(e.px ?? e.x, e.x, alpha), y = lerp(e.py ?? e.y, e.y, alpha), z = lerp(e.pz ?? e.z, e.z, alpha), yaw = lerpAngle(e.pyaw ?? e.yaw, e.yaw, alpha);
   const light = entLight(e); const flash = e.hurtTime > 0 || (e.dead && e.deathTime) ? [0.7, 0, 0, 0.45] : e.fuse > 0 && (e.fuse >> 2) % 2 ? [1, 1, 1, 0.6] : null;
-  if (e.boat) return drawBoat(e, x, y, z, light, alpha);
+  if (e.isBoat) return drawBoat(e, x, y, z, light, alpha);
   if (e.type === 'item') return drawItemEnt(e, x, y, z, light, t);
   if (e instanceof Projectile || e.proxyProj) return drawProj(e, x, y, z, yaw, light, t);
   if (e.type === 'player') return drawPlayerModel(e, x, y, z, yaw, light, flash, t);
@@ -5413,7 +5413,7 @@ function rayEntity(ox, oy, oz, dx, dy, dz, maxD, dim) {
   let best = null, bt = maxD;
   for (const e of G.entities.values()) {
     if (e.dim !== dim || e.removed || e.dead || e.type === 'item' || (e instanceof Projectile && e.type !== 'fireball')) continue;
-    const hw = e.w / 2 + 0.1; const y0 = e.boat && e.capsized ? e.y - e.h : e.y; const h = rayBox(ox, oy, oz, dx, dy, dz, e.x - hw, y0, e.z - hw, e.x + hw, y0 + e.h, e.z + hw);
+    const hw = e.w / 2 + 0.1; const y0 = e.isBoat && e.capsized ? e.y - e.h : e.y; const h = rayBox(ox, oy, oz, dx, dy, dz, e.x - hw, y0, e.z - hw, e.x + hw, y0 + e.h, e.z + hw);
     if (h && h.t < bt) { bt = h.t; best = e; }
   }
   return best ? { e: best, t: bt } : null;
@@ -6132,7 +6132,7 @@ function currentTarget() {
 function attackEntity(e) {
   const p = G.player; const s = p.held(); const d = s ? REG[s.id] : null; let dmg = d && d.dmg ? d.dmg : 1; const sh = enchLvl(s, 'sharpness'); if (sh) dmg += 0.5 * sh + 0.5; const fa = enchLvl(s, 'fire_aspect'); if (fa && e.type !== 'player') e.fire = Math.max(e.fire || 0, 80 * fa);
   if (G.gameMode === 'spectator') return;
-  if (e.boat) { boatHit(e, p); p.swing = 1; return; }
+  if (e.isBoat) { boatHit(e, p); p.swing = 1; return; }
   const crit = !p.onGround && p.vy < 0 && !p.inWater; if (crit) { dmg *= 1.5; for (let i = 0; i < 12; i++) P_({ x: e.x, y: e.y + e.h * 0.7, z: e.z, vx: (Math.random() - 0.5) * 5, vy: Math.random() * 4, vz: (Math.random() - 0.5) * 5, life: 0.5, size: 0.1, layer: TEX.spark, add: true, emis: 2, r: 0.9, g: 0.9, b: 0.6, grav: 10 }); }
   if (s && s.id === ID.mace && p.fallDist > 1.5) { dmg += Math.floor(p.fallDist) * 2; p.fallDist = 0; p.vy = 4; explosionFX(p.dim, e.x, e.y, e.z, 0.5); }
   const kb = p.sprinting ? 9 : 5; const kx = -Math.sin(p.yaw) * kb, kz = -Math.cos(p.yaw) * kb;
@@ -6180,7 +6180,7 @@ function useItem(hit) {
     const e = hit.ent;
     if (s && s.id === ID.shears && e.type === 'sheep' && !e.sheared) { e.sheared = true; dropItem(e.dim, e.x, e.y + 1, e.z, { id: ID.white_wool, c: 1 + (Math.random() * 3 | 0) }); damageItem(p.inv, p.sel, 1); return true; }
     if (s && s.id === ID.bucket && (e.type === 'cow' || e.type === 'goat')) { consumeHeld(p); giveItem(p, { id: ID.milk_bucket, c: 1 }); return true; }
-    if (e.boat) { boatMount(p, e); return true; }
+    if (e.isBoat) { boatMount(p, e); return true; }
     if (e.type === 'villager') { openTrade(e); return true; }
     if (s && s.id === ID.name_tag) { e.persist = true; e.name = 'Mascota'; consumeHeld(p); return true; }
   }
@@ -6472,6 +6472,8 @@ function hostHandle(c, m) {
     case 'chat': { const txt = m.sys ? m.m : '<' + (c.ent ? c.ent.name : '?') + '> ' + m.m; chatMsg(txt, m.sys ? '#ff8' : null); netBroadcast({ t: 'chat', m: txt, sys: m.sys }); break; }
     case 'st': { if (c.ent) { c.ent.state = m.s; n.states[c.ent.name] = m.s; } break; }
     case 'tnt': { if (!w) return; igniteTNT(w, m.x, m.y, m.z); break; }
+    case 'boat': boatNetRecv(c, m); break;
+    case 'brm': { const e = c.ent; if (e && Array.isArray(m.h) && Array.isArray(m.v)) broomPush(e, Math.floor(e.y + 0.01), clamp(+m.dt || 0.05, 0, 0.1), { head: m.h, v: m.v }); break; }
     case 'boom': { if (!w) return; explode(w, m.x, m.y, m.z, m.p, true, null); break; }
     case 'summon': { spawnMob(m.ty, m.d, m.x, m.y, m.z); break; }
     case 'gm': { if (c.ent) c.ent.creative = m.m === 'creative' || m.m === 'spectator'; break; }
@@ -6492,6 +6494,7 @@ function hostNetTick() {
       if (e.dim !== p.dim || e.remotePlayer || e.removed) continue; if (Math.abs(e.x - p.x) > 96 || Math.abs(e.z - p.z) > 96) continue;
       const o = { i: e.id, ty: e.type, x: +e.x.toFixed(2), y: +e.y.toFixed(2), z: +e.z.toFixed(2), yw: +e.yaw.toFixed(2) };
       if (e instanceof Mob) { o.hp = e.hp; o.mh = e.maxHp; o.ht = e.hurtTime; o.f = e.fuse; o.op = e.open; o.dt = e.deathTime; if (e.color) o.c = e.color; o.tg = e.target ? 1 : 0; if (e.laserT) o.lt = e.laserT.id; o.sw = e.swing; }
+      else if (e.isBoat) boatNetState(e, o);
       else if (e.type === 'item') o.s = e.stack; else if (e.type === 'falling_block') o.b = e.block; else if (e.type === 'tnt') o.fu = e.fuse; else { o.vx = e.vx; o.vy = e.vy; o.vz = e.vz; o.st = e.stuck; o.pt = e.pitch; }
       list.push(o);
     }
@@ -6553,11 +6556,12 @@ function updateProxyEntities(dim, list) {
   for (const o of list) {
     const key = 'e' + o.i; seen.add(key); let e = G.entities.get(key);
     if (!e) {
-      if (MOB[o.ty]) e = new Mob(o.ty, dim, o.x, o.y, o.z); else if (o.ty === 'item') e = new ItemEnt(dim, o.x, o.y, o.z, o.s); else { e = new Projectile(o.ty, dim, o.x, o.y, o.z, o.vx || 0, o.vy || 0, o.vz || 0, null); }
+      if (MOB[o.ty]) e = new Mob(o.ty, dim, o.x, o.y, o.z); else if (o.ty === 'boat') e = new Boat(dim, o.x, o.y, o.z, 0); else if (o.ty === 'item') e = new ItemEnt(dim, o.x, o.y, o.z, o.s); else { e = new Projectile(o.ty, dim, o.x, o.y, o.z, o.vx || 0, o.vy || 0, o.vz || 0, null); }
       e.proxy = true; e.hostId = o.i; e.id = key; G.entities.set(key, e); e.x = o.x; e.y = o.y; e.z = o.z;
     }
     e.tx = o.x; e.ty = o.y; e.tz = o.z; e.yaw = o.yw; e.dim = dim;
     if (e instanceof Mob) { e.hp = o.hp; e.hurtTime = o.ht; e.fuse = o.f; e.open = o.op; e.deathTime = o.dt; e.dead = o.dt > 0; if (o.c) e.color = o.c; e.target = o.tg ? G.player : null; e.laser = o.lt ? 1 : 0; e.laserT = o.lt ? (o.lt === G.myNetId ? G.player : G.entities.get('pl' + o.lt)) : null; e.swing = o.sw; }
+    else if (e.isBoat) boatNetApply(e, o);
     else if (e.type === 'item') e.stack = o.s; else if (o.b) e.block = o.b; if (o.fu !== undefined) e.fuse = o.fu; if (o.pt !== undefined) e.pitch = o.pt;
   }
   for (const [k, e] of G.entities) if (e.proxy && e.type !== 'player' && e.dim === dim && !seen.has(k)) G.entities.delete(k);
@@ -6567,7 +6571,7 @@ function clientNetTick() {
   netSend({ t: 'p', x: +p.x.toFixed(3), y: +p.y.toFixed(3), z: +p.z.toFixed(3), yw: +p.yaw.toFixed(3), pt: +p.pitch.toFixed(3), dim: p.dim, sn: p.sneaking, h: p.held() ? p.held().id : 0, ar: p.armor.map(a => a ? a.id : 0), hp: p.hp, cr: G.gameMode === 'creative', sp: G.gameMode === 'spectator', dead: p.dead, sw: p.swing, gl: p.gliding });
   if (G.tick % 100 === 0) netSend({ t: 'st', s: playerState(p) });
 }
-function smoothProxies(dt) { for (const e of G.entities.values()) { if (!e.proxy) continue; if (e.tx === undefined) continue; const k = Math.min(1, dt * 12); const ox = e.x, oz = e.z; e.x += (e.tx - e.x) * k; e.y += (e.ty - e.y) * k; e.z += (e.tz - e.z) * k; e.px = e.x; e.py = e.y; e.pz = e.z; e.pyaw = e.yaw; if (e.type !== 'player') { const hd = Math.hypot(e.x - ox, e.z - oz); e.walk += hd * 1.5; e.walkAmt = lerp(e.walkAmt, Math.min(1, hd / dt / 3), 0.2); } else { const hd = Math.hypot(e.x - ox, e.z - oz); e.walk += hd; e.walkAmt = lerp(e.walkAmt || 0, Math.min(1, hd / Math.max(dt, 0.001) / 4), 0.2); } } }
+function smoothProxies(dt) { for (const e of G.entities.values()) { if (!e.proxy) continue; if (e.tx === undefined) continue; if (e.isBoat && e.tr) { const k2 = Math.min(1, dt * 12); for (let i = 0; i < 9; i++) e.rot[i] += (e.tr[i] - e.rot[i]) * k2; e.prot = e.rot; } const k = Math.min(1, dt * 12); const ox = e.x, oz = e.z; e.x += (e.tx - e.x) * k; e.y += (e.ty - e.y) * k; e.z += (e.tz - e.z) * k; e.px = e.x; e.py = e.y; e.pz = e.z; e.pyaw = e.yaw; if (e.type !== 'player') { const hd = Math.hypot(e.x - ox, e.z - oz); e.walk += hd * 1.5; e.walkAmt = lerp(e.walkAmt, Math.min(1, hd / dt / 3), 0.2); } else { const hd = Math.hypot(e.x - ox, e.z - oz); e.walk += hd; e.walkAmt = lerp(e.walkAmt || 0, Math.min(1, hd / Math.max(dt, 0.001) / 4), 0.2); } } }
 
 // ===== j_ragdoll.js
 // ============================================================================
@@ -9146,41 +9150,43 @@ function broomUse(p) {
   if (!p._brSnd || now - p._brSnd > 260 && Math.abs(Math.cos(BROOM.ph)) > 0.9) { p._brSnd = now; playSound('step', BROOM.head[0], BROOM.head[1], BROOM.head[2], 0.5, ID.sand); }
   p.swing = Math.max(p.swing || 0, 0.01);
   broomPush(p, base, dt);
+  // en multijugador las entidades las simula el anfitrión: se le manda el barrido (unas 20 veces por segundo)
+  if (G.net && G.net.role === 'client' && now - (BROOM.sent || 0) > 50) { BROOM.sent = now; netSend({ t: 'brm', h: BROOM.head.map(v => +v.toFixed(2)), v: BROOM.v.map(v => +v.toFixed(2)), dt: 0.05 }); }
 }
 function broomActive() { return BROOM.active && performance.now() - BROOM.t < 120; }
 // ¿esta altura (pies de la cosa) está al nivel del jugador?
 function broomLevel(y, base, p) { return y >= base - 0.05 && y < p.y + 1.8; }
 // ¿punto dentro de la zona barrida (cerca de la cabeza de la escoba, delante del jugador)?
-function broomHit(x, z, p) {
-  const hx = BROOM.head[0], hz = BROOM.head[2]; const d = Math.hypot(x - hx, z - hz); if (d > BROOM_R + 0.6) return 0;
+function broomHit(x, z, p, B = BROOM) {
+  const hx = B.head[0], hz = B.head[2]; const d = Math.hypot(x - hx, z - hz); if (d > BROOM_R + 0.6) return 0;
   const fx = -Math.sin(p.yaw), fz = -Math.cos(p.yaw); const rx = x - p.x, rz = z - p.z; const rl = Math.hypot(rx, rz) || 1;
   if ((rx * fx + rz * fz) / rl < -0.2) return 0; // detrás del jugador no
   return clamp(1 - d / (BROOM_R + 0.6), 0, 1);
 }
-function broomPush(p, base, dt) {
-  const V = BROOM.v; const k = 20;
+function broomPush(p, base, dt, B = BROOM) {
+  const V = B.v; const k = 20;
   // entidades (mobs, objetos tirados, botes): un empujón en la dirección del barrido
   for (const e of G.entities.values()) {
     if (e.removed || e.dead || e === p || e.dim !== p.dim || e instanceof Projectile) continue;
     if (e.ragdoll) continue; // el ragdoll se empuja por sus cuerpos
-    if (!broomLevel(e.y, base, p)) continue; const f = broomHit(e.x, e.z, p); if (!f) continue;
-    const m = e.type === 'item' ? 1 : e.boat ? 0.5 : (e instanceof Mob ? 0.35 : 0.5);
+    if (!broomLevel(e.y, base, p)) continue; const f = broomHit(e.x, e.z, p, B); if (!f) continue;
+    const m = e.type === 'item' ? 1 : e.isBoat ? 0.5 : (e instanceof Mob ? 0.35 : 0.5);
     e.vx = (e.vx || 0) + (V[0] - (e.vx || 0)) * Math.min(1, k * f * m * dt); e.vz = (e.vz || 0) + (V[2] - (e.vz || 0)) * Math.min(1, k * f * m * dt);
     if (e.type === 'item') { e.onGround = false; e.vy = Math.max(e.vy || 0, 1.6 * f); }
-    if (e.boat) { e.wy = (e.wy || 0) + (V[0] * (e.z - p.z) - V[2] * (e.x - p.x)) * 0.02 * f; }
+    if (e.isBoat) { e.wy = (e.wy || 0) + (V[0] * (e.z - p.z) - V[2] * (e.x - p.x)) * 0.02 * f; }
   }
   // ragdolls: se desplaza el punto anterior de cada cuerpo (verlet) → ganan velocidad
   if (typeof RAG !== 'undefined') for (const rd of RAG.list) {
     if (rd.dim !== p.dim) continue; let touched = false;
     for (const b of rd.bodies) for (let i = 0; i < 4; i++) {
-      const x = b.p[i * 3], y = b.p[i * 3 + 1], z = b.p[i * 3 + 2]; if (!broomLevel(y, base, p) || y > base + 1.2) continue; const f = broomHit(x, z, p); if (!f) continue;
+      const x = b.p[i * 3], y = b.p[i * 3 + 1], z = b.p[i * 3 + 2]; if (!broomLevel(y, base, p) || y > base + 1.2) continue; const f = broomHit(x, z, p, B); if (!f) continue;
       const s = f * 4 * dt / 60; b.q[i * 3] -= V[0] * s; b.q[i * 3 + 1] -= 0.5 * s; b.q[i * 3 + 2] -= V[2] * s; touched = true; // Δv = V·f·4·dt
     }
     if (touched) { rd.sleep = 0; rd.still = 0; }
   }
   // escombros de explosiones (bloques que vuelan o ya en el suelo)
   if (typeof DEB !== 'undefined') for (const e of DEB.list) {
-    if (e.dim !== p.dim || !broomLevel(e.y - 0.4, base, p)) continue; const f = broomHit(e.x, e.z, p); if (!f) continue;
+    if (e.dim !== p.dim || !broomLevel(e.y - 0.4, base, p)) continue; const f = broomHit(e.x, e.z, p, B); if (!f) continue;
     e.vx += (V[0] - e.vx) * Math.min(1, 3 * f * dt); e.vz += (V[2] - e.vz) * Math.min(1, 3 * f * dt); e.rest = 0; e.onGround = false; if (e.vy < 0.5) e.vy = 0.8 * f;
   }
   // nieve suelta (bolas y fragmentos) usa los escombros; el fluido continuo usa el colisionador de flEntities
@@ -9203,10 +9209,10 @@ const BOAT_L = 2.3, BOAT_W = 1.25, BOAT_H = 0.6;
 const BOAT_PTS = [];
 for (const z of [-1, -0.33, 0.33, 1]) for (const x of [-1, 1]) BOAT_PTS.push([x * BOAT_W * 0.45, 0, z * BOAT_L * 0.45, 1]);
 for (const z of [-1, 1]) BOAT_PTS.push([0, 0, z * BOAT_L * 0.5, 1]);
-for (const z of [-1, 0, 1]) for (const x of [-1, 1]) BOAT_PTS.push([x * BOAT_W * 0.5, BOAT_H, z * BOAT_L * 0.45, 0.8]);
+for (const z of [-1, 0, 1]) for (const x of [-1, 1]) BOAT_PTS.push([x * BOAT_W * 0.5, BOAT_H, z * BOAT_L * 0.45, 0.45]);
 class Boat extends Entity {
   constructor(dim, x, y, z, yaw) {
-    super('boat', dim, x, y, z); this.boat = true; this.w = BOAT_W + 0.1; this.h = BOAT_H; this.hp = 3; this.rider = null; this.hits = 0;
+    super('boat', dim, x, y, z); this.isBoat = true; this.w = BOAT_W + 0.1; this.h = BOAT_H; this.hp = 3; this.rider = null; this.hits = 0;
     this.yaw = yaw || 0; this.rot = boatRotYaw(this.yaw); this.prot = this.rot.slice(); this.wx = 0; this.wy = 0; this.wz = 0; this.capsized = false; this.rest = 0;
   }
 }
@@ -9229,7 +9235,7 @@ function boatTick(e, dt, w) {
   const n = 4; const h = dt / n;
   for (let s = 0; s < n; s++) boatStep(e, h, w);
   e.yaw = Math.atan2(e.rot[6], e.rot[8]);
-  if (e.rider && (e.rider.dead || e.rider.boat !== e)) { e.rider = null; e.ctl = null; }
+  if (e.rider && (e.rider.dead || e.rider.removed || e.rider.boat !== e)) { e.rider = null; e.ctl = null; }
   const up = e.rot[4]; const was = e.capsized; e.capsized = was ? up < 0.6 : up < 0.3; // de lado o boca abajo: volcado (histéresis)
   if (e.capsized && !was) { if (e.rider) boatDismount(e.rider, true); playSound('splash', e.x, e.y, e.z, 0.8); }
   if (e.hurtTime > 0) e.hurtTime--;
@@ -9237,7 +9243,7 @@ function boatTick(e, dt, w) {
 }
 function boatStep(e, h, w) {
   const R = e.rot; let fx = 0, fy = -9.8, fz = 0, tx = 0, ty = 0, tz = 0; let wet = 0, ux = 0, uz = 0;
-  const kB = 9.8 / (10 * 0.22); // con unos 10 puntos hundidos 0,22 se equilibra
+  const kB = 9.8 / (10 * 0.15); // con unos 10 puntos hundidos 0,15 se equilibra: más reserva de flotación (aguanta olas y peso, pero inundado de lado o volcado sí se hunde más)
   for (const P of BOAT_PTS) {
     const r = bMul(R, P); const px = e.x + r[0], py = e.y + r[1], pz = e.z + r[2];
     // velocidad del punto: v + ω × r
@@ -9253,7 +9259,7 @@ function boatStep(e, h, w) {
   }
   if (wet) { fx += (ux / wet - e.vx) * 0.6; fz += (uz / wet - e.vz) * 0.6; }
   // remos del jinete
-  if (e.rider && !e.capsized && e.ctl) { const c = e.ctl; const fwd = [-R[6], 0, -R[8]]; const th = (c.f ? 6 : 0) - (c.b ? 3 : 0); fx += fwd[0] * th * (wet ? 1 : 0.15); fz += fwd[2] * th * (wet ? 1 : 0.15); ty += ((c.l ? 1 : 0) - (c.r ? 1 : 0)) * 5 * (wet ? 1 : 0.3); }
+  if (e.rider && !e.capsized && e.ctl) { const c = e.ctl; const fwd = [-R[6], 0, -R[8]]; const th = (c.f ? 12 : 0) - (c.b ? 6 : 0); /* el doble que al principio (iban muy lentos) */ fx += fwd[0] * th * (wet ? 1 : 0.04); fz += fwd[2] * th * (wet ? 1 : 0.04); ty += ((c.l ? 1 : 0) - (c.r ? 1 : 0)) * 5 * (wet ? 1 : 0.3); }
   if (e.rider) fy -= 2.5; // peso del jinete (centro de masa más alto: vuelca antes)
   const I = [1.1, 1.6, 0.55]; // inercia: cabeceo (x) cuesta más que el balanceo (z)
   e.vx += fx * h; e.vy += fy * h; e.vz += fz * h;
@@ -9267,30 +9273,37 @@ function boatStep(e, h, w) {
 // ---- montar / bajar
 function boatMount(p, e) {
   if (e.capsized) { showActionMsg('El bote está volcado: métete debajo y golpéalo para enderezarlo'); return; }
-  if (e.rider && e.rider !== p) return; p.boat = e; e.rider = p; e.ctl = null; p.vx = p.vy = p.vz = 0;
+  if (e.rider && e.rider !== p) return;
+  if (e.proxy) { netSend({ t: 'boat', a: 'mount', id: e.hostId }); p._boatOffT = 0; return; } // lo confirma el anfitrión (lista de entidades) p.boat = e; e.rider = p; e.ctl = null; p.vx = p.vy = p.vz = 0;
 }
 function boatDismount(p, thrown) {
   const e = p.boat; if (!e) return; p.boat = null; e.rider = null; e.ctl = null;
+  if (p.remotePlayer) return; // jugador remoto en el anfitrión: su posición la manda su cliente
+  if (e.proxy) { netSend({ t: 'boat', a: 'off', id: e.hostId }); p._boatOffT = performance.now(); p._bctl = -1; }
   const R = e.rot; p.x = e.x + R[0] * 1.1; p.z = e.z + R[2] * 1.1; p.y = e.y + (thrown ? 0.2 : 0.8); p.vx = e.vx; p.vy = thrown ? 1.5 : 2; p.vz = e.vz; p.fallDist = 0;
 }
 // el jugador va sentado: sigue al bote; W/S reman, A/D giran; agacharse para bajar
 function boatRide(p, dt, input, a = 1) {
   const e = p.boat; if (!e || e.removed || e.dim !== p.dim) { p.boat = null; return; }
   if (input.sneak) { boatDismount(p); return; }
-  e.ctl = input; const s = bMul(e.rot, [0, 0.25, 0.15]);
+  if (e.proxy) { const k = (input.f ? 1 : 0) | (input.b ? 2 : 0) | (input.l ? 4 : 0) | (input.r ? 8 : 0); if (k !== p._bctl) { p._bctl = k; netSend({ t: 'boat', a: 'ctl', id: e.hostId, k }); } }
+  else e.ctl = input;
+  const s = bMul(e.rot, [0, 0.25, 0.15]);
   p.x = lerp(e.px, e.x, a) + s[0]; p.y = lerp(e.py, e.y, a) + s[1]; p.z = lerp(e.pz, e.z, a) + s[2]; p.vx = e.vx; p.vy = e.vy; p.vz = e.vz; p.onGround = true; p.fallDist = 0; p.inWater = false; p.eyeInWater = false;
 }
 // golpe al bote: desde debajo (cabeza bajo el casco) lo endereza; si no, a los tres golpes se rompe y suelta el objeto
-function boatHit(e, p) {
-  const under = Math.hypot(p.x - e.x, p.z - e.z) < 1.6 && p.eye < e.y + 0.4;
+function boatHit(e, p, under, creative) {
+  if (under === undefined) under = Math.hypot(p.x - e.x, p.z - e.z) < 1.6 && p.eye < e.y + 0.4;
+  if (creative === undefined) creative = G.gameMode === 'creative';
+  if (e.proxy) { netSend({ t: 'boat', a: 'hit', id: e.hostId, u: under ? 1 : 0, cr: creative ? 1 : 0 }); playSound('hit', e.x, e.y, e.z, 0.6, ID.oak_planks); return; }
   if (e.capsized && under) {
     e.rot = boatRotYaw(e.yaw); e.wx = e.wz = 0; e.wy = 0; e.vy = 3; e.y += 0.3; e.capsized = false;
-    playSound('splash', e.x, e.y, e.z, 0.7); showActionMsg('Bote enderezado'); return;
+    playSound('splash', e.x, e.y, e.z, 0.7); if (p === G.player) showActionMsg('Bote enderezado'); return;
   }
   e.hits++; e.hurtTime = 6; e.wz += (Math.random() - 0.5) * 1.5; playSound('hit', e.x, e.y, e.z, 0.6, ID.oak_planks);
-  if (e.hits >= 3 || G.gameMode === 'creative') {
+  if (e.hits >= 3 || creative) {
     if (e.rider) boatDismount(e.rider); e.removed = true;
-    if (G.gameMode !== 'creative') dropItem(e.dim, e.x, e.y + 0.5, e.z, { id: ID.oak_boat, c: 1 }, 0, 2, 0);
+    if (!creative) dropItem(e.dim, e.x, e.y + 0.5, e.z, { id: ID.oak_boat, c: 1 }, 0, 2, 0);
     playSound('break', e.x, e.y, e.z, 0.8, ID.oak_planks);
   }
 }
@@ -9301,7 +9314,8 @@ function boatPlace(p, w) {
   if (bd && (bd.liquid === 1 || bd.inWater)) { const s = boatSurf(w, x, hit.y + 0.5, z); y = (s === s ? s : hit.y + 1) - 0.15; }
   else y = hit.y + 1 + (hit.n ? 0 : 0);
   if (w.solidAt(Math.floor(x), Math.floor(y + 0.3), Math.floor(z))) return false;
-  const e = new Boat(p.dim, x, y, z, p.yaw); G.entities.set(e.id, e); playSound('place', x, y, z, 0.7, ID.oak_planks); return true;
+  if (G.net && G.net.role === 'client') netSend({ t: 'boat', a: 'place', d: p.dim, x: +x.toFixed(3), y: +y.toFixed(3), z: +z.toFixed(3), yw: +p.yaw.toFixed(3) });
+  else { const e = new Boat(p.dim, x, y, z, p.yaw); G.entities.set(e.id, e); } playSound('place', x, y, z, 0.7, ID.oak_planks); return true;
 }
 // ---- dibujo: casco con cajas (fondo, costados, proa, popa y banco)
 const BOAT_BOXES = [
@@ -9320,6 +9334,27 @@ function drawBoat(e, x, y, z, light, alpha) {
     const t = bMul(r, o); m[12] = x + t[0] - cam[0]; m[13] = y + t[1] - cam[1]; m[14] = z + t[2] - cam[2]; m[15] = 1;
     drawBox(m, L, light, null, flash, 0);
   }
+}
+// ---- multijugador: el anfitrión simula; los clientes ven réplicas y mandan sus acciones
+// anfitrión: mensaje de un cliente (c.ent es su jugador remoto)
+function boatNetRecv(c, m) {
+  const pl = c.ent; if (!pl) return;
+  if (m.a === 'place') { if (G.worlds && G.worlds[m.d]) { const e = new Boat(m.d, m.x, m.y, m.z, m.yw); G.entities.set(e.id, e); } return; }
+  const e = G.entities.get(m.id); if (!e || !e.isBoat || e.removed) return;
+  if (m.a === 'mount') { if (!e.capsized && (!e.rider || e.rider === pl)) { if (pl.boat && pl.boat !== e && pl.boat.rider === pl) pl.boat.rider = null; e.rider = pl; pl.boat = e; e.ctl = null; } }
+  else if (m.a === 'off') { if (e.rider === pl) { e.rider = null; e.ctl = null; } if (pl.boat === e) pl.boat = null; }
+  else if (m.a === 'ctl') { if (e.rider === pl) e.ctl = { f: m.k & 1, b: m.k & 2, l: m.k & 4, r: m.k & 8 }; }
+  else if (m.a === 'hit') boatHit(e, pl, !!m.u, !!m.cr);
+}
+// anfitrión: datos del bote para la lista de entidades
+function boatNetState(e, o) { o.r = e.rot.map(v => +v.toFixed(3)); o.cp = e.capsized ? 1 : 0; o.ht = e.hurtTime; o.rd = e.rider ? e.rider.id : 0; }
+// cliente: aplicar el estado recibido a la réplica y al propio jugador (montado / tirado al agua)
+function boatNetApply(e, o) {
+  e.tr = o.r; e.hurtTime = o.ht || 0; const was = e.capsized; e.capsized = !!o.cp; const p = G.player; if (!p) return;
+  const mine = o.rd === G.myNetId; e.rider = mine ? p : null;
+  if (mine && p.boat !== e && performance.now() - (p._boatOffT || 0) > 1500) { p.boat = e; p._bctl = -1; p.vx = p.vy = p.vz = 0; }
+  else if (!mine && p.boat === e) { p.boat = null; p._bctl = -1; const R = e.rot; p.x = e.x + R[0] * 1.1; p.z = e.z + R[2] * 1.1; p.y = e.y + 0.3; p.vy = 1.5; p.fallDist = 0; }
+  if (e.capsized && !was) playSound('splash', e.x, e.y, e.z, 0.8);
 }
 
 // ===== i_main.js
@@ -9421,7 +9456,7 @@ function serializeWorld() {
   for (const d in G.worlds) { const w = G.worlds[d]; const out = {}; for (const c of w.chunks.values()) if (c.modified) out[ckey(c.cx, c.cz)] = { b: rleEncode(c.blocks), m: rleEncode(c.meta), fv: 2, loot: c.loot, sp: c.spawners }; for (const k in w.saved) if (!out[k]) out[k] = w.saved[k]; dims[d] = out; }
   const players = Object.assign({}, G.playerStates || {}); players.__local = playerState(G.player); players.__local.name = G.player.name;
   if (G.net && G.net.role === 'host') for (const c of G.net.conns.values()) if (c.ent && c.ent.state) players[c.ent.name] = c.ent.state;
-  const ents = []; for (const e of G.entities.values()) { if (e.proxy || e.remotePlayer || e.removed || e.dead) continue; if (e instanceof Mob && (e.persist || !e.def.hostile)) ents.push({ k: 'mob', ty: e.type, d: e.dim, x: e.x, y: e.y, z: e.z, hp: e.hp, c: e.color, p: e.persist, n: e.name }); else if (e.type === 'item') ents.push({ k: 'item', d: e.dim, x: e.x, y: e.y, z: e.z, s: e.stack }); else if (e.boat) ents.push({ k: 'boat', d: e.dim, x: e.x, y: e.y, z: e.z, r: e.rot }); }
+  const ents = []; for (const e of G.entities.values()) { if (e.proxy || e.remotePlayer || e.removed || e.dead) continue; if (e instanceof Mob && (e.persist || !e.def.hostile)) ents.push({ k: 'mob', ty: e.type, d: e.dim, x: e.x, y: e.y, z: e.z, hp: e.hp, c: e.color, p: e.persist, n: e.name }); else if (e.type === 'item') ents.push({ k: 'item', d: e.dim, x: e.x, y: e.y, z: e.z, s: e.stack }); else if (e.isBoat) ents.push({ k: 'boat', d: e.dim, x: e.x, y: e.y, z: e.z, r: e.rot }); }
   return { format: 'minecraft2-world', version: 3, name: G.worldName, seed: G.seed, seedStr: G.seedStr, gameMode: G.defaultMode || G.gameMode, curMode: G.gameMode, difficulty: G.difficulty, cheats: G.cheats, time: G.time, rain: G.rain, rainTimer: G.rainTimer, worldSpawn: G.worldSpawn, dragonKilled: G.dragonKilled, endInit: G.endInit, gateway: G.gateway, keepInventory: G.keepInventory, containers: G.containers, spawned: [...G.spawned], dims, players, entities: ents, created: G.created || Date.now(), lastPlayed: Date.now(), structures: G.structures !== false, climate: G.climate || 1, fluid: typeof flSerialize === 'function' ? flSerialize() : null };
 }
 function worldIcon() { try { const c = document.createElement('canvas'); c.width = 64; c.height = 64; c.getContext('2d').drawImage($('gl'), ($('gl').width - $('gl').height) / 2, 0, $('gl').height, $('gl').height, 0, 0, 64, 64); return c.toDataURL('image/jpeg', 0.7); } catch (e) { return null; } }

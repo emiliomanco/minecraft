@@ -74,6 +74,8 @@ function hostHandle(c, m) {
     case 'chat': { const txt = m.sys ? m.m : '<' + (c.ent ? c.ent.name : '?') + '> ' + m.m; chatMsg(txt, m.sys ? '#ff8' : null); netBroadcast({ t: 'chat', m: txt, sys: m.sys }); break; }
     case 'st': { if (c.ent) { c.ent.state = m.s; n.states[c.ent.name] = m.s; } break; }
     case 'tnt': { if (!w) return; igniteTNT(w, m.x, m.y, m.z); break; }
+    case 'boat': boatNetRecv(c, m); break;
+    case 'brm': { const e = c.ent; if (e && Array.isArray(m.h) && Array.isArray(m.v)) broomPush(e, Math.floor(e.y + 0.01), clamp(+m.dt || 0.05, 0, 0.1), { head: m.h, v: m.v }); break; }
     case 'boom': { if (!w) return; explode(w, m.x, m.y, m.z, m.p, true, null); break; }
     case 'summon': { spawnMob(m.ty, m.d, m.x, m.y, m.z); break; }
     case 'gm': { if (c.ent) c.ent.creative = m.m === 'creative' || m.m === 'spectator'; break; }
@@ -94,6 +96,7 @@ function hostNetTick() {
       if (e.dim !== p.dim || e.remotePlayer || e.removed) continue; if (Math.abs(e.x - p.x) > 96 || Math.abs(e.z - p.z) > 96) continue;
       const o = { i: e.id, ty: e.type, x: +e.x.toFixed(2), y: +e.y.toFixed(2), z: +e.z.toFixed(2), yw: +e.yaw.toFixed(2) };
       if (e instanceof Mob) { o.hp = e.hp; o.mh = e.maxHp; o.ht = e.hurtTime; o.f = e.fuse; o.op = e.open; o.dt = e.deathTime; if (e.color) o.c = e.color; o.tg = e.target ? 1 : 0; if (e.laserT) o.lt = e.laserT.id; o.sw = e.swing; }
+      else if (e.isBoat) boatNetState(e, o);
       else if (e.type === 'item') o.s = e.stack; else if (e.type === 'falling_block') o.b = e.block; else if (e.type === 'tnt') o.fu = e.fuse; else { o.vx = e.vx; o.vy = e.vy; o.vz = e.vz; o.st = e.stuck; o.pt = e.pitch; }
       list.push(o);
     }
@@ -155,11 +158,12 @@ function updateProxyEntities(dim, list) {
   for (const o of list) {
     const key = 'e' + o.i; seen.add(key); let e = G.entities.get(key);
     if (!e) {
-      if (MOB[o.ty]) e = new Mob(o.ty, dim, o.x, o.y, o.z); else if (o.ty === 'item') e = new ItemEnt(dim, o.x, o.y, o.z, o.s); else { e = new Projectile(o.ty, dim, o.x, o.y, o.z, o.vx || 0, o.vy || 0, o.vz || 0, null); }
+      if (MOB[o.ty]) e = new Mob(o.ty, dim, o.x, o.y, o.z); else if (o.ty === 'boat') e = new Boat(dim, o.x, o.y, o.z, 0); else if (o.ty === 'item') e = new ItemEnt(dim, o.x, o.y, o.z, o.s); else { e = new Projectile(o.ty, dim, o.x, o.y, o.z, o.vx || 0, o.vy || 0, o.vz || 0, null); }
       e.proxy = true; e.hostId = o.i; e.id = key; G.entities.set(key, e); e.x = o.x; e.y = o.y; e.z = o.z;
     }
     e.tx = o.x; e.ty = o.y; e.tz = o.z; e.yaw = o.yw; e.dim = dim;
     if (e instanceof Mob) { e.hp = o.hp; e.hurtTime = o.ht; e.fuse = o.f; e.open = o.op; e.deathTime = o.dt; e.dead = o.dt > 0; if (o.c) e.color = o.c; e.target = o.tg ? G.player : null; e.laser = o.lt ? 1 : 0; e.laserT = o.lt ? (o.lt === G.myNetId ? G.player : G.entities.get('pl' + o.lt)) : null; e.swing = o.sw; }
+    else if (e.isBoat) boatNetApply(e, o);
     else if (e.type === 'item') e.stack = o.s; else if (o.b) e.block = o.b; if (o.fu !== undefined) e.fuse = o.fu; if (o.pt !== undefined) e.pitch = o.pt;
   }
   for (const [k, e] of G.entities) if (e.proxy && e.type !== 'player' && e.dim === dim && !seen.has(k)) G.entities.delete(k);
@@ -169,4 +173,4 @@ function clientNetTick() {
   netSend({ t: 'p', x: +p.x.toFixed(3), y: +p.y.toFixed(3), z: +p.z.toFixed(3), yw: +p.yaw.toFixed(3), pt: +p.pitch.toFixed(3), dim: p.dim, sn: p.sneaking, h: p.held() ? p.held().id : 0, ar: p.armor.map(a => a ? a.id : 0), hp: p.hp, cr: G.gameMode === 'creative', sp: G.gameMode === 'spectator', dead: p.dead, sw: p.swing, gl: p.gliding });
   if (G.tick % 100 === 0) netSend({ t: 'st', s: playerState(p) });
 }
-function smoothProxies(dt) { for (const e of G.entities.values()) { if (!e.proxy) continue; if (e.tx === undefined) continue; const k = Math.min(1, dt * 12); const ox = e.x, oz = e.z; e.x += (e.tx - e.x) * k; e.y += (e.ty - e.y) * k; e.z += (e.tz - e.z) * k; e.px = e.x; e.py = e.y; e.pz = e.z; e.pyaw = e.yaw; if (e.type !== 'player') { const hd = Math.hypot(e.x - ox, e.z - oz); e.walk += hd * 1.5; e.walkAmt = lerp(e.walkAmt, Math.min(1, hd / dt / 3), 0.2); } else { const hd = Math.hypot(e.x - ox, e.z - oz); e.walk += hd; e.walkAmt = lerp(e.walkAmt || 0, Math.min(1, hd / Math.max(dt, 0.001) / 4), 0.2); } } }
+function smoothProxies(dt) { for (const e of G.entities.values()) { if (!e.proxy) continue; if (e.tx === undefined) continue; if (e.isBoat && e.tr) { const k2 = Math.min(1, dt * 12); for (let i = 0; i < 9; i++) e.rot[i] += (e.tr[i] - e.rot[i]) * k2; e.prot = e.rot; } const k = Math.min(1, dt * 12); const ox = e.x, oz = e.z; e.x += (e.tx - e.x) * k; e.y += (e.ty - e.y) * k; e.z += (e.tz - e.z) * k; e.px = e.x; e.py = e.y; e.pz = e.z; e.pyaw = e.yaw; if (e.type !== 'player') { const hd = Math.hypot(e.x - ox, e.z - oz); e.walk += hd * 1.5; e.walkAmt = lerp(e.walkAmt, Math.min(1, hd / dt / 3), 0.2); } else { const hd = Math.hypot(e.x - ox, e.z - oz); e.walk += hd; e.walkAmt = lerp(e.walkAmt || 0, Math.min(1, hd / Math.max(dt, 0.001) / 4), 0.2); } } }

@@ -304,7 +304,7 @@ function extinguishAt(world, q) {
 // ------------------------------------------------------------ daño
 function hurtEntity(e, amount, attacker, kx = 0, ky = 0, kz = 0, cause) {
   if (e.dead || e.removed) return false;
-  if (e.boat) return false; // los botes se rompen a golpes (boatHit), no por daño
+  if (e.isBoat) return false; // los botes se rompen a golpes (boatHit), no por daño
   if (e === G.player) return G.player.damage(amount, cause, attacker, kx, ky, kz);
   if (e.remotePlayer) { netSendTo(e.conn, { t: 'hurt', a: amount, kx, ky, kz, c: cause }); return true; }
   if (e.proxy) { netSend({ t: 'atk', id: e.hostId || e.id, a: amount, kx, ky, kz }); e.hurtTime = 10; return true; }
@@ -528,7 +528,7 @@ function entityTick(e, dt) {
   e.savePrev(); e.age++;
   const w = e.world; if (!w) { e.removed = true; return; }
   const cx = Math.floor(e.x) >> 4, cz = Math.floor(e.z) >> 4; if (!w.chunk(cx, cz)) return; // congelado fuera de zona cargada
-  if (e.boat) return boatTick(e, dt, w);
+  if (e.isBoat) return boatTick(e, dt, w);
   if (e.type === 'item') return itemTick(e, dt, w);
   if (e instanceof Projectile) return projTick(e, dt, w);
   if (!(e instanceof Mob)) return;
