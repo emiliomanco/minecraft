@@ -96,7 +96,7 @@ function serializeWorld() {
   for (const d in G.worlds) { const w = G.worlds[d]; const out = {}; for (const c of w.chunks.values()) if (c.modified) out[ckey(c.cx, c.cz)] = { b: rleEncode(c.blocks), m: rleEncode(c.meta), fv: 2, loot: c.loot, sp: c.spawners }; for (const k in w.saved) if (!out[k]) out[k] = w.saved[k]; dims[d] = out; }
   const players = Object.assign({}, G.playerStates || {}); players.__local = playerState(G.player); players.__local.name = G.player.name;
   if (G.net && G.net.role === 'host') for (const c of G.net.conns.values()) if (c.ent && c.ent.state) players[c.ent.name] = c.ent.state;
-  const ents = []; for (const e of G.entities.values()) { if (e.proxy || e.remotePlayer || e.removed || e.dead) continue; if (e instanceof Mob && (e.persist || !e.def.hostile)) ents.push({ k: 'mob', ty: e.type, d: e.dim, x: e.x, y: e.y, z: e.z, hp: e.hp, c: e.color, p: e.persist, n: e.name }); else if (e.type === 'item') ents.push({ k: 'item', d: e.dim, x: e.x, y: e.y, z: e.z, s: e.stack }); }
+  const ents = []; for (const e of G.entities.values()) { if (e.proxy || e.remotePlayer || e.removed || e.dead) continue; if (e instanceof Mob && (e.persist || !e.def.hostile)) ents.push({ k: 'mob', ty: e.type, d: e.dim, x: e.x, y: e.y, z: e.z, hp: e.hp, c: e.color, p: e.persist, n: e.name }); else if (e.type === 'item') ents.push({ k: 'item', d: e.dim, x: e.x, y: e.y, z: e.z, s: e.stack }); else if (e.boat) ents.push({ k: 'boat', d: e.dim, x: e.x, y: e.y, z: e.z, r: e.rot }); }
   return { format: 'minecraft2-world', version: 3, name: G.worldName, seed: G.seed, seedStr: G.seedStr, gameMode: G.defaultMode || G.gameMode, curMode: G.gameMode, difficulty: G.difficulty, cheats: G.cheats, time: G.time, rain: G.rain, rainTimer: G.rainTimer, worldSpawn: G.worldSpawn, dragonKilled: G.dragonKilled, endInit: G.endInit, gateway: G.gateway, keepInventory: G.keepInventory, containers: G.containers, spawned: [...G.spawned], dims, players, entities: ents, created: G.created || Date.now(), lastPlayed: Date.now(), structures: G.structures !== false, climate: G.climate || 1, fluid: typeof flSerialize === 'function' ? flSerialize() : null };
 }
 function worldIcon() { try { const c = document.createElement('canvas'); c.width = 64; c.height = 64; c.getContext('2d').drawImage($('gl'), ($('gl').width - $('gl').height) / 2, 0, $('gl').height, $('gl').height, 0, 0, 64, 64); return c.toDataURL('image/jpeg', 0.7); } catch (e) { return null; } }
@@ -142,7 +142,7 @@ function startWorld(data, isNew, netWelcome) {
   if (st) { Object.assign(p, { x: st.x, y: st.y, z: st.z, dim: st.dim || 'overworld', hp: st.hp ?? 20, food: st.food ?? 20, sat: st.sat ?? 5, inv: st.inv || p.inv, armor: st.armor || p.armor, offhand: st.off || null, ender: st.ender || p.ender, spawn: st.spawn || null, sel: st.sel || 0, xp: st.xp || 0, yaw: st.yaw || 0, pitch: st.pitch || 0 }); if (p.hp <= 0) p.hp = 20; }
   else { p.x = G.worldSpawn.x; p.z = G.worldSpawn.z; p.y = -1; p.dim = 'overworld'; }
   if (netWelcome) { G.myNetId = netWelcome.id; p.name = netWelcome.name; G.gameMode = netWelcome.gm; for (const c of (G.net.chunks || [])) applyNetChunk(c); }
-  if (data.entities && !netWelcome) for (const e of data.entities) { if (e.k === 'mob') { const m = spawnMob(e.ty, e.d, e.x, e.y, e.z); if (m) { m.hp = e.hp; if (e.c) m.color = e.c; m.persist = e.p; m.name = e.n; } } else if (e.k === 'item') dropItem(e.d, e.x, e.y, e.z, e.s, 0, 0, 0, 0); }
+  if (data.entities && !netWelcome) for (const e of data.entities) { if (e.k === 'mob') { const m = spawnMob(e.ty, e.d, e.x, e.y, e.z); if (m) { m.hp = e.hp; if (e.c) m.color = e.c; m.persist = e.p; m.name = e.n; } } else if (e.k === 'item') dropItem(e.d, e.x, e.y, e.z, e.s, 0, 0, 0, 0); else if (e.k === 'boat') { const b = new Boat(e.d, e.x, e.y, e.z, 0); if (e.r) { b.rot = e.r.slice(); b.prot = e.r.slice(); } G.entities.set(b.id, b); } }
   if (G.endInit && !netWelcome) { /* ya hay cristales/dragón guardados */ }
   G.world = G.worlds[p.dim]; G.mode = 'loading'; G.loadStart = performance.now();
   showScreen('sLoading'); $('loadTitle').textContent = isNew ? 'Generando mundo' : 'Cargando mundo'; $('hud').style.display = 'none'; $('menuShade').style.display = 'none';
@@ -329,7 +329,8 @@ function gameFrame(dt) {
   if (!pausedSP) { acc += dt * 1000; let n = 0; while (acc >= 50 && n < 4) { gameTick(); acc -= 50; n++; } if (n >= 4) acc = 0; }
   const typing = $('chatIn').classList.contains('on');
   const input = (UI.open || typing || G.paused || p.dead) ? {} : { f: held('forward'), b: held('back'), l: held('left'), r: held('right'), jump: held('jump'), sneak: SETTINGS.ctl.toggleSneak ? !!INPUT.tSneak : held('sneak'), sprint: SETTINGS.ctl.toggleSprint ? (held('forward') ? !!INPUT.tSprint : (INPUT.tSprint = false)) : held('sprint'), useHeld: p.eatT > 0 || p.bowT > 0 };
-  if (!pausedSP && !p.dead && !p.ragdoll) { p.savePrev(); const steps = dt > 0.034 ? 2 : 1; for (let i = 0; i < steps; i++) updatePlayerPhysics(p, dt / steps, input); }
+  if (!pausedSP && !p.dead && !p.ragdoll && p.boat) { p.savePrev(); boatRide(p, dt, input, pausedSP ? 1 : clamp(acc / 50, 0, 1)); }
+  else if (!pausedSP && !p.dead && !p.ragdoll) { p.savePrev(); const steps = dt > 0.034 ? 2 : 1; for (let i = 0; i < steps; i++) updatePlayerPhysics(p, dt / steps, input); }
   if (!pausedSP && p.ragdoll && input.jump && p.ragdoll.alive && p.ragdoll.t > 0.5) p.ragdoll.dur = 0; // saltar = levantarse
   if (!pausedSP && typeof ragUpdate === 'function') ragUpdate(dt);
   if (!pausedSP && typeof debrisUpdate === 'function') { debrisUpdate(dt); boomUpdate(dt); }
@@ -585,7 +586,8 @@ function optPhysics(ui) {
   let v;
   ui.sec('Océanos');
   v = mode('oceans', 'oleaje con olas que crecen con la lluvia y espuma en las crestas.', 'agua del mar plana.');
-  ui.slider('Altura de las olas', ...PK('oceans', 'waves'), 0, 2, 0.05, v2 => v2 === 0 ? 'Mar en calma' : pct(v2), 'Tamaño del oleaje en el mar.', { off: v });
+  ui.slider('Altura de las olas', ...PK('oceans', 'waves'), 0, 5, 0.05, v2 => v2 === 0 ? 'Mar en calma' : pct(v2), 'Tamaño del oleaje en el mar.', { off: v });
+  ui.slider('Calma junto a la orilla', ...PK('oceans', 'shore'), 0, 10, 1, v2 => v2 === 0 ? 'No (olas hasta la orilla)' : v2 + (v2 === 1 ? ' bloque' : ' bloques'), 'Las olas empiezan a esta distancia de la orilla (contada desde la cara de tierra que toca el agua) y crecen poco a poco en los 4 bloques siguientes. Así las olas no dejan al aire los bloques de la orilla.', { off: v });
   ui.cycle('Espuma', ...PK('oceans', 'foam'), [true, false], ['Sí', 'No'], 'Espuma blanca en las crestas de las olas y en las orillas.', { off: v });
   ui.sec('Líquidos (agua y lava)');
   v = mode('liquids', 'el agua y la lava tienen volumen fijo: no hay fuentes infinitas y un cubo recoge solo lo que hay.', 'fuentes infinitas y corrientes de 7 bloques como en el original.');

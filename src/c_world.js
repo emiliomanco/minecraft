@@ -839,7 +839,7 @@ function villageBuild(S, pl, M, style, r) {
     return ddx ? [bx, z + sideSign * (hz - 1 - k)] : [x + sideSign * (hx - 1 - k), bz];
   };
   const [ax, az] = back(0, -1), [bx2, bz2] = back(0, 1);
-  S.set(ax, y, az, ID.bed);
+  { const f = DIR4.findIndex(d => d[0] === -ddx && d[1] === -ddz); S.set(ax, y, az, ID.bed, (f < 0 ? 0 : f) | 4); S.set(ax + ddx, y, az + ddz, ID.bed, f < 0 ? 0 : f); } // cabecera contra la pared del fondo
   const station = pl.type === 'smith' ? ID.blast_furnace : pl.type === 'library' ? ID.bookshelf : [ID.crafting_table, ID.smoker, ID.barrel, ID.smithing_table, ID.furnace][pl.n % 5];
   S.set(bx2, y, bz2, station);
   const [cx2, cz2] = back(1, 1); if (cx2 !== x || cz2 !== z) S.chest(cx2, y, cz2, 'village');

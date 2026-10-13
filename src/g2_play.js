@@ -221,7 +221,7 @@ const CREATIVE_TABS = [['Construcción', i => { const d = REG[i]; return d.isBlo
   ['Colores', i => /wool|terracotta|glass|concrete|carpet/.test(REG[i].name)],
   ['Naturales', i => { const d = REG[i]; return d.isBlock && (/ore|log|leaves|sand|gravel|dirt|grass|nylium|sapling|flower|mushroom|cactus|snow|ice|stone$|netherrack|soul|end_stone|moss|sculk|dripstone|clay|mud|basalt|blackstone|kelp|seagrass|lily|vine|fungus|roots|stem|wart|melon|pumpkin|bush|fern|poppy|dandelion|orchid|cornflower|daisy|amethyst|cane|chorus|petals|debris/.test(d.name)); }],
   ['Funcionales', i => { const d = REG[i]; return d.isBlock && (d.ui || d.light || /portal|spawner|bed|tnt|bars|fence|wall|rail|ladder|slab|scaffold|lever|button|plate|rod|lamp|detector|target|note|slime|honey/.test(d.name)); }],
-  ['Herramientas', i => { const d = REG[i]; return !d.isBlock && (d.tool && d.tool.type !== 'sword' || /bucket|flint_and|extinguisher|shears|compass|clock|spyglass|map|lead|brush|fishing|rocket|saddle|name_tag|bone_meal|eye_of|ender_pearl/.test(d.name)); }],
+  ['Herramientas', i => { const d = REG[i]; return !d.isBlock && (d.tool && d.tool.type !== 'sword' || /bucket|flint_and|extinguisher|shears|compass|clock|spyglass|map|lead|brush|broom|boat|fishing|rocket|saddle|name_tag|bone_meal|eye_of|ender_pearl/.test(d.name)); }],
   ['Combate', i => { const d = REG[i]; return !d.isBlock && (d.armor || (d.tool && d.tool.type === 'sword') || /bow|arrow|shield|trident|mace|totem|elytra|snowball/.test(d.name) || (d.tool && d.tool.type === 'axe')); }],
   ['Comida', i => !REG[i].isBlock && !!REG[i].food],
   ['Ingredientes', i => { const d = REG[i]; return !d.isBlock && !d.food && !d.tool && !d.armor && !d.dur && !d.bucket && !/bow|arrow|shield|trident|mace|totem|elytra/.test(d.name); }],
@@ -365,6 +365,7 @@ function currentTarget() {
 function attackEntity(e) {
   const p = G.player; const s = p.held(); const d = s ? REG[s.id] : null; let dmg = d && d.dmg ? d.dmg : 1; const sh = enchLvl(s, 'sharpness'); if (sh) dmg += 0.5 * sh + 0.5; const fa = enchLvl(s, 'fire_aspect'); if (fa && e.type !== 'player') e.fire = Math.max(e.fire || 0, 80 * fa);
   if (G.gameMode === 'spectator') return;
+  if (e.boat) { boatHit(e, p); p.swing = 1; return; }
   const crit = !p.onGround && p.vy < 0 && !p.inWater; if (crit) { dmg *= 1.5; for (let i = 0; i < 12; i++) P_({ x: e.x, y: e.y + e.h * 0.7, z: e.z, vx: (Math.random() - 0.5) * 5, vy: Math.random() * 4, vz: (Math.random() - 0.5) * 5, life: 0.5, size: 0.1, layer: TEX.spark, add: true, emis: 2, r: 0.9, g: 0.9, b: 0.6, grav: 10 }); }
   if (s && s.id === ID.mace && p.fallDist > 1.5) { dmg += Math.floor(p.fallDist) * 2; p.fallDist = 0; p.vy = 4; explosionFX(p.dim, e.x, e.y, e.z, 0.5); }
   const kb = p.sprinting ? 9 : 5; const kx = -Math.sin(p.yaw) * kb, kz = -Math.cos(p.yaw) * kb;
@@ -390,6 +391,7 @@ function placeBlock(hit, stack) {
   if (id === ID.torch || id === ID.soul_torch || id === ID.redstone_torch) { if (hit.n[1] === -1) return false; if (hit.n[1] === 0) meta = hit.n[2] === -1 ? 1 : hit.n[0] === 1 ? 2 : hit.n[2] === 1 ? 3 : 4; }
   if (bd.leaves) meta = 1;
   if (bd.shape && bd.shape !== 'fence' && bd.shape !== 'wall' && bd.shape !== 'pane') { const dx = -Math.sin(p.yaw), dz = -Math.cos(p.yaw); meta = Math.abs(dx) > Math.abs(dz) ? (dx > 0 ? 1 : 3) : (dz > 0 ? 2 : 0); if ((bd.shape === 'stairs' || bd.shape === 'trapdoor') && hit.n[1] === -1) meta |= bd.shape === 'stairs' ? 4 : 8; }
+  if (bd.shape === 'bed') { const [hx, hz] = DIR4[meta & 3]; const hb = w.get(tx + hx, ty, tz + hz); if (hb !== 0 && !(hb > 0 && REG[hb].replace)) return false; }
   if (bd.shape === 'door') { const up = w.get(tx, ty + 1, tz); if (up !== 0 && !(up > 0 && REG[up].replace)) return false; const below = w.get(tx, ty - 1, tz); if (!(below > 0 && REG[below].solid)) return false; }
   if (id === ID.pointed_dripstone && hit.n[1] === -1) meta = 1;
   if (id === ID.snow) meta = 1;
@@ -400,7 +402,7 @@ function placeBlock(hit, stack) {
   const tmp = { x: tx, y: ty, z: tz };
   if ((bd.render === 'cross' || bd.crop) && !bd.inWater) { const below = w.get(tx, ty - 1, tz); const ok = bd.crop ? below === ID.farmland : bd.sapling || bd.name.includes('flower') || [ID.poppy, ID.dandelion, ID.blue_orchid, ID.cornflower, ID.oxeye_daisy, ID.tall_grass, ID.fern].includes(id) ? [ID.grass_block, ID.dirt, ID.moss_block, ID.mud, ID.farmland, ID.snowy_grass, ID.podzol].includes(below) : id === ID.sugar_cane ? [ID.sand, ID.dirt, ID.grass_block, ID.sugar_cane].includes(below) : (id === ID.crimson_fungus || id === ID.warped_fungus) ? [ID.crimson_nylium, ID.warped_nylium, ID.soul_soil, ID.netherrack].includes(below) : below > 0 && REG[below].solid; if (!ok) return false; }
   if (id === ID.cactus) { const below = w.get(tx, ty - 1, tz); if (below !== ID.sand && below !== ID.red_sand && below !== ID.cactus) return false; }
-  setBlockNet(w, tx, ty, tz, id, meta); if (bd.shape === 'door') setBlockNet(w, tx, ty + 1, tz, id, meta | 8);
+  setBlockNet(w, tx, ty, tz, id, meta); if (bd.shape === 'door') setBlockNet(w, tx, ty + 1, tz, id, meta | 8); if (bd.shape === 'bed') setBlockNet(w, tx + DIR4[meta & 3][0], ty, tz + DIR4[meta & 3][1], id, (meta & 3) | 4);
   playSound('place', tx, ty, tz, 0.8, id); p.swing = 1; consumeHeld(p);
   return true;
 }
@@ -411,6 +413,7 @@ function useItem(hit) {
     const e = hit.ent;
     if (s && s.id === ID.shears && e.type === 'sheep' && !e.sheared) { e.sheared = true; dropItem(e.dim, e.x, e.y + 1, e.z, { id: ID.white_wool, c: 1 + (Math.random() * 3 | 0) }); damageItem(p.inv, p.sel, 1); return true; }
     if (s && s.id === ID.bucket && (e.type === 'cow' || e.type === 'goat')) { consumeHeld(p); giveItem(p, { id: ID.milk_bucket, c: 1 }); return true; }
+    if (e.boat) { boatMount(p, e); return true; }
     if (e.type === 'villager') { openTrade(e); return true; }
     if (s && s.id === ID.name_tag) { e.persist = true; e.name = 'Mascota'; consumeHeld(p); return true; }
   }
@@ -440,6 +443,7 @@ function useItem(hit) {
   if (d.trident) { p.bowT = 0.01; return 'hold'; }
   if (d.spyglass) { p.spy = true; return 'hold'; }
   if (d.extinguisher) { sprayExtinguisher(p); return 'hold'; }
+  if (d.broom) { broomUse(p); return 'hold'; }
   if (d.throwable) {
     const dir = lookDir(p);
     if (d.throwable === 'eye') {
@@ -472,6 +476,7 @@ function useItem(hit) {
     bucketPourMl(w, p, dir, hit, cont, ml);
     if (G.gameMode !== 'creative') p.inv[p.sel] = { id: ID.bucket, c: 1 }; playSound('bucket_empty', p.x, p.eye, p.z, 0.8); updateHUD(); return true;
   }
+  if (d.boatItem) { if (boatPlace(p, w)) { if (G.gameMode !== 'creative') consumeHeld(p); return true; } return false; }
   if (!hit || hit.ent) return false;
   if (s.id === ID.flint_and_steel) {
     const tx = hit.x + hit.n[0], ty = hit.y + hit.n[1], tz = hit.z + hit.n[2];

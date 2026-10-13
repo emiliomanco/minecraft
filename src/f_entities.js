@@ -22,6 +22,8 @@ function collect(world, x0, y0, z0, x1, y1, z1) {
   }
   return _bx;
 }
+// daño de caída: nada por debajo de 4 bloques; 1 a los 4 y 20 (muerte sin armadura) a los 24
+function fallDamage(h) { return h < 4 ? 0 : Math.floor((h - 4) * 19 / 20) + 1; }
 function moveEntity(world, e, dx, dy, dz) {
   const hw = e.w / 2; const eps = 1e-5;
   let bx0 = e.x - hw, by0 = e.y, bz0 = e.z - hw, bx1 = e.x + hw, by1 = e.y + e.h, bz1 = e.z + hw;
@@ -302,6 +304,7 @@ function extinguishAt(world, q) {
 // ------------------------------------------------------------ daño
 function hurtEntity(e, amount, attacker, kx = 0, ky = 0, kz = 0, cause) {
   if (e.dead || e.removed) return false;
+  if (e.boat) return false; // los botes se rompen a golpes (boatHit), no por daño
   if (e === G.player) return G.player.damage(amount, cause, attacker, kx, ky, kz);
   if (e.remotePlayer) { netSendTo(e.conn, { t: 'hurt', a: amount, kx, ky, kz, c: cause }); return true; }
   if (e.proxy) { netSend({ t: 'atk', id: e.hostId || e.id, a: amount, kx, ky, kz }); e.hurtTime = 10; return true; }
@@ -469,7 +472,7 @@ function updatePlayerPhysics(p, dt, input) {
     if (p.onGround) {
       const land = blockAt(w, p.x, p.y - 0.05, p.z); const ld = land > 0 ? REG[land] : null;
       if (ld && ld.bouncy && !p.sneaking && vyBefore < -3) { p.vy = -vyBefore * 0.8; p.onGround = false; p.fallDist = 0; }
-      else if (p.fallDist > 3.2) { let dmg = Math.floor(p.fallDist - 3); if (land === ID.hay_block) dmg = Math.floor(dmg * 0.2); if (ld && (ld.sticky || ld.bouncy)) dmg = 0; if (dmg > 0) { p.damage(dmg, 'fall'); playSound('fall', p.x, p.y, p.z, 1); blockParticles(w, Math.floor(p.x), Math.floor(p.y - 1), Math.floor(p.z), land, 10, 2); } }
+      else if (p.fallDist >= 4) { let dmg = fallDamage(p.fallDist); if (land === ID.hay_block) dmg = Math.floor(dmg * 0.2); if (ld && (ld.sticky || ld.bouncy)) dmg = 0; if (dmg > 0) { p.damage(dmg, 'fall'); playSound('fall', p.x, p.y, p.z, 1); blockParticles(w, Math.floor(p.x), Math.floor(p.y - 1), Math.floor(p.z), land, 10, 2); } }
       p.fallDist = 0;
 
     }
@@ -525,6 +528,7 @@ function entityTick(e, dt) {
   e.savePrev(); e.age++;
   const w = e.world; if (!w) { e.removed = true; return; }
   const cx = Math.floor(e.x) >> 4, cz = Math.floor(e.z) >> 4; if (!w.chunk(cx, cz)) return; // congelado fuera de zona cargada
+  if (e.boat) return boatTick(e, dt, w);
   if (e.type === 'item') return itemTick(e, dt, w);
   if (e instanceof Projectile) return projTick(e, dt, w);
   if (!(e instanceof Mob)) return;

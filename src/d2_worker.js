@@ -14,7 +14,7 @@ const WORKER_MAIN = function () {
         const c = new Chunk(w, m.cx, m.cz); w.gen.generate(c);
         self.postMessage({ t: 'gen', id: m.id, wid: m.wid, cx: m.cx, cz: m.cz, blocks: c.blocks, meta: c.meta, biomes: c.biomes, tint: c.tint, loot: c.loot, spawners: c.spawners, spawns: c.spawns, top: c.top }, [c.blocks.buffer, c.meta.buffer, c.biomes.buffer, c.tint.buffer]);
       } else if (m.t === 'mesh') {
-        MESH_QUALITY = m.q; regB = m.regB; regM = m.regM; regH = m.H; regSC = m.regSC || null;
+        MESH_QUALITY = m.q; MESH_SHORE = m.sh ?? 3; regB = m.regB; regM = m.regM; regH = m.H; regSC = m.regSC || null;
         if (!regS || regS.length !== regB.length) { regS = new Uint8Array(regB.length); regL = new Uint8Array(regB.length); }
         const ch = { cx: m.cx, cz: m.cz, top: m.top, biomes: m.biomes, light: null, emitters: null };
         const r = meshRegion({ dim: m.dim, H: m.H }, ch);
@@ -48,7 +48,7 @@ function requestMesh(w, c) {
   buildRegion(w, c);
   c.meshVer = (c.meshVer || 0) + 1; c.meshPending = true; c.dirty = false; c.urgent = false;
   const b = regB.slice(), m = regM.slice(); const sc = regSC; regSC = null;
-  wpost({ t: 'mesh', wid: worldId(w), dim: w.dim, H: w.H, cx: c.cx, cz: c.cz, top: c.top, biomes: c.biomes, q: MESH_QUALITY, ver: c.meshVer, regB: b, regM: m, regSC: sc }, sc ? [b.buffer, m.buffer, sc.buffer] : [b.buffer, m.buffer]);
+  wpost({ t: 'mesh', wid: worldId(w), dim: w.dim, H: w.H, cx: c.cx, cz: c.cz, top: c.top, biomes: c.biomes, q: MESH_QUALITY, sh: MESH_SHORE, ver: c.meshVer, regB: b, regM: m, regSC: sc }, sc ? [b.buffer, m.buffer, sc.buffer] : [b.buffer, m.buffer]);
 }
 function onWorkerMsg(e) {
   const m = e.data; this.busy = Math.max(0, this.busy - 1);

@@ -174,7 +174,7 @@ function bucketPour(w, x, y, z, liq) {
 function liquidSurface(world, x, y, z) {
   const b = world.get(x, y, z); const d = b > 0 ? REG[b] : null; if (d && d.inWater) return 1; if (!d || !d.liquid) return typeof flSurfIn === 'function' ? flSurfIn(world, x, y, z) : 0;
   const up = world.get(x, y + 1, z); if (up > 0 && REG[up] && REG[up].liquid === d.liquid) return 1;
-  if (b === ID.water && (world.getMeta(x, y, z) & LIQ_OCEAN)) return clamp(0.92 + oceanWaveAt(x + 0.5, z + 0.5).h, 0, 1.6); // mar: con olas y marea
+  if (b === ID.water && (world.getMeta(x, y, z) & LIQ_OCEAN)) return clamp(0.92 + oceanWaveAt(x + 0.5, z + 0.5).h * oceanShoreW(world, x + 0.5, y, z + 0.5), 0, 1.6); // mar: con olas y marea
   const m = world.getMeta(x, y, z); if (m & LIQ_FALL) return 1; return liqAmt(m) / 8 * 0.92; // igual que la superficie dibujada (liqTopH)
 }
 // depuración: suma de volumen (en octavos) de un líquido en una caja
@@ -201,12 +201,24 @@ function oceanWaveAt(x, z) {
     h += a * (Math.pow(s * 0.5 + 0.5, 1.6) * 2 - 1); const om = k * c * 0.55; ux += a * om * s * W[0]; uz += a * om * s * W[1]; }
   _OWV.h = h * 0.85 - A * 1.1 - 0.05 + oceanTide(); _OWV.ux = ux; _OWV.uz = uz; return _OWV;
 }
+// lo mismo que shoreW (d_mesh) pero contra el mundo: peso del oleaje (0 junto a la orilla) para flotación y nado
+const OSHORE = new Map();
+function oceanShoreW(w, x, y, z) {
+  if (MESH_SHORE <= 0) return 1;
+  const key = ((Math.round(x * 4) + 4e5) * 8e5 + Math.round(z * 4) + 4e5) * 512 + y; let r = OSHORE.get(key); if (r !== undefined) return r;
+  if (OSHORE.size > 20000) OSHORE.clear();
+  const R = Math.min(13, MESH_SHORE + SHORE_RAMP); let best = R + 1;
+  for (let b = Math.floor(z - R); b < Math.ceil(z + R); b++) { const dz = Math.max(b - z, 0, z - (b + 1)); if (dz >= best) continue;
+    for (let a = Math.floor(x - R); a < Math.ceil(x + R); a++) { const dx = Math.max(a - x, 0, x - (a + 1)); if (dx >= best) continue;
+      const bb = w.get(a, y, b); if (bb < 0 || (bb > 0 && (REG[bb].liquid === 1 || REG[bb].inWater))) continue; const d = Math.hypot(dx, dz); if (d < best) best = d; } }
+  const t = clamp((best - MESH_SHORE) / SHORE_RAMP, 0, 1); r = t * t * (3 - 2 * t); OSHORE.set(key, r); return r;
+}
 // celda de mar con aire (o algo no líquido) encima
 function isOceanTop(w, x, y, z) { return isOcean(w, x, y, z) && w.get(x, y + 1, z) !== ID.water; }
 // altura de la superficie del mar con olas sobre la columna (x,z) cerca de y; NaN si no hay mar
 function oceanSurfY(w, x, y, z) {
   const bx = Math.floor(x), bz = Math.floor(z), cy = Math.floor(y);
-  for (let yy = cy + 1; yy >= cy - 2; yy--) if (isOceanTop(w, bx, yy, bz)) return yy + 0.92 + oceanWaveAt(x, z).h;
+  for (let yy = cy + 1; yy >= cy - 2; yy--) if (isOceanTop(w, bx, yy, bz)) return yy + 0.92 + oceanWaveAt(x, z).h * oceanShoreW(w, x, yy, z);
   return NaN;
 }
 // superficie del agua (mar con olas, agua quieta o en movimiento) por encima de un punto sumergido

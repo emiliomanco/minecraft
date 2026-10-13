@@ -742,7 +742,8 @@ function buildTextureArray() {
 function shadowLevel() { if (R.q === 0) return 0; const s = SETTINGS.gfx.shadows; return s >= 0 ? clamp(s | 0, 0, 3) : R.q; }
 // uniforms de opciones que cambian sin recompilar (olas, viento, espuma)
 R.gfxU = new Float32Array([1, 1, 1, 0]);
-function gfxUniforms() { const oc = physCfg('oceans'); R.gfxU[0] = oc.real ? clamp(oc.waves, 0, 2) : 0; R.gfxU[1] = SETTINGS.gfx.waving === false ? 0 : 1; R.gfxU[2] = oc.real && oc.foam !== false ? 1 : 0; }
+function gfxUniforms() { const oc = physCfg('oceans'); R.gfxU[0] = oc.real ? clamp(oc.waves, 0, 5) : 0;
+  const sh = oc.real ? clamp(Math.round(oc.shore ?? 3), 0, 10) : 0; if (sh !== MESH_SHORE) { MESH_SHORE = sh; OSHORE.clear(); for (const w of [G.worlds && G.worlds.overworld, G.menuWorld]) if (w) for (const c of w.chunks.values()) c.dirty = true; } R.gfxU[1] = SETTINGS.gfx.waving === false ? 0 : 1; R.gfxU[2] = oc.real && oc.foam !== false ? 1 : 0; }
 function setQuality(q) {
   R.q = clamp(q | 0, 0, 3); const gl = R.gl;
   if (R.q === 2 && !R.cfb) R.q = 1;
@@ -975,8 +976,15 @@ function renderWorld(world, cam, yaw, pitch, opts = {}) {
   if (typeof flRender === 'function') flRender(); // fluido continuo (partículas) sobre el agua quieta
   // segunda pasada: cristal/hielo/portales/fuego (descartando agua en shader de chunk por alfa)
   { const P = R.progs.chunk; gl.useProgram(P.p); setCommon(P); gl.uniformMatrix4fv(P.u.u_vp, false, R.vp); gl.uniform1f(P.u.u_pass, 1);
-    gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA); gl.depthMask(false);
+    // hielo y cristal tintado se ven como un sólido translúcido: primero solo profundidad, luego color de la cara más
+    // cercana (sin caras traseras); así no se ve el hielo a través de sí mismo
+    gl.enable(gl.CULL_FACE); gl.cullFace(gl.BACK);
+    gl.colorMask(false, false, false, false); gl.depthMask(true); gl.disable(gl.BLEND);
+    for (const c of R._transVis) { const m = c.mesh.t; if (!m) continue; gl.uniform3f(P.u.u_off, c.cx * 16 - cam[0], -cam[1], c.cz * 16 - cam[2]); gl.bindVertexArray(m.vao); gl.drawElements(gl.TRIANGLES, m.count, gl.UNSIGNED_INT, 0); }
+    gl.colorMask(true, true, true, true); gl.depthMask(false); gl.depthFunc(gl.LEQUAL);
+    gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     for (const c of R._transVis) { const m = c.mesh.t; if (!m) continue; gl.uniform3f(P.u.u_off, c.cx * 16 - cam[0], -cam[1], c.cz * 16 - cam[2]); gl.bindVertexArray(m.vao); gl.drawElements(gl.TRIANGLES, m.count, gl.UNSIGNED_INT, 0); R.stats.draws++; }
+    gl.disable(gl.CULL_FACE);
   }
   gl.depthMask(true);
   if (opts.drawTranslucentExtra) opts.drawTranslucentExtra();

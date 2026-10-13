@@ -40,6 +40,10 @@ vec3 gradW(vec3 r, float rl){ if(rl<1e-5 || rl>=H) return vec3(0.0); float d=H-r
 float vox(ivec3 c){ if(c.x<0||c.y<0||c.z<0||c.x>=u_vdim.x||c.y>=u_vdim.y||c.z>=u_vdim.z) return 0.0; return floor(texelFetch(u_vox,c,0).r*255.0+0.5); }
 // parte sólida de la celda en vertical (y0,y1); vacía si y1<=y0
 vec2 span(float v){ if(v==1.0) return vec2(0.0,1.0); if(v>=100.0){ float k=v-100.0; float a=floor(k/9.0); return vec2(a,k-a*9.0)/8.0; } return vec2(1.0,0.0); }
+// altura del suelo bajo la columna de la celda c (parte sólida de c o tope del bloque de abajo); hueco de 1+ bloques: c.y-1.5
+float supH(ivec3 c){ vec2 s=span(vox(c)); if(s.y>s.x) return float(c.y)+s.y; vec2 b=span(vox(c-ivec3(0,1,0))); if(b.y>b.x) return float(c.y-1)+b.y; return float(c.y)-1.5; }
+// ¿la celda tapa el paso a la altura y? (su parte sólida sube por encima)
+bool wallAt(ivec3 c, float y){ vec2 s=span(vox(c)); return s.y>s.x && float(c.y)+s.y>y-RAD+0.02; }
 float cmp(vec3 v,int a){ return a==0?v.x:(a==1?v.y:v.z); }
 // barrido en un eje de la caja de la partícula (lado 2·RAD) contra las cajas sólidas: hasta dónde puede llegar
 float sweepAxis(vec3 p, int ax, float to){
@@ -77,6 +81,20 @@ void main(){
   for(int e=0;e<8;e++){ if(e>=u_nEnt) break; vec4 E=u_ent[e], EV=u_entV[e];
     float t=clamp(x.y-E.y,-EV.w,EV.w); vec3 c=vec3(E.x,E.y+t,E.z); vec3 d=x-c; float dl=length(d);
     if(dl<E.w){ vec3 n=dl>1e-4?d/dl:vec3(0.0,1.0,0.0); v=mix(v,EV.xyz*1.1+n*(E.w-dl)*10.0,0.6); } }
+  // ladera: en reposo sobre el suelo, buscar (radio 2 bloques) la celda alcanzable más cercana con el suelo más bajo y
+  // correr hacia ella; las vecinas del mismo líquido vienen detrás por la cohesión y la viscosidad (XSPH). Si no hay
+  // ninguna más baja, la superficie es plana y se queda quieta.
+  { ivec3 c=ivec3(floor(x)); float h0=supH(c);
+    if(x.y-h0<0.45){
+      float best=1e9; vec2 tgt=vec2(0.0);
+      for(int dz=-2;dz<=2;dz++) for(int dx=-2;dx<=2;dx++){
+        if(dx==0&&dz==0) continue; float dd=float(dx*dx+dz*dz); if(dd>5.0||dd>=best) continue;
+        ivec3 n=c+ivec3(dx,0,dz); if(wallAt(n,x.y)) continue;
+        ivec3 m=c+ivec3(dx/2,0,dz/2); if((abs(dx)==2||abs(dz)==2) && wallAt(m,x.y)) continue;
+        if(abs(dx)==1&&abs(dz)==1 && wallAt(c+ivec3(dx,0,0),x.y) && wallAt(c+ivec3(0,0,dz),x.y)) continue; // esquina cerrada
+        if(supH(n)<h0-0.1){ best=dd; tgt=vec2(n.xz)+0.5; } }
+      if(best<1e8){ vec2 d=tgt-x.xz; float l=length(d); if(l>1e-3){ float acc=P.w>1.5&&P.w<2.5?2.2:7.0; v.xz+=d/l*acc*u_dt; } }
+    } }
   // orilla: junto a (o sobre) el mar, el oleaje arrastra el agua adelante y atrás
   { ivec3 c=ivec3(floor(x)); bool sea=false; for(int k=0;k<6;k++){ ivec3 o2=k==0?ivec3(0,-1,0):k==1?ivec3(1,-1,0):k==2?ivec3(-1,-1,0):k==3?ivec3(0,-1,1):k==4?ivec3(0,-1,-1):ivec3(0,0,0); if(vox(c+o2)==27.0) sea=true; }
     if(sea && P.w>0.5 && P.w<2.5 || sea && P.w>2.5 && P.w<3.5){ vec3 sw=seaWave(x.xz+u_org.xz); v.xz=mix(v.xz,v.xz+sw.yz*2.2,0.25); } }
@@ -361,6 +379,7 @@ function flUpdate(dt, w) {
   const gl = R.gl; if (!gl || !G.player) return;
   if (FL.gl !== gl) flInit();
   if (!FL.ok || R.q < 2) return;
+  flOceanFillTick();
   const p = G.player; FL.frame++; flRecenter(w, p.x, p.y, p.z, false);
   if (FL.pending && FL.pending.dim === w.dim) { const a = FL.pending.p; FL.pending = null; for (let i = 0; i + 4 < a.length; i += 5) if (flSpawn(a[i], a[i + 1], a[i + 2], 0, 0, 0, a[i + 3], a[i + 4]) < 0) break; }
   if (FL.frame % 20 === 0) flVoxChunks(w);
@@ -383,7 +402,7 @@ function flUpdate(dt, w) {
 function flEntities(w) {
   const E = FL.ents, V = FL.entV; let n = 0; const o = FL.org;
   const add = (e, r, hh) => { if (n >= 8) return; const k = n * 4; E[k] = e.x - o[0]; E[k + 1] = e.y + hh - o[1]; E[k + 2] = e.z - o[2]; E[k + 3] = r; V[k] = e.vx || 0; V[k + 1] = e.vy || 0; V[k + 2] = e.vz || 0; V[k + 3] = hh; n++; };
-  const p = G.player; if (p && !p.dead && G.gameMode !== 'spectator') add(p, 0.35, 0.9);
+  const p = G.player; if (p && !p.dead && G.gameMode !== 'spectator') { if (typeof broomColliders === 'function') broomColliders(add); add(p, 0.35, 0.9); }
   for (const e of G.entities.values()) { if (n >= 8) break; if (e.removed || e.dead || e.dim !== p.dim) continue; if (Math.abs(e.x - p.x) > 24 || Math.abs(e.z - p.z) > 24) continue; if (e instanceof Mob) add(e, Math.max(0.25, (e.w || 0.6) * 0.5), (e.h || 1.8) * 0.5); else if (e.type === 'item') add(e, 0.15, 0.12); }
   FL.nEnt = n;
 }
@@ -625,6 +644,23 @@ function flSpawnCell(w, x, y, z, a, phase, vx, vy, vz) {
   }
   return k;
 }
+// el mar entra en un hueco: un chorro de partículas la primera vez y, al siguiente tick, el hueco ya es mar
+// (las partículas que quedan dentro se las traga). Sin esto el mar soltaba partículas sin fin, porque las
+// partículas nunca vuelven a ser bloques y el hueco seguía vacío.
+FL.oceanPend = new Map();
+function flOceanInto(w, x, y, z, vx, vy, vz) {
+  const k = FLK(x, y, z), t = FL.oceanPend.get(k);
+  if (t !== undefined && G.tick - t < 400) { FL.oceanPend.delete(k); if (cellVol(w, x, y, z, 1) === 0) w.set(x, y, z, ID.water, LIQ_OCEAN); return; }
+  if (FL.oceanPend.size > 4000) FL.oceanPend.clear();
+  FL.oceanPend.set(k, G.tick); flSpawnCell(w, x, y, z, 8, 1, vx, vy, vz); FL.oceanFill.push([G.tick, w, x, y, z]);
+}
+// el hueco ya lleno de partículas no vuelve a pedir agua al mar (las partículas cuentan como líquido): pasado un
+// segundo se convierte en mar igualmente y las partículas que quedan dentro se funden con él
+FL.oceanFill = [];
+function flOceanFillTick() {
+  const L = FL.oceanFill; if (!L.length) return;
+  while (L.length && G.tick - L[0][0] > 20) { const [, w, x, y, z] = L.shift(); const b = w.get(x, y, z); if (y <= SEA && (b === 0 || (b > 0 && REG[b].liquid === 1 && !(w.getMeta(x, y, z) & LIQ_OCEAN)))) w.set(x, y, z, ID.water, LIQ_OCEAN); }
+}
 // sustituye a fluidTick cuando el fluido continuo está activo en esa celda
 function flContTick(w, x, y, z, id, liq, meta) {
   const ocean = liq === 1 && (meta & LIQ_OCEAN) !== 0; let a = ocean ? 8 : liqAmt(meta); const placed = (meta & LIQ_PLACED) !== 0;
@@ -633,7 +669,7 @@ function flContTick(w, x, y, z, id, liq, meta) {
   // 1) hueco debajo: el líquido cae como fluido
   if (vb === 0) {
     if (flFree() < a * 8 + 256) { w.scheduleTick(x, y, z, 20, 0); return; }
-    if (ocean) { if (y - 1 <= SEA) { flSpawnCell(w, x, y - 1, z, 8, 1, 0, -0.5, 0); w.scheduleTick(x, y, z, 14, 0); } return; }
+    if (ocean) { if (y - 1 <= SEA) { flOceanInto(w, x, y - 1, z, 0, -0.5, 0); w.scheduleTick(x, y, z, 14, 0); } return; }
     flSpawnCell(w, x, y, z, a, ph, 0, -0.3, 0); flSetStatic(w, x, y, z, liq, 0); return;
   }
   if (vb > 0 && vb < 8) { // dentro del mismo cuerpo: asentar hacia abajo
@@ -652,7 +688,7 @@ function flContTick(w, x, y, z, id, liq, meta) {
   }
   if (spill.length) {
     if (flFree() < a * 8 + 256) { w.scheduleTick(x, y, z, 20, 0); return; }
-    if (ocean) { if (y <= SEA) for (const [dx, dz] of spill) flSpawnCell(w, x + dx, y, z + dz, 8, 1, dx * 1.2, 0, dz * 1.2); w.scheduleTick(x, y, z, 14, 0); return; }
+    if (ocean) { if (y <= SEA) for (const [dx, dz] of spill) flOceanInto(w, x + dx, y, z + dz, dx * 1.2, 0, dz * 1.2); w.scheduleTick(x, y, z, 14, 0); return; }
     let sx = 0, sz = 0; for (const [dx, dz] of spill) { sx += dx; sz += dz; } const sp = liq === 2 ? 0.35 : 1.0;
     flSpawnCell(w, x, y, z, a, ph, sx * sp, 0, sz * sp); flSetStatic(w, x, y, z, liq, 0); return;
   }

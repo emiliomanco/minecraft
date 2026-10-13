@@ -40,6 +40,8 @@ shaped('shears', 1, [' I', 'I '], { I: 'iron_ingot' }); shaped('compass', 1, [' 
 shaped('bow', 1, [' TS', 'T S', ' TS'], { T: 'stick', S: 'string' }); shaped('arrow', 4, ['F', 'S', 'E'], { F: 'flint', S: 'stick', E: 'feather' });
 shaped('crossbow', 1, ['STS', 'TIT', ' S '], { S: 'stick', T: 'string', I: 'iron_ingot' });
 shaped('shield', 1, ['PIP', 'PPP', ' P '], { P: '#planks', I: 'iron_ingot' });
+shaped('oak_boat', 1, ['P P', 'PPP'], { P: 'oak_planks' });
+shaped('broom', 1, ['  S', ' S ', 'W  '], { S: 'stick', W: 'wheat' });
 shaped('fishing_rod', 1, ['  S', ' ST', 'S T'], { S: 'stick', T: 'string' });
 shaped('bed', 1, ['WWW', 'PPP'], { W: '#wool', P: '#planks' });
 shaped('glass_bottle', 3, ['G G', ' G '], { G: 'glass' });
@@ -158,7 +160,7 @@ function rayEntity(ox, oy, oz, dx, dy, dz, maxD, dim) {
   let best = null, bt = maxD;
   for (const e of G.entities.values()) {
     if (e.dim !== dim || e.removed || e.dead || e.type === 'item' || (e instanceof Projectile && e.type !== 'fireball')) continue;
-    const hw = e.w / 2 + 0.1; const h = rayBox(ox, oy, oz, dx, dy, dz, e.x - hw, e.y, e.z - hw, e.x + hw, e.y + e.h, e.z + hw);
+    const hw = e.w / 2 + 0.1; const y0 = e.boat && e.capsized ? e.y - e.h : e.y; const h = rayBox(ox, oy, oz, dx, dy, dz, e.x - hw, y0, e.z - hw, e.x + hw, y0 + e.h, e.z + hw);
     if (h && h.t < bt) { bt = h.t; best = e; }
   }
   return best ? { e: best, t: bt } : null;
@@ -217,6 +219,11 @@ function markDirty(w, x, z, urgent) {
 }
 const NETBATCH = [];
 function onBlockSet(w, x, y, z, old, id, meta) {
+  if (old === ID.bed && id !== ID.bed) for (const [dx, dz] of DIR4) { // la otra mitad de la cama se va con esta
+    if (w.get(x + dx, y, z + dz) !== ID.bed) continue; const m = w.getMeta(x + dx, y, z + dz); const [fx, fz] = DIR4[m & 3]; const s = m & 4 ? -1 : 1;
+    if (x + dx + fx * s === x && z + dz + fz * s === z) w.set(x + dx, y, z + dz, 0);
+  }
+  if (OSHORE.size) OSHORE.clear();
   markDirty(w, x, z, true);
   if (typeof flOnBlock === 'function') flOnBlock(w, x, y, z);
   if (G.net && G.net.role === 'host' && !G.applyingNet) NETBATCH.push([w.dim, x, y, z, id, meta]);

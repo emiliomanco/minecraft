@@ -150,6 +150,13 @@ function shapeBoxes(d, meta, nb, forCollision) {
       const up = meta & 4; out.push(up ? [0, 8, 0, 16, 16, 16] : [0, 0, 0, 16, 8, 16]);
       const t = [[0, 0, 0, 16, 8, 8], [8, 0, 0, 16, 8, 16], [0, 0, 8, 16, 8, 16], [0, 0, 0, 8, 8, 16]][f].slice(); if (!up) { t[1] += 8; t[4] += 8; } out.push(t); break;
     }
+    case 'bed': { // cama de 2 bloques: f = dirección pie → cabecera; meta & 4 = cabecera (con almohada en el extremo)
+      out.push([0, 3, 0, 16, 9, 16]);
+      const leg = (a, b) => out.push([a, 0, b, a + 3, 3, b + 3]); const far = [[0, -1], [1, 0], [0, 1], [-1, 0]][f]; // patas en el extremo de cada parte
+      if (far[0]) { const lx = (far[0] > 0) === !!(meta & 4) ? 13 : 0; leg(lx, 0); leg(lx, 13); } else { const lz = (far[1] > 0) === !!(meta & 4) ? 13 : 0; leg(0, lz); leg(13, lz); }
+      if ((meta & 4) && !forCollision) { const P = [[2, 9, 1, 14, 11, 6], [10, 9, 2, 15, 11, 14], [2, 9, 10, 14, 11, 15], [1, 9, 2, 6, 11, 14]][f].slice(); P.push('white_wool'); out.push(P); }
+      break;
+    }
     case 'door': { const open = meta & 4; const side = (f + 2) % 4; out.push(PANEL[open ? (side + 1) % 4 : side]); break; }
     case 'trapdoor': { if (meta & 4) out.push(PANEL[(f + 2) % 4]); else out.push(meta & 8 ? [0, 13, 0, 16, 16, 16] : [0, 0, 0, 16, 3, 16]); break; }
     case 'gate': { const ax = f & 1; if (meta & 4) { out.push(ax ? [0, 0, 6, 2, 16, 10] : [6, 0, 0, 10, 16, 2]); out.push(ax ? [14, 0, 6, 16, 16, 10] : [6, 0, 14, 10, 16, 16]); } else out.push(ax ? [7, 0, 0, 9, 16, 16] : [0, 0, 7, 16, 16, 9]); break; }
@@ -175,8 +182,22 @@ function faceLayer(d, f, meta) {
   return d.faces[f];
 }
 let MESH_QUALITY = 2;
+// olas lejos de la orilla: a menos de MESH_SHORE bloques de la cara de tierra el mar no tiene oleaje (no deja al aire
+// los bloques de la orilla al bajar); después crece en una rampa de 4 bloques
+let MESH_SHORE = 3; const SHORE_RAMP = 4; let SHORE_C = new Map();
+function shoreW(px, y, pz) { // px,pz: coordenadas locales del chunk (pueden ser fraccionarias)
+  if (MESH_SHORE <= 0) return 1;
+  const key = (y * 512 + Math.round(px * 4) + 64) * 512 + Math.round(pz * 4) + 64; let r = SHORE_C.get(key); if (r !== undefined) return r;
+  const R = Math.min(LP - 1, MESH_SHORE + SHORE_RAMP); let best = R + 1;
+  const x0 = Math.floor(px - R), x1 = Math.ceil(px + R), z0 = Math.floor(pz - R), z1 = Math.ceil(pz + R);
+  for (let b = z0; b < z1; b++) { const dz = Math.max(b - pz, 0, pz - (b + 1)); if (dz >= best) continue;
+    for (let a = x0; a < x1; a++) { const dx = Math.max(a - px, 0, px - (a + 1)); if (dx >= best) continue;
+      const c = ((y + 1) * LR + b + LP + 1) * LR + a + LP + 1; if (isLiqB(regB[c], 1)) continue; const d = Math.hypot(dx, dz); if (d < best) best = d; } }
+  const t = clamp((best - MESH_SHORE) / SHORE_RAMP, 0, 1); r = t * t * (3 - 2 * t); SHORE_C.set(key, r); return r;
+}
 function buildMesh(world, ch) { buildRegion(world, ch); return meshRegion(world, ch); }
 function meshRegion(world, ch) {
+  SHORE_C.clear();
   computeLight(world, ch);
   const O = MB_O, T = MB_T; O.reset(); T.reset(); MB_W.reset(); MB_F.reset();
   const H = world.H; const top = Math.min(H - 1, ch.top + 1);
@@ -227,7 +248,7 @@ function meshRegion(world, ch) {
       emitBox(d, x, y, z, ri, meta, ch);
     } else if (d.render === 'shape') {
       const boxes = shapeBoxes(d, meta, (dx, dz) => regB[ri + dx + dz * LR]); const lay = d.shape === 'door' && (meta & 8) ? d.layerTop : undefined;
-      for (const b of boxes) emitBox(d, x, y, z, ri, meta, ch, b, lay);
+      for (const b of boxes) { if (b.length > 6) emitBox(d, x, y, z, ri, meta, ch, b.slice(0, 6), TEX[b[6]]); else emitBox(d, x, y, z, ri, meta, ch, b, lay); }
     } else if (d.render === 'liquid') {
       emitLiquidCell(d.liquid === 1 ? MB_W : O, d.liquid, x, y, z, ri, ch, bxw, bzw);
     } else if (d.render === 'snow') {
@@ -373,7 +394,7 @@ function snowStepTop(c) {
 // celda de agua o lava: superficie suave, chorro cayendo (tubo) o nada (si está cubierta)
 function emitLiquidCell(B, kind, x, y, z, ri, ch, bxw, bzw) {
   if (liqFall(ri)) { emitFall(B === MB_W ? MB_F : B, kind, x, y, z, ri, ch); return; }
-  const u = ri + LRR; if ((isLiqB(regB[u], kind) && !liqFall(u)) || T_FULL[regB[u]]) { emitLiquidSides(B, kind, x, y, z, ri, ch, null); return; } // cubierta por más líquido o por un bloque: solo lados contra cristal
+  const u = ri + LRR; if ((isLiqB(regB[u], kind) && !liqFall(u)) || T_FULL[regB[u]] || regB[u] === ID.ice) { emitLiquidSides(B, kind, x, y, z, ri, ch, null); return; } // cubierta por más líquido o por un bloque: solo lados contra cristal
   emitSurface(B, kind, x, y, z, ri, ch, bxw, bzw);
 }
 function liqTint(kind, ri, ch, x, z) { if (kind !== SK_WATER) return 0; const m = regM[ri]; const d = REG[regB[ri]]; return d && !d.inWater && (m & LIQ_OCEAN) ? 1 + ch.biomes[x | z << 4] : 200; }
@@ -423,6 +444,7 @@ function emitSurface(B, kind, x, y, z, ri, ch, bxw, bzw) {
       let oc = 0, wn = 0; for (let b = (j ? 0 : -1); b <= (j ? 1 : 0); b++) for (let a = (i ? 0 : -1); a <= (i ? 1 : 0); a++) { const c = ri + a + b * LR; const bb = regB[c]; if (isLiqB(bb, 1)) { wn++; const dd = REG[bb]; if (dd.inWater ? ocean : (regM[c] & LIQ_OCEAN)) oc++; } }
       if (oc > 0 && oc < wn) flow = 16384 | Math.round(oc / wn * 255); else if (oc > 0) flow = 16384 | 255;
     } else if (ocean) flow = 16384 | 255;
+    if (kind === SK_WATER && (flow & 16384) && MESH_SHORE > 0) { const sw = shoreW(x + i / N, y, z + j / N); flow = 16384 | Math.round((flow & 255) * sw); }
     const L = surfLight(ri, i / N, j / N);
     B.v(x + i / N, y + hs[k], z + j / N, nx * 0.5 + 0.5, nz * 0.5 + 0.5, flow, fl, L[0], L[1], snow ? 3 - cs[k] * 1.5 : kind === SK_WATER ? depth / 5 : 3, tint);
   }
@@ -491,6 +513,7 @@ function emitLiquidSides(B, kind, x, y, z, ri, ch, P, N, tint) {
   for (let s = 0; s < 4; s++) {
     const [nx, nz, x0, z0, ex, ez] = SIDES4[s]; const j = ri + nx + nz * LR; const b = regB[j];
     if (T_FULL[b] || isLiqB(b, kind)) continue;
+    { const rb = REG[b]; if (rb && rb.render === 'cube' && rb.trans === 2) continue; } // hielo/slime/miel ya dibujan esa cara (si no, dos caras en el mismo plano parpadean)
     if (full && airLike(b)) continue; // bajo la superficie, junto al aire: el agua de al lado ya cae
     if (airLike(b) && isLiqB(regB[j - LRR], kind) && !liqFall(j - LRR)) continue; // continúa en el nivel de abajo (rampa)
     const sk = Math.max(sky, regS[j]), bl = Math.max(blk, regL[j]); const n = full ? 1 : N;
