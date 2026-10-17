@@ -58,7 +58,7 @@ function boatStep(e, h, w) {
   }
   if (wet) { fx += (ux / wet - e.vx) * 0.6; fz += (uz / wet - e.vz) * 0.6; }
   // remos del jinete
-  if (e.rider && !e.capsized && e.ctl) { const c = e.ctl; const fwd = [-R[6], 0, -R[8]]; const th = (c.f ? 12 : 0) - (c.b ? 6 : 0); /* el doble que al principio (iban muy lentos) */ fx += fwd[0] * th * (wet ? 1 : 0.04); fz += fwd[2] * th * (wet ? 1 : 0.04); ty += ((c.l ? 1 : 0) - (c.r ? 1 : 0)) * 5 * (wet ? 1 : 0.3); }
+  if (e.rider && !e.capsized && e.ctl) { const c = e.ctl; const fwd = [-R[6], 0, -R[8]]; const th = (c.f ? 24 : 0) - (c.b ? 12 : 0); /* 4 veces el empuje inicial (se pidió el doble dos veces) */ fx += fwd[0] * th * (wet ? 1 : 0.04); fz += fwd[2] * th * (wet ? 1 : 0.04); ty += ((c.l ? 1 : 0) - (c.r ? 1 : 0)) * 5 * (wet ? 1 : 0.3); }
   if (e.rider) fy -= 2.5; // peso del jinete (centro de masa más alto: vuelca antes)
   const I = [1.1, 1.6, 0.55]; // inercia: cabeceo (x) cuesta más que el balanceo (z)
   e.vx += fx * h; e.vy += fy * h; e.vz += fz * h;

@@ -58,13 +58,13 @@ function hostHandle(c, m) {
       const st = n.states[name]; const sp = G.worldSpawn;
       const e = new Entity('player', st ? st.dim : 'overworld', st ? st.x : sp.x, st ? st.y : sp.y, st ? st.z : sp.z); e.remotePlayer = true; e.conn = c; e.name = name; e.state = st; e.armor = []; e.w = 0.6; e.h = 1.8; e.hp = 20;
       G.entities.set(e.id, e); c.ent = e; n.peers = n.conns.size;
-      c.send({ t: 'welcome', id: e.id, name, seed: G.seed, climate: G.climate, dyn: !!G.dynTrees, seedStr: G.seedStr, worldName: G.worldName, gm: G.gameMode, time: G.time, diff: G.difficulty, dk: G.dragonKilled, ei: G.endInit, gw: G.gateway, st: st || null, spawn: sp, hostName: G.player.name, hostId: G.player.id, keep: G.keepInventory });
+      c.send({ t: 'welcome', id: e.id, name, seed: G.seed, climate: G.climate, dyn: !!G.dynTrees, seedStr: G.seedStr, worldName: G.worldName, gm: G.gameMode, time: G.time, diff: G.difficulty, dk: G.dragonKilled, ei: G.endInit, gw: G.gateway, st: st || null, spawn: sp, hostName: G.player.name, hostId: G.player.id, keep: G.keepInventory, rules: { dc: G.doDaylightCycle !== false, wc: G.doWeatherCycle !== false, wd: !!G.doWaterDespawn } });
       const chunks = modifiedChunks(); for (let i = 0; i < chunks.length; i += 8) c.send({ t: 'chunks', list: chunks.slice(i, i + 8) });
       c.send({ t: 'ready' });
       chatMsg(name + ' se unió al juego', '#ff8'); netBroadcast({ t: 'chat', m: name + ' se unió al juego', sys: true }, c);
       break;
     }
-    case 'p': { const e = c.ent; if (!e) return; e.px = e.x; e.py = e.y; e.pz = e.z; e.x = m.x; e.y = m.y; e.z = m.z; e.yaw = m.yw; e.pitch = m.pt; e.dim = m.dim; e.sneaking = m.sn; e.heldItem = m.h; e.armor = (m.ar || []).map(id => id ? { id } : null); e.hp = m.hp; e.creative = m.cr; e.spectator = m.sp; e.dead = m.dead; e.swing = m.sw; const hd = Math.hypot(e.x - e.px, e.z - e.pz); e.walk = (e.walk || 0) + hd; e.walkAmt = Math.min(1, hd * 5); e.gliding = m.gl; break; }
+    case 'p': { const e = c.ent; if (!e) return; if (e.dim !== m.dim && e.nbuf) e.nbuf.length = 0; netSample(e, m.x, m.y, m.z, m.yw, m.pt); e.dim = m.dim; e.sneaking = m.sn; e.heldItem = m.h; e.armor = (m.ar || []).map(id => id ? { id } : null); e.hp = m.hp; e.creative = m.cr; e.spectator = m.sp; e.dead = m.dead; e.swing = m.sw; e.gliding = m.gl; break; }
     case 'sb': { if (!w) return; w.ensure(m.x >> 4, m.z >> 4); w.set(m.x, m.y, m.z, m.id, m.m); break; }
     case 'drop': { const e = dropItem(m.d, m.x, m.y, m.z, m.s, m.vx, m.vy, m.vz, 40); break; }
     case 'proj': { const p = shoot(m.ty, m.d, m.x, m.y, m.z, m.vx, m.vy, m.vz, c.ent, m.ex); break; }
@@ -75,6 +75,8 @@ function hostHandle(c, m) {
     case 'st': { if (c.ent) { c.ent.state = m.s; n.states[c.ent.name] = m.s; } break; }
     case 'tnt': { if (!w) return; igniteTNT(w, m.x, m.y, m.z); break; }
     case 'boat': boatNetRecv(c, m); break;
+    case 'flm': { const e = c.ent; if (e && Array.isArray(m.o) && Array.isArray(m.dir)) flamerEmit(G.worlds[e.dim] || G.world, m.o.map(Number), m.dir.map(Number), clamp(+m.dt || 0.05, 0, 0.1), e); break; }
+    case 'spg': { const e = c.ent; if (e && Array.isArray(m.p) && Math.hypot(m.p[0] - e.x, m.p[2] - e.z) < 8) spongeAt(G.worlds[e.dim] || G.world, m.p.map(Number), 1.6); break; }
     case 'brm': { const e = c.ent; if (e && Array.isArray(m.h) && Array.isArray(m.v)) broomPush(e, Math.floor(e.y + 0.01), clamp(+m.dt || 0.05, 0, 0.1), { head: m.h, v: m.v }); break; }
     case 'boom': { if (!w) return; explode(w, m.x, m.y, m.z, m.p, true, null); break; }
     case 'summon': { spawnMob(m.ty, m.d, m.x, m.y, m.z); break; }
@@ -137,6 +139,7 @@ function clientHandle(m, resolve, reject) {
     case 'tp': if (G.player) { G.player.x = m.x; G.player.y = m.y; G.player.z = m.z; G.player.vy = 0; G.player.fallDist = 0; } break;
     case 'time': G.time = m.v; if (m.r !== undefined) { if (m.r !== G.rain) G.weatherFast = 80; G.rain = m.r; } break;
     case 'tick': G.tickFrozen = !!m.f; G.tickRate = m.r || 1; break;
+    case 'rules': G.keepInventory = !!m.keep; G.doDaylightCycle = m.dc !== false; G.doWeatherCycle = m.wc !== false; G.doWaterDespawn = !!m.wd; break;
     case 'chat': chatMsg(m.m, m.sys ? '#ff8' : null); break;
     case 'cd': if (UI.pendingKey === m.k) { UI.pendingKey = null; openScreen(m.kind, { c: m.c, key: m.k, block: m.b, title: REG[m.b].disp }); } break;
     case 'fx': if (m.k === 'boom') explosionFX(m.d, m.x, m.y, m.z, m.p); break;
@@ -150,7 +153,7 @@ function updateProxyPlayers(list) {
   for (const o of list) {
     if (o.i === G.myNetId) continue; const key = 'pl' + o.i; seen.add(key);
     let e = G.entities.get(key); if (!e) { e = new Entity('player', o.d, o.x, o.y, o.z); e.proxy = true; e.hostId = o.i; e.name = o.n; e.w = 0.6; e.h = 1.8; G.entities.set(key, e); e.id = key; }
-    e.tx = o.x; e.ty = o.y; e.tz = o.z; e.dim = o.d; e.yaw = o.yw; e.pitch = o.pt; e.sneaking = o.sn; e.heldItem = o.h || null; e.armor = (o.ar || []).map(id => id ? { id } : null); e.dead = o.dead; e.spectator = o.sp; e.gliding = o.gl; e.swing = o.sw;
+    if (e.dim !== o.d && e.nbuf) e.nbuf.length = 0; netSample(e, o.x, o.y, o.z, o.yw, o.pt); e.dim = o.d; e.sneaking = o.sn; e.heldItem = o.h || null; e.armor = (o.ar || []).map(id => id ? { id } : null); e.dead = o.dead; e.spectator = o.sp; e.gliding = o.gl; e.swing = o.sw;
   }
   for (const [k, e] of G.entities) if (e.proxy && e.type === 'player' && !seen.has(k)) G.entities.delete(k);
 }
@@ -162,10 +165,10 @@ function updateProxyEntities(dim, list) {
       if (MOB[o.ty]) e = new Mob(o.ty, dim, o.x, o.y, o.z); else if (o.ty === 'boat') e = new Boat(dim, o.x, o.y, o.z, 0); else if (o.ty === 'item') e = new ItemEnt(dim, o.x, o.y, o.z, o.s); else { e = new Projectile(o.ty, dim, o.x, o.y, o.z, o.vx || 0, o.vy || 0, o.vz || 0, null); }
       e.proxy = true; e.hostId = o.i; e.id = key; G.entities.set(key, e); e.x = o.x; e.y = o.y; e.z = o.z;
     }
-    e.tx = o.x; e.ty = o.y; e.tz = o.z; e.yaw = o.yw; e.dim = dim;
+    netSample(e, o.x, o.y, o.z, o.yw, o.pt); e.dim = dim;
     if (e instanceof Mob) { e.hp = o.hp; e.hurtTime = o.ht; e.fuse = o.f; e.open = o.op; e.deathTime = o.dt; e.dead = o.dt > 0; if (o.c) e.color = o.c; e.target = o.tg ? G.player : null; e.laser = o.lt ? 1 : 0; e.laserT = o.lt ? (o.lt === G.myNetId ? G.player : G.entities.get('pl' + o.lt)) : null; e.swing = o.sw; }
     else if (e.isBoat) boatNetApply(e, o);
-    else if (e.type === 'item') e.stack = o.s; else if (o.b) e.block = o.b; if (o.fu !== undefined) e.fuse = o.fu; if (o.pt !== undefined) e.pitch = o.pt;
+    else if (e.type === 'item') e.stack = o.s; else if (o.b) e.block = o.b; if (o.fu !== undefined) e.fuse = o.fu;
   }
   for (const [k, e] of G.entities) if (e.proxy && e.type !== 'player' && e.dim === dim && !seen.has(k)) G.entities.delete(k);
 }
@@ -174,4 +177,24 @@ function clientNetTick() {
   netSend({ t: 'p', x: +p.x.toFixed(3), y: +p.y.toFixed(3), z: +p.z.toFixed(3), yw: +p.yaw.toFixed(3), pt: +p.pitch.toFixed(3), dim: p.dim, sn: p.sneaking, h: p.held() ? p.held().id : 0, ar: p.armor.map(a => a ? a.id : 0), hp: p.hp, cr: G.gameMode === 'creative', sp: G.gameMode === 'spectator', dead: p.dead, sw: p.swing, gl: p.gliding });
   if (G.rtick % 100 === 0) netSend({ t: 'st', s: playerState(p) });
 }
-function smoothProxies(dt) { for (const e of G.entities.values()) { if (!e.proxy) continue; if (e.tx === undefined) continue; if (e.isBoat && e.tr) { const k2 = Math.min(1, dt * 12); for (let i = 0; i < 9; i++) e.rot[i] += (e.tr[i] - e.rot[i]) * k2; e.prot = e.rot; } const k = Math.min(1, dt * 12); const ox = e.x, oz = e.z; e.x += (e.tx - e.x) * k; e.y += (e.ty - e.y) * k; e.z += (e.tz - e.z) * k; e.px = e.x; e.py = e.y; e.pz = e.z; e.pyaw = e.yaw; if (e.type !== 'player') { const hd = Math.hypot(e.x - ox, e.z - oz); e.walk += hd * 1.5; e.walkAmt = lerp(e.walkAmt, Math.min(1, hd / dt / 3), 0.2); } else { const hd = Math.hypot(e.x - ox, e.z - oz); e.walk += hd; e.walkAmt = lerp(e.walkAmt || 0, Math.min(1, hd / Math.max(dt, 0.001) / 4), 0.2); } } }
+// Interpolación de entidades remotas (jugadores y lo que simula el anfitrión): cada posición recibida se guarda con
+// su hora y se dibuja un poco en el pasado (1,6 veces el intervalo entre paquetes), siempre entre dos muestras reales.
+// Antes se movían de golpe al llegar cada paquete (o se suavizaban con el ritmo de los ticks) y temblaban.
+function netSample(e, x, y, z, yaw, pitch) {
+  const t = performance.now(); const b = e.nbuf || (e.nbuf = []); const last = b[b.length - 1];
+  if (last && Math.abs(x - last[1]) + Math.abs(y - last[2]) + Math.abs(z - last[3]) > 12) b.length = 0; // teletransporte: sin interpolar
+  if (last && b.length) { const gap = clamp(t - last[0], 5, 500); e.nGap = e.nGap ? e.nGap * 0.9 + gap * 0.1 : gap; }
+  if (!b.length) { e.x = x; e.y = y; e.z = z; if (yaw !== undefined) e.yaw = yaw; e.px = x; e.py = y; e.pz = z; e.pyaw = e.yaw; }
+  b.push([t, x, y, z, yaw ?? e.yaw ?? 0, pitch ?? e.pitch ?? 0]); if (b.length > 40) b.shift();
+}
+function netInterp(e, dt) {
+  const b = e.nbuf; if (!b || !b.length) return;
+  let rt = performance.now() - clamp((e.nGap || 50) * 1.6 + 15, 50, 320); if (e.nRt && rt < e.nRt && e.nRt - rt < 400) rt = e.nRt; e.nRt = rt; // nunca hacia atrás
+  while (b.length > 2 && b[1][0] <= rt) b.shift();
+  let s; if (b.length === 1 || rt <= b[0][0]) s = b[0]; else { const a = b[0], c = b[1]; const k = clamp((rt - a[0]) / Math.max(1, c[0] - a[0]), 0, 1);
+    s = [0, lerp(a[1], c[1], k), lerp(a[2], c[2], k), lerp(a[3], c[3], k), lerpAngle(a[4], c[4], k), lerp(a[5], c[5], k)]; }
+  const ox = e.x, oz = e.z; e.x = s[1]; e.y = s[2]; e.z = s[3]; e.yaw = s[4]; e.pitch = s[5]; e.px = e.x; e.py = e.y; e.pz = e.z; e.pyaw = e.yaw;
+  const hd = Math.hypot(e.x - ox, e.z - oz); if (hd > 3) return; const pl = e.type === 'player';
+  e.walk = (e.walk || 0) + hd * (pl ? 1 : 1.5); e.walkAmt = lerp(e.walkAmt || 0, Math.min(1, hd / Math.max(dt, 0.001) / (pl ? 4 : 3)), Math.min(1, dt * 10));
+}
+function smoothProxies(dt) { for (const e of G.entities.values()) { if (!e.proxy && !e.remotePlayer) continue; if (e.isBoat && e.tr) { const k2 = Math.min(1, dt * 12); for (let i = 0; i < 9; i++) e.rot[i] += (e.tr[i] - e.rot[i]) * k2; e.prot = e.rot; } netInterp(e, dt); } }

@@ -682,74 +682,81 @@ function dynTreePlan(sp, x, y, z, stage, seed) {
   const r = mulberry32((seed ^ Math.imul(x, 73856093) ^ Math.imul(z, 19349663) ^ 0x7ee5) >>> 0);
   const logs = new Map(), leaves = new Map(); const K = (a, b, c) => a + ',' + b + ',' + c;
   const s = [0.32, 0.55, 0.8, 1][stage];
-  const addLog = (a, b, c, t) => { t = clamp(Math.round(t), 0, 7); const k = K(a, b, c); const o = logs.get(k); if (!o || o[3] < t) logs.set(k, [a, b, c, t]); };
+  const addLog = (a, b, c, t) => { t = clamp(Math.round(t), 0, 7); const k = K(a, b, c); const o = logs.get(k); if (!o || o[3] < t) logs.set(k, [a, b, c, t]); leaves.delete(k); };
   const leaf = (a, b, c) => { const k = K(a, b, c); if (!logs.has(k)) leaves.set(k, [a, b, c]); };
-  const blob = (cx, cy, cz, rx, ry) => { rx = Math.max(1, rx); ry = Math.max(1, ry); for (let dy = -ry; dy <= ry; dy++) for (let dz = -rx; dz <= rx; dz++) for (let dx = -rx; dx <= rx; dx++) { const d = (dx * dx + dz * dz) / (rx * rx + 0.5) + (dy * dy) / (ry * ry + 0.5); if (d <= 1 && !(d > 0.7 && r() < 0.35)) leaf(cx + dx, cy + dy, cz + dz); } };
-  const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-  // rama: avanza en (dx,dz), sube un bloque cada `rise` pasos y a veces se desvía a un lado; deja la punta para la copa
-  const branch = (bx, by, bz, d, len, t0, rise, droop) => {
-    let cx = bx, cy = by, cz = bz; const [dx, dz] = d;
+  // copa: elipsoide con borde irregular (sin agujeros por dentro)
+  const blob = (cx, cy, cz, rx, ry, flat) => { rx = Math.max(1, rx); ry = Math.max(0, ry); const ix = Math.ceil(rx), iy = Math.ceil(ry);
+    for (let dy = -iy; dy <= iy; dy++) for (let dz = -ix; dz <= ix; dz++) for (let dx = -ix; dx <= ix; dx++) {
+      const yy = flat && dy < 0 ? dy * 1.8 : dy; const d = (dx * dx + dz * dz) / (rx * rx) + (ry > 0 ? (yy * yy) / (ry * ry) : (dy ? 9 : 0));
+      if (d <= 1 && !(d > 0.72 && r() < 0.4)) leaf(cx + dx, cy + dy, cz + dz); } };
+  // rama en cualquier dirección horizontal (escalera 6-conexa) que sube con pendiente `rise` (bloques por bloque de avance)
+  const branch = (bx, by, bz, ang, len, t0, rise, tipLeaves, sub) => {
+    let fx = bx + 0.5, fz = bz + 0.5, fy = by + 0.5; let cx = bx, cy = by, cz = bz; const dx = Math.cos(ang), dz = Math.sin(ang);
     for (let i = 1; i <= len; i++) {
-      const t = t0 * (1 - (i - 1) / len);
-      if (rise > 0 && i % rise === 0) { cy++; addLog(cx, cy, cz, t); }
-      if (droop && i === len && r() < 0.5) { cy--; addLog(cx, cy, cz, t); }
-      cx += dx; cz += dz; addLog(cx, cy, cz, t);
-      if (r() < 0.22 && i < len) { const sx = dz, sz = dx; const sg = r() < 0.5 ? 1 : -1; cx += sx * sg; cz += sz * sg; addLog(cx, cy, cz, t); }
+      const t = t0 * (1 - (i - 1) / (len + 0.5)); fx += dx; fz += dz; fy += rise;
+      const nx = Math.floor(fx), nz = Math.floor(fz), ny = Math.floor(fy);
+      if (ny > cy) { cy = ny; addLog(cx, cy, cz, t); }
+      if (nx !== cx) { cx = nx; addLog(cx, cy, cz, t); }
+      if (nz !== cz) { cz = nz; addLog(cx, cy, cz, t); }
+      if (sub && i === Math.ceil(len * 0.55) && len >= 3) { const sa = ang + (r() < 0.5 ? 1 : -1) * (0.7 + r() * 0.5); branch(cx, cy, cz, sa, Math.max(1, Math.round(len * 0.5)), Math.max(0, t - 1), rise + 0.15, tipLeaves, false); }
     }
+    if (tipLeaves) tipLeaves(cx, cy, cz);
     return [cx, cy, cz];
   };
-  const trunk = (H, T0, taper) => { for (let i = 0; i < H; i++) addLog(x, y + i, z, T0 * (1 - taper * i / H)); };
-  const tT = (H, T0, taper, yy) => T0 * (1 - taper * (yy - y) / H);
-  let leafId = sp;
+  const trunk = (H, T0, Tt) => { for (let i = 0; i < H; i++) addLog(x, y + i, z, T0 + (Tt - T0) * Math.pow(i / Math.max(1, H - 1), 0.8)); };
+  const tAt = (H, T0, Tt, yy) => T0 + (Tt - T0) * Math.pow(clamp((yy - y) / Math.max(1, H - 1), 0, 1), 0.8);
+  const a0 = r() * Math.PI * 2;
   switch (sp) {
     case 'oak': case 'cherry': case 'dark_oak': {
-      const big = sp === 'dark_oak'; const H = Math.max(2, Math.round((big ? 6 : 5) * s + r() * 2 * s) + 1), T0 = Math.round((big ? 7 : 6) * s + 0.4);
-      trunk(H, T0, 0.6); const nb = Math.round((big ? 5 : sp === 'cherry' ? 4 : 3) * s + r() * 2 * s); let last = -1;
+      const big = sp === 'dark_oak', ch = sp === 'cherry';
+      const H = Math.max(2, Math.round(((big ? 7 : ch ? 5 : 6) + r() * 2) * s)), T0 = Math.round((big ? 7 : 6.5) * s + 0.3), Tt = Math.max(0, Math.round(T0 * 0.35));
+      trunk(H, T0, Tt);
+      const nb = Math.max(1, Math.round(((big ? 5 : ch ? 4 : 4) + r() * 1.5) * s));
+      const cl = (cx, cy, cz) => blob(cx, cy + 1, cz, ((big ? 3 : ch ? 3.2 : 2.6) + r() * 0.6) * s + 0.4, (big ? 1.8 : 1.6) * s + 0.4, true);
       for (let i = 0; i < nb; i++) {
-        const hy = y + Math.floor(H * (0.45 + 0.5 * r())); let di = (r() * 4) | 0; if (di === last) di = (di + 1 + ((r() * 3) | 0)) % 4; last = di;
-        const len = Math.max(1, Math.round((2 + r() * (big ? 3 : 2.5)) * s + (sp === 'cherry' ? 1 : 0)));
-        const tip = branch(x, hy, z, DIRS[di], len, Math.max(0, tT(H, T0, 0.6, hy) - 2), sp === 'cherry' ? 3 : 2, false);
-        blob(tip[0], tip[1] + 1, tip[2], Math.round((big ? 3 : 2.4) * s + 0.5), Math.round((big ? 2 : 1.6) * s + 0.4));
+        const hy = y + Math.max(1, Math.floor(H * (0.42 + 0.48 * (i + r() * 0.6) / nb)));
+        const ang = a0 + i * (Math.PI * 2 / nb) + (r() - 0.5) * 0.8; const len = Math.max(1, Math.round(((big ? 4 : ch ? 4.5 : 3.6) + r() * 1.5) * s));
+        branch(x, hy, z, ang, len, Math.max(0, tAt(H, T0, Tt, hy) - 2), ch ? 0.35 : 0.5, cl, s > 0.6);
       }
-      blob(x, y + H, z, Math.round((big ? 3.4 : 2.8) * s + 0.5), Math.round(2 * s + 0.5));
+      blob(x, y + H, z, ((big ? 3.6 : ch ? 3.4 : 3) + r() * 0.5) * s + 0.5, 2.2 * s + 0.4, true);
       break;
     }
     case 'birch': {
-      const H = Math.max(3, Math.round((7 + r() * 3) * s) + 1), T0 = Math.round(4 * s + 0.3); trunk(H, T0, 0.5);
-      const nb = Math.round(4 * s + r() * 2 * s);
-      for (let i = 0; i < nb; i++) { const hy = y + Math.floor(H * (0.5 + 0.45 * r())); const tip = branch(x, hy, z, DIRS[(r() * 4) | 0], 1 + ((r() * 2 * s) | 0), 0.6, 1, false); blob(tip[0], tip[1] + 1, tip[2], Math.round(1.6 * s + 0.4), 1); }
-      for (let yy = y + Math.floor(H * 0.45); yy <= y + H + 1; yy++) { const k = (yy - y) / (H + 1); const rr = Math.max(1, Math.round((k > 0.85 ? 1.2 : 2.3) * s + 0.3)); blob(x, yy, z, rr, 0); }
+      const H = Math.max(3, Math.round((8 + r() * 3) * s)), T0 = Math.round(4.5 * s + 0.3); trunk(H, T0, Math.max(0, T0 - 3));
+      const nb = Math.max(1, Math.round((5 + r() * 2) * s));
+      for (let i = 0; i < nb; i++) { const hy = y + Math.floor(H * (0.45 + 0.5 * r())); branch(x, hy, z, a0 + i * 2.4, Math.max(1, Math.round((1.5 + r() * 1.5) * s)), 0.8, 0.8, (cx, cy, cz) => blob(cx, cy, cz, 1.6 * s + 0.4, 1.2 * s + 0.3), false); }
+      blob(x, y + Math.round(H * 0.72), z, 2.2 * s + 0.5, H * 0.33 + 0.5);
       break;
     }
     case 'spruce': {
-      const H = Math.max(3, Math.round((9 + r() * 4) * s) + 2), T0 = Math.round(5 * s + 0.3); trunk(H, T0, 0.75);
+      const H = Math.max(3, Math.round((10 + r() * 5) * s) + 1), T0 = Math.round(5.5 * s + 0.3); trunk(H, T0, 0);
       for (let yy = y + 2; yy < y + H; yy++) {
-        const k = (yy - y - 2) / Math.max(1, H - 2); const rr = Math.max(1, Math.round((1 - k) * 3.4 * s + 0.6));
-        if (((yy - y) & 1) === 0 || rr <= 1) { blob(x, yy, z, rr, 0); if (rr >= 2) for (const d of DIRS) if (r() < 0.7) branch(x, yy, z, d, rr - 1, 0.5, 0, true); }
-        else blob(x, yy, z, Math.max(1, rr - 1), 0);
+        const k = (yy - y - 2) / Math.max(1, H - 2); const rr = (1 - k) * 3.6 * s + 0.8; const layer = ((yy - y) % 2) === 0;
+        if (layer && rr >= 1.8) { const nb = 3 + ((r() * 2) | 0); for (let i = 0; i < nb; i++) branch(x, yy, z, a0 + yy + i * (Math.PI * 2 / nb), Math.max(1, Math.round(rr - 0.8)), 0.6, -0.15, null, false); }
+        blob(x, yy, z, layer ? rr : Math.max(1, rr - 1.1), 0);
       }
       leaf(x, y + H, z); leaf(x, y + H + 1, z);
       break;
     }
     case 'jungle': {
-      const H = Math.max(4, Math.round((12 + r() * 6) * s) + 2), T0 = Math.round(7 * s + 0.3); trunk(H, T0, 0.55);
-      const nb = Math.max(1, Math.round(3 * s));
-      for (let i = 0; i < nb; i++) { const hy = y + Math.floor(H * (0.7 + 0.25 * r())); const tip = branch(x, hy, z, DIRS[(i + ((r() * 4) | 0)) % 4], Math.round((3 + r() * 2) * s) + 1, Math.max(0, tT(H, T0, 0.55, hy) - 2), 2, false); blob(tip[0], tip[1] + 1, tip[2], Math.round(3 * s + 0.4), Math.round(1.6 * s + 0.4)); }
-      blob(x, y + H, z, Math.round(3.4 * s + 0.5), Math.round(2 * s + 0.4));
+      const H = Math.max(4, Math.round((13 + r() * 6) * s) + 1), T0 = Math.round(7 * s + 0.3), Tt = Math.max(1, Math.round(T0 * 0.4)); trunk(H, T0, Tt);
+      const nb = Math.max(1, Math.round(4 * s));
+      for (let i = 0; i < nb; i++) { const hy = y + Math.floor(H * (0.68 + 0.27 * r())); branch(x, hy, z, a0 + i * (Math.PI * 2 / nb), Math.max(1, Math.round((3.5 + r() * 2) * s)), Math.max(0, tAt(H, T0, Tt, hy) - 2), 0.45, (cx, cy, cz) => blob(cx, cy + 1, cz, 3 * s + 0.5, 1.6 * s + 0.4, true), s > 0.6); }
+      blob(x, y + H, z, 3.6 * s + 0.5, 2 * s + 0.4, true);
       break;
     }
     case 'acacia': {
-      const h1 = Math.max(1, Math.round(3 * s) + 1), T0 = Math.round(5 * s + 0.3); for (let i = 0; i < h1; i++) addLog(x, y + i, z, T0 * (1 - 0.3 * i / h1));
-      const limbs = [DIRS[(r() * 4) | 0]]; if (s > 0.5) { let d2 = DIRS[(r() * 4) | 0]; if (d2 === limbs[0]) d2 = [-d2[0], -d2[1]]; limbs.push(d2); }
-      for (const [dx, dz] of limbs) {
-        let cx = x, cy = y + h1 - 1, cz = z; const n = Math.max(1, Math.round((2.5 + r()) * s)); let t = Math.max(0, T0 - 2);
-        for (let i = 0; i < n; i++) { cy++; addLog(cx, cy, cz, t); cx += dx; cz += dz; addLog(cx, cy, cz, t); t = Math.max(0, t - 1); }
-        cy++; addLog(cx, cy, cz, Math.max(0, t - 1)); const R = Math.round(3 * s + 0.5); blob(cx, cy + 1, cz, R, 0); blob(cx, cy + 2, cz, Math.max(1, R - 1), 0);
+      const h1 = Math.max(1, Math.round(3.5 * s) + 1), T0 = Math.round(5.5 * s + 0.3); trunk(h1, T0, T0 - 1);
+      const limbs = s > 0.5 ? 2 + (r() < 0.4 ? 1 : 0) : 1;
+      for (let i = 0; i < limbs; i++) {
+        const ang = a0 + i * (Math.PI * 2 / limbs) + (r() - 0.5) * 0.6;
+        const tip = branch(x, y + h1 - 1, z, ang, Math.max(1, Math.round((3 + r()) * s)), Math.max(0, T0 - 2), 0.9, null, false);
+        addLog(tip[0], tip[1] + 1, tip[2], 0); const R = 3 * s + 0.8; blob(tip[0], tip[1] + 2, tip[2], R, 0); blob(tip[0], tip[1] + 3, tip[2], Math.max(1, R - 1.2), 0);
       }
       break;
     }
   }
-  return { logs, leaves, leafId: leafId + '_leaves', logId: 'dyn_' + sp + '_log' };
+  return { logs, leaves, leafId: sp + '_leaves', logId: 'dyn_' + sp + '_log' };
 }
 // coloca (o hace crecer) el árbol: las ramas solo ocupan aire, plantas, hojas o ramas del mismo árbol; las hojas solo aire
 function dynTreePlace(S, x, y, z, sp, stage, seed, stumpKeep) {
@@ -758,11 +765,20 @@ function dynTreePlace(S, x, y, z, sp, stage, seed, stumpKeep) {
   // se coloca solo lo que sigue unido a la raíz recorriendo el esqueleto desde ella
   const live = !!S.getMeta; const K = (a, b, c) => a + ',' + b + ',' + c; const N6 = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
   const ground = b => b > 0 && REG[b] && REG[b].solid && !REG[b].leaves && !REG[b].dynLog && !REG[b].replace;
+  // al crecer en el mundo: las ramas que ya son de este árbol (las más cercanas a su raíz por el esqueleto) sí se pueden tocar
+  let own = null;
+  if (live) {
+    const comp = new Map(), st = [[x, y, z]]; comp.set(K(x, y, z), [x, y, z]);
+    while (st.length && comp.size < 800) { const [a, b, c] = st.pop(); for (const [dx, dy, dz] of N6) { const p = a + dx, q = b + dy, t = c + dz; const k = K(p, q, t); if (comp.has(k) || Math.abs(p - x) > 12 || Math.abs(t - z) > 12) continue; const nb = S.get(p, q, t); if (nb > 0 && REG[nb].dynLog) { comp.set(k, [p, q, t]); st.push([p, q, t]); } } }
+    const ow = new Map(), oq = []; for (const [k, [a, b, c]] of comp) if (k === K(x, y, z) || ground(S.get(a, b - 1, c))) { ow.set(k, k); oq.push(k); }
+    for (let i = 0; i < oq.length; i++) { const k = oq[i]; const [a, b, c] = comp.get(k); for (const [dx, dy, dz] of N6) { const nk = K(a + dx, b + dy, c + dz); if (comp.has(nk) && !ow.has(nk)) { ow.set(nk, ow.get(k)); oq.push(nk); } } }
+    own = new Set(); for (const [k, o] of ow) if (o === K(x, y, z)) own.add(k);
+  }
   const ok = (a, b, c, root) => {
     const cur = S.get(a, b, c); if (cur < 0) return false; const cd = cur > 0 ? REG[cur] : null;
     if (cur !== 0 && cur !== ID.water && !(cd && (cd.replace || cd.leaves || cur === logId))) return false;
     if (!root && !P.logs.has(K(a, b - 1, c)) && ground(S.get(a, b - 1, c))) return false;
-    for (const [dx, dy, dz] of N6) { const k = K(a + dx, b + dy, c + dz); if (P.logs.has(k)) continue; const nb = S.get(a + dx, b + dy, c + dz); if (nb > 0 && REG[nb].dynLog && !(live && nb === logId)) return false; }
+    for (const [dx, dy, dz] of N6) { const k = K(a + dx, b + dy, c + dz); if (P.logs.has(k)) continue; const nb = S.get(a + dx, b + dy, c + dz); if (nb > 0 && REG[nb].dynLog && !(own && own.has(k))) return false; }
     return true;
   };
   const rk = K(x, y, z); if (!P.logs.has(rk) || !ok(x, y, z, true)) return;

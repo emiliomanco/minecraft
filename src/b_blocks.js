@@ -158,7 +158,7 @@ for (const [c, dn] of [['white', 'blanca'], ['orange', 'naranja'], ['yellow', 'a
 defB('tnt', 'Dinamita', { tex: { top: 'tnt_top', bottom: 'tnt_bottom', side: 'tnt_side' }, hard: 0, tnt: true });
 defB('bed', 'Cama', { render: 'shape', shape: 'bed', solid: true, box: [0, 0, 0, 16, 9, 16], tex: { top: 'bed_top', side: 'bed_side', bottom: 'oak_planks' }, hard: 0.2, ui: 'bed' });
 defB('spawner', 'Generador de monstruos', { trans: 1, hard: 5, tool: 'pickaxe', lvl: 1, drop: null });
-defB('sponge', 'Esponja', { hard: 0.6 });
+defB('sponge', 'Bloque de esponja', { hard: 0.6 });
 defB('wet_sponge', 'Esponja mojada', { hard: 0.6 });
 defB('prismarine', 'Prismarina', { hard: 1.5, tool: 'pickaxe', lvl: 1 });
 defB('prismarine_bricks', 'Ladrillos de prismarina', { hard: 1.5, tool: 'pickaxe', lvl: 1 });
@@ -260,6 +260,14 @@ for (const [n, dn, tool] of [['oak', 'roble', 'axe'], ['spruce', 'abeto', 'axe']
 defB('glass_pane', 'Panel de cristal', { render: 'shape', shape: 'pane', trans: 1, tex: 'glass', solid: true, hard: 0.3, drop: null });
 defB('oak_fence_gate', 'Puerta de valla de roble', { render: 'shape', shape: 'gate', solid: true, tex: 'oak_planks', hard: 2, tool: 'axe' });
 defB('campfire', 'Fogata', { render: 'box', box: [0, 0, 0, 16, 7, 16], tex: { top: 'campfire_top', side: 'campfire_side', bottom: 'oak_log' }, light: 15, hard: 2, tool: 'axe', drop: 'charcoal', dropN: 2, hurt: 1, campfire: true });
+// bloques de colores que faltaban (al final de la lista para no mover los IDs de los mundos guardados)
+const DYE16 = [['white', 'blanco', 'blanca', [234, 236, 236], [209, 178, 161]], ['light_gray', 'gris claro', 'gris claro', [142, 142, 135], [135, 107, 98]], ['gray', 'gris', 'gris', [62, 68, 71], [57, 42, 35]], ['black', 'negro', 'negra', [20, 21, 25], [37, 22, 16]],
+  ['brown', 'marrón', 'marrón', [114, 71, 40], [77, 51, 35]], ['red', 'rojo', 'roja', [160, 39, 34], [143, 61, 46]], ['orange', 'naranja', 'naranja', [240, 118, 20], [161, 83, 37]], ['yellow', 'amarillo', 'amarilla', [248, 197, 39], [186, 133, 35]],
+  ['lime', 'lima', 'lima', [112, 185, 25], [103, 117, 52]], ['green', 'verde', 'verde', [84, 109, 27], [76, 83, 42]], ['cyan', 'cian', 'cian', [21, 137, 145], [86, 91, 91]], ['light_blue', 'azul claro', 'azul claro', [58, 175, 217], [113, 108, 137]],
+  ['blue', 'azul', 'azul', [53, 57, 157], [74, 59, 91]], ['purple', 'morado', 'morada', [121, 42, 172], [118, 70, 86]], ['magenta', 'magenta', 'magenta', [189, 68, 179], [149, 88, 108]], ['pink', 'rosa', 'rosa', [237, 141, 172], [161, 78, 78]]];
+for (const [c, m, f] of DYE16) if (ID[c + '_wool'] === undefined) defB(c + '_wool', 'Lana ' + f, { hard: 0.8, flammable: true });
+for (const [c, m, f] of DYE16) if (ID[c + '_terracotta'] === undefined) defB(c + '_terracotta', 'Terracota ' + f, { hard: 1.25, tool: 'pickaxe', lvl: 1 });
+for (const [c, m] of DYE16) defB(c + '_concrete', 'Hormigón ' + m, { hard: 1.8, tool: 'pickaxe', lvl: 1 });
 for (const d of REG) if (d && d.crop) d.stages = [0, 1, 2, 3].map(i => texLayer(d.crop + '_' + i));
 const BLOCK_COUNT = _nextBlock;
 if (BLOCK_COUNT >= ITEM_BASE) console.error('Demasiados bloques', BLOCK_COUNT);
@@ -310,7 +318,7 @@ defI('spyglass', 'Catalejo', { stack: 1, spyglass: true }); defI('map', 'Mapa', 
 defI('turtle_helmet', 'Caparazón de tortuga', { stack: 1, armor: { slot: 0, pts: 2, mat: 'turtle', tough: 0 }, dur: 275 });
 defI('trident', 'Tridente', { stack: 1, dur: 250, dmg: 9, trident: true }); defI('crossbow', 'Ballesta', { stack: 1, dur: 465, bow: true, crossbow: true });
 defI('mace', 'Maza', { stack: 1, dur: 500, dmg: 6, mace: true });
-defI('one_hit_obliterator', 'One-Hit Obliterator', { stack: 1, dmg: 1e9, obliterator: true }); // sin receta: solo en el menú creativo defI('heavy_core', 'Núcleo denso');
+defI('heavy_core', 'Núcleo denso');
 defI('experience_bottle', 'Frasco de experiencia', { throwable: 'xpbottle' }); defI('brush', 'Brocha', { stack: 1, dur: 64 }); defI('fishing_rod', 'Caña de pescar', { stack: 1, dur: 64 });
 defI('broom', 'Escoba', { stack: 1, broom: true }); defI('oak_boat', 'Bote', { stack: 1, boatItem: true });
 const TOOLMAT = { wooden: { lvl: 1, speed: 2, dur: 59, dmg: 0, n: 'madera', col: [137, 103, 59] }, stone: { lvl: 2, speed: 4, dur: 131, dmg: 1, n: 'piedra', col: [130, 130, 130] }, iron: { lvl: 3, speed: 6, dur: 250, dmg: 2, n: 'hierro', col: [220, 220, 220] }, golden: { lvl: 1, speed: 12, dur: 32, dmg: 0, n: 'oro', col: [250, 220, 70] }, diamond: { lvl: 4, speed: 8, dur: 1561, dmg: 3, n: 'diamante', col: [80, 230, 220] }, netherite: { lvl: 5, speed: 9, dur: 2031, dmg: 4, n: 'netherita', col: [80, 70, 75] } };
@@ -325,6 +333,9 @@ for (const m in ARMORMAT) ARMORPART.forEach(([p, dn, du], slot) => {
 });
 // (añadir objetos nuevos siempre al final para no cambiar los IDs guardados)
 defI('fire_extinguisher', 'Extintor', { stack: 1, dur: 400, extinguisher: true });
+defI('one_hit_obliterator', 'One-Hit Obliterator', { stack: 1, dmg: 1e9, obliterator: true }); /* sin receta: solo en el menú creativo */
+defI('flamethrower', 'Lanzallamas', { stack: 1, dur: 600, flamethrower: true });
+defI('sponge_item', 'Esponja', { stack: 1, pbfSponge: true }); /* borra partículas de agua y lava del fluido continuo */
 // ---- codificación del meta de líquidos (agua/lava), compartida por simulación (k_fluids), mallado y render:
 //  bits 0-2: volumen en octavos (0 = bloque lleno 8/8, 1..7 = n/8)
 //  bit 3 (8): cayendo (columna vertical / chorro)
@@ -371,30 +382,69 @@ function genTex(name) {
   TEXCACHE[name] = p.d; return p.d;
 }
 function C(hex) { return [(hex >> 16) & 255, (hex >> 8) & 255, hex & 255]; }
-function stoneLike(p, c, v = 12) { p.noise(c, v); p.blobs(c.map(x => x - 18), 6, 4, 8); p.blobs(c.map(x => x + 12), 4, 3, 8); }
+// ruido suave que se repite cada 16 px (rejilla de periodo n): las texturas encajan sin costuras
+function tnoise(seed, n) {
+  const r = mulberry32(seed >>> 0); const g = Array.from({ length: n * n }, () => r());
+  const G = (i, j) => g[(((j % n) + n) % n) * n + (((i % n) + n) % n)], sm = t => t * t * (3 - 2 * t);
+  return (x, y) => { const fx = x * n / 16, fy = y * n / 16, x0 = Math.floor(fx), y0 = Math.floor(fy), tx = sm(fx - x0), ty = sm(fy - y0);
+    const a = G(x0, y0) + (G(x0 + 1, y0) - G(x0, y0)) * tx, b = G(x0, y0 + 1) + (G(x0 + 1, y0 + 1) - G(x0, y0 + 1)) * tx; return a + (b - a) * ty; };
+}
+// celdas de Voronoi que se repiten cada 16 px: [distancia al centro más cercano, al segundo, índice, centro]
+function tvoronoi(r, n) {
+  const pts = Array.from({ length: n }, () => [r() * 16, r() * 16]);
+  return (x, y) => { let d1 = 1e9, d2 = 1e9, k = 0, c = null; for (let i = 0; i < n; i++) for (let oy = -16; oy <= 16; oy += 16) for (let ox = -16; ox <= 16; ox += 16) { const qx = pts[i][0] + ox, qy = pts[i][1] + oy; const d = Math.hypot(x + 0.5 - qx, y + 0.5 - qy); if (d < d1) { d2 = d1; d1 = d; k = i; c = [qx, qy]; } else if (d < d2) d2 = d; } return [d1, d2, k, c]; };
+}
+const texShade = (c, k, add = 0) => [c[0] * k + add, c[1] * k + add, c[2] * k + add];
+// tonos escalonados (pixel art): t en 0..1 → uno de n niveles entre lo oscuro y lo claro
+function stepTone(c, t, n = 5, lo = 0.8, hi = 1.18) { const q = Math.round(Math.max(0, Math.min(1, t)) * (n - 1)) / (n - 1); return texShade(c, lo + (hi - lo) * q); }
+function stoneLike(p, c, v = 12) {
+  const s = hashStr(p.name), n1 = tnoise(s + 1, 4), n2 = tnoise(s + 2, 8);
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const t = n1(x, y) * 0.55 + n2(x, y) * 0.35 + p.r() * 0.22 - 0.06; p.set(x, y, stepTone(c, t, 5, 0.82, 1.14)); }
+  for (let i = 0; i < 5; i++) { let x = (p.r() * 16) | 0, y = (p.r() * 16) | 0; const len = 1 + ((p.r() * 3) | 0); for (let j = 0; j < len; j++) { p.set(x, y, texShade(c, 0.74)); x = (x + 1) & 15; if (p.r() < 0.4) y = (y + 1) & 15; } }
+}
 function oreTex(p, base, col, col2) {
-  p.copy(base);
-  const r = p.r; for (let i = 0; i < 5; i++) { const cx = 2 + (r() * 12) | 0, cy = 2 + (r() * 12) | 0; const n = 2 + (r() * 3) | 0; for (let j = 0; j < n; j++) { const x = cx + ((r() * 3) | 0) - 1, y = cy + ((r() * 3) | 0) - 1; p.set(x, y, j % 2 ? col : (col2 || col.map(v => v * 0.75))); p.set(x + 1, y, col.map(v => Math.min(255, v * 1.15))); } }
+  p.copy(base); const r = p.r; const B = genTex(base); const at = (x, y) => [B[(y * 16 + x) * 4], B[(y * 16 + x) * 4 + 1], B[(y * 16 + x) * 4 + 2]];
+  const shapes = [[[0, 0], [1, 0], [0, 1], [1, 1], [2, 1], [2, 2]], [[1, 0], [0, 1], [1, 1], [2, 1], [1, 2], [2, 2]], [[0, 0], [1, 0], [2, 0], [1, 1], [2, 1]], [[0, 0], [1, 1], [0, 1], [1, 2]], [[0, 0], [1, 0], [1, 1], [2, 2], [1, 2], [0, 1]], [[1, 0], [2, 0], [0, 1], [1, 1], [2, 1], [1, 2]]];
+  const used = new Set(); const light = col.map(v => Math.min(255, v * 1.2 + 25));
+  for (let i = 0; i < 9; i++) { const cx = 1 + ((r() * 12) | 0), cy = 1 + ((r() * 12) | 0); const sh = shapes[(r() * shapes.length) | 0];
+    const pix = sh.map(([dx, dy]) => [(cx + dx) & 15, (cy + dy) & 15]); if (pix.some(([x, y]) => used.has(x + y * 16))) continue;
+    for (const [x, y] of pix) for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const xx = (x + ox) & 15, yy = (y + oy) & 15; if (!pix.some(([a, b]) => a === xx && b === yy) && !used.has(xx + yy * 16)) p.set(xx, yy, texShade(at(xx, yy), 0.78)); }
+    pix.forEach(([x, y], k) => { used.add(x + y * 16); p.set(x, y, k === 0 ? light : (k === pix.length - 1 ? col2 : col)); }); }
 }
 function planks(p, c) {
-  p.noise(c, 8); for (let y = 0; y < 16; y++) { if (y % 4 === 3) for (let x = 0; x < 16; x++) p.set(x, y, c.map(v => v * 0.62)); }
-  for (let b = 0; b < 4; b++) { const x = ((b * 7 + 3) % 16); p.set(x, b * 4 + 1, c.map(v => v * 0.7)); p.set((x + 8) % 16, b * 4 + 2, c.map(v => v * 0.75)); }
-  for (let i = 0; i < 20; i++) { const y = (p.r() * 16) | 0; if (y % 4 === 3) continue; const x = (p.r() * 14) | 0; p.set(x, y, c.map(v => v * 0.88)); p.set(x + 1, y, c.map(v => v * 0.88)); }
+  const seams = [3, 11, 6, 14].map(v => (v + ((p.r() * 3) | 0)) & 15);
+  for (let y = 0; y < 16; y++) { const b = y >> 2, row = y & 3; const g0 = (p.r() - 0.5) * 0.1;
+    for (let x = 0; x < 16; x++) { let k = 1 + g0 + Math.sin((x + b * 5) * 0.55 + y * 2.1) * 0.035 + (p.r() - 0.5) * 0.05;
+      if (row === 3) k = 0.64; else if (row === 0) k += 0.05; if (x === seams[b] && row !== 3) k = 0.7; else if (x === ((seams[b] + 1) & 15) && row !== 3) k -= 0.04;
+      p.set(x, y, texShade(c, k)); } }
+  for (let i = 0; i < 9; i++) { const y = (p.r() * 16) | 0; if ((y & 3) === 3) continue; const x = (p.r() * 14) | 0, n = 2 + ((p.r() * 3) | 0); for (let j = 0; j < n; j++) p.set(x + j, y, texShade(c, 0.86)); }
 }
-function logSide(p, c, dark) { for (let x = 0; x < 16; x++) { const k = (p.r() - 0.5) * 20; const stripe = (x % 4 === 0 || p.r() < 0.15) ? 0.72 : 1; for (let y = 0; y < 16; y++) p.set(x, y, c.map(v => v * stripe + k + (p.r() - 0.5) * 10)); } if (dark) p.blobs(dark, 5, 3, 10); }
+function logSide(p, c, dark) {
+  const col = Array.from({ length: 16 }, () => 0.9 + p.r() * 0.18); const groove = Array.from({ length: 16 }, (_, x) => x % 4 === 0 || p.r() < 0.12);
+  for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) { let k = col[x] + (p.r() - 0.5) * 0.08; if (groove[x] && p.r() > 0.12) k = 0.62 + p.r() * 0.08; else if (groove[(x + 15) & 15]) k += 0.06; p.set(x, y, texShade(c, k)); }
+  for (let i = 0; i < 4; i++) { const x = (p.r() * 16) | 0, y = (p.r() * 14) | 0; p.set(x, y, texShade(c, 0.55)); p.set(x, y + 1, texShade(c, 0.6)); }
+  if (dark) p.blobs(dark, 5, 3, 10);
+}
 function logTop(p, bark, inner) {
   for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
-    const d = Math.max(Math.abs(x - 7.5), Math.abs(y - 7.5)); const ring = Math.floor(d) % 2;
-    const c = d > 6.6 ? bark : inner.map(v => v * (ring ? 0.88 : 1)); p.set(x, y, c.map(v => v + (p.r() - 0.5) * 10));
+    const ax = Math.abs(x - 7.5), ay = Math.abs(y - 7.5); const d = Math.max(ax, ay) + Math.min(ax, ay) * 0.18;
+    let c; if (d > 6.9) c = texShade(bark, 0.95 + p.r() * 0.12); else if (d > 6.2) c = texShade(inner, 0.7); else { const ring = Math.floor(d * 0.95) % 2; c = texShade(inner, (ring ? 0.86 : 1) + (p.r() - 0.5) * 0.05); }
+    p.set(x, y, c);
   }
+  p.set(7, 7, texShade(inner, 0.75)); p.set(8, 8, texShade(inner, 0.8));
 }
-function leaves(p, c, holes = 0.18) { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const r = p.r(); if (r < holes) { p.set(x, y, [0, 0, 0], 0); continue; } const k = (p.r() - 0.5) * 50; const dk = p.r() < 0.25 ? 0.7 : 1; p.set(x, y, [c[0] * dk + k * 0.5, c[1] * dk + k, c[2] * dk + k * 0.4]); } }
+function leaves(p, c, holes = 0.18) {
+  const n = tnoise(hashStr(p.name) + 7, 4);
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const t = n(x, y); const r = p.r();
+    if (r < holes * (0.6 + (1 - t) * 0.8)) { p.set(x, y, [0, 0, 0], 0); continue; }
+    const k = t * 0.5 + p.r() * 0.5; const f = k < 0.25 ? 0.68 : k < 0.5 ? 0.84 : k < 0.78 ? 1 : 1.13; p.set(x, y, [c[0] * f, c[1] * f, c[2] * f]); }
+}
 function bricks(p, brick, mortar, bh = 4, bw = 8, v = 14) {
-  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
-    const row = Math.floor(y / bh); const off = (row % 2) * (bw / 2);
-    const m = (y % bh === bh - 1) || ((x + off) % bw === bw - 1);
-    const k = (p.r() - 0.5) * v; const c = m ? mortar : brick; p.set(x, y, c.map(q => q + k));
-  }
+  for (let row = 0; row * bh < 16; row++) { const off = (row % 2) * (bw / 2);
+    for (let bx = -1; bx * bw < 16 + bw; bx++) { const shade = 0.9 + p.r() * 0.18;
+      for (let y = row * bh; y < row * bh + bh && y < 16; y++) for (let i = 0; i < bw; i++) { const x = bx * bw + i + off; if (x < 0 || x > 15) continue;
+        const ly = y - row * bh; const m = ly === bh - 1 || i === bw - 1; if (m) { p.set(x, y, texShade(mortar, 0.95 + p.r() * 0.1)); continue; }
+        let k = shade + (p.r() - 0.5) * v / 120; if (ly === 0) k += 0.08; if (ly === bh - 2) k -= 0.08; if (i === 0) k += 0.04; p.set(x, y, texShade(brick, k)); } } }
 }
 function tiles(p, c, size = 4, line) { p.noise(c, 6); for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) if (x % size === 0 || y % size === 0) p.set(x, y, line || c.map(v => v * 0.8)); }
 function cross(p, fn) { p.clear(); fn(p); }
@@ -404,7 +454,9 @@ function plant(p, stem, flower, petal) {
   if (flower) { for (let dy = -2; dy <= 1; dy++) for (let dx = -2; dx <= 2; dx++) if (Math.abs(dx) + Math.abs(dy) < 3) p.set(7 + dx, 5 + dy, (dx === 0 && dy === -0) ? (petal || flower.map(v => v * 0.6)) : flower.map(v => v + (p.r() - 0.5) * 30)); }
 }
 function grassBlades(p, c, n = 14) { p.clear(); for (let i = 0; i < n; i++) { const x = 1 + ((p.r() * 14) | 0); const h = 5 + ((p.r() * 10) | 0); let xx = x; for (let y = 15; y > 15 - h; y--) { p.set(xx, y, c.map(v => v * (0.6 + 0.5 * (15 - y) / h) + (p.r() - 0.5) * 20)); if (p.r() < 0.2) xx += p.r() < 0.5 ? -1 : 1; } } }
-function wool(p, c) { p.noise(c, 8); for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) if ((x + y * 3) % 5 === 0) p.set(x, y, c.map(v => v * 0.86)); }
+function wool(p, c) {
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { let k = 1 + (p.r() - 0.5) * 0.07; const a = (x + y) & 3, b = (x - y + 16) & 3; if (a === 0) k -= 0.06; else if (b === 0) k += 0.04; if (((x >> 1) + (y >> 1)) % 5 === 0) k -= 0.03; p.set(x, y, texShade(c, k)); }
+}
 function soft(p, c, power = 1) { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const d = Math.hypot(x - 7.5, y - 7.5) / 8; const a = Math.max(0, 1 - d); p.set(x, y, c, 255 * Math.pow(a, power)); } }
 
 Object.assign(TEXGEN, {
@@ -680,11 +732,11 @@ for (let i = 0; i < 10; i++) TEXGEN['destroy_' + i] = p => {
   for (let k = 0; k < n; k++) { let x = 8 + ((r() - 0.5) * (4 + i)) | 0, y = 8 + ((r() - 0.5) * (4 + i)) | 0; const len = 2 + (r() * (2 + i)) | 0; for (let j = 0; j < len; j++) { p.set(x, y, [30, 30, 30], 255); x += ((r() * 3) | 0) - 1; y += ((r() * 3) | 0) - 1; } }
 };
 function cobble(p, c, dark) {
-  const pts = []; const r = p.r; for (let i = 0; i < 9; i++) pts.push([r() * 16, r() * 16, (r() - 0.5) * 30]);
-  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
-    let d1 = 99, d2 = 99, k = 0; for (const q of pts) for (let ox = -16; ox <= 16; ox += 16) for (let oy = -16; oy <= 16; oy += 16) { const d = Math.hypot(x - q[0] - ox, y - q[1] - oy); if (d < d1) { d2 = d1; d1 = d; k = q[2]; } else if (d < d2) d2 = d; }
-    const edge = d2 - d1 < 1.2; const v = (r() - 0.5) * 12; p.set(x, y, edge ? dark.map(q => q + v) : c.map(q => q + k + v + (d1 < 2 ? 10 : 0)));
-  }
+  const V = tvoronoi(p.r, 10); const shades = Array.from({ length: 10 }, () => 0.86 + p.r() * 0.26);
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const [d1, d2, k, ctr] = V(x, y);
+    if (d2 - d1 < 1.15) { p.set(x, y, texShade(dark, 0.9 + p.r() * 0.2)); continue; }
+    const lx = (x + 0.5 - ctr[0]), ly = (y + 0.5 - ctr[1]); const bevel = -(lx + ly) / Math.max(2, d1 + d2) * 0.35;
+    p.set(x, y, texShade(c, shades[k] + bevel + (p.r() - 0.5) * 0.08)); }
 }
 // árboles
 const WOODS = { oak: [[162, 130, 78], [102, 81, 51], [180, 145, 90], [90, 160, 50]], spruce: [[115, 85, 50], [58, 37, 17], [130, 100, 60], [60, 100, 60]], birch: [[196, 179, 123], [220, 220, 215], [210, 190, 130], [110, 150, 70]], jungle: [[160, 115, 80], [85, 67, 25], [175, 130, 90], [70, 160, 40]], acacia: [[168, 90, 50], [104, 97, 88], [185, 100, 55], [110, 150, 40]], dark_oak: [[66, 43, 20], [60, 46, 26], [80, 55, 30], [50, 110, 30]], mangrove: [[117, 54, 48], [84, 66, 40], [130, 60, 52], [80, 150, 50]] };
@@ -805,6 +857,8 @@ function itemTexAuto(p, name) {
     brush: () => { for (let i = 0; i < 7; i++) p.set(3 + i, 12 - i, [150, 110, 60]); p.rect(9, 2, 13, 6, [220, 200, 160]); outline(p); }, oak_boat: () => { for (let x = 1; x < 15; x++) { const d = Math.abs(x - 7.5); const y0 = 8 + Math.max(0, d - 4.5) * 0.9; for (let y = Math.round(y0); y < 13; y++) p.set(x, y, [150, 115, 65].map(v => v + (p.r() - 0.5) * 18 - (y === 12 ? 30 : 0))); } p.rect(6, 6, 7, 11, [110, 80, 45]); outline(p); }, broom: () => { for (let i = 0; i < 9; i++) p.set(12 - i, 1 + i, [125, 90, 50]); for (let y = 9; y < 15; y++) for (let x = 1; x < 7; x++) if (x + (14 - y) * 0.5 < 8 && x - (y - 9) * 0.4 > 0) p.set(x, y, [205, 175, 80].map(v => v + (p.r() - 0.5) * 30)); p.rect(3, 9, 5, 10, [150, 60, 40]); outline(p); }, fishing_rod: () => { for (let i = 0; i < 12; i++) p.set(2 + i, 13 - i, [120, 90, 50]); for (let y = 2; y < 14; y++) p.set(13, y, [230, 230, 230]); },
     beetroot: () => { blob([170, 30, 50], 4.5); p.rect(7, 2, 8, 4, [60, 140, 40]); }, beetroot_seeds: () => { for (let i = 0; i < 6; i++) p.set(4 + ((p.r() * 8) | 0), 6 + ((p.r() * 6) | 0), [150, 110, 60]); }, beetroot_soup: () => { for (let y = 7; y < 13; y++) for (let x = 3; x < 13; x++) if (Math.hypot((x - 7.5) / 5, (y - 7) / 5.5) < 1) p.set(x, y, [140, 100, 60]); p.rect(4, 7, 11, 8, [170, 30, 50]); outline(p); },
     fire_extinguisher: () => { p.rect(5, 4, 10, 14, [200, 30, 30]); p.rect(6, 5, 7, 13, [240, 80, 70]); p.rect(9, 5, 9, 13, [140, 15, 15]); p.rect(5, 8, 10, 9, [230, 230, 230]); p.rect(6, 2, 9, 3, [40, 40, 40]); p.rect(9, 1, 12, 1, [60, 60, 60]); p.rect(3, 2, 5, 2, [40, 40, 40]); p.rect(2, 3, 2, 9, [30, 30, 30]); outline(p); },
+    flamethrower: () => { for (let i = 0; i < 9; i++) { p.set(4 + i, 11 - i, [90, 90, 98]); p.set(5 + i, 11 - i, [140, 140, 150]); } p.rect(2, 9, 6, 14, [190, 70, 30]); p.rect(3, 10, 4, 13, [235, 125, 60]); p.rect(6, 12, 8, 13, [60, 60, 66]); p.set(14, 2, [120, 170, 255]); p.set(13, 1, [255, 190, 80]); p.set(14, 1, [255, 235, 150]); p.set(15, 1, [255, 150, 40]); p.set(15, 0, [255, 120, 30]); outline(p); },
+    sponge_item: () => { for (let y = 4; y < 13; y++) for (let x = 2; x < 14; x++) if (Math.hypot((x - 7.5) / 5.6, (y - 8.5) / 4.4) < 1) p.set(x, y, [228, 208, 75].map(v => v + (p.r() - 0.5) * 22)); for (let k = 0; k < 12; k++) p.set(4 + ((p.r() * 8) | 0), 6 + ((p.r() * 6) | 0), [165, 140, 38]); outline(p); },
     experience_bottle: () => { for (let y = 5; y < 15; y++) for (let x = 4; x < 12; x++) if (Math.hypot(x - 7.5, y - 10) < 4.2) p.set(x, y, [120, 230, 90]); p.rect(7, 2, 8, 5, [200, 220, 240]); outline(p); },
     saddle: () => blob([120, 70, 40], 5), name_tag: () => { p.rect(3, 5, 12, 10, [220, 210, 180]); outline(p); }, netherite_upgrade: () => { p.rect(3, 2, 12, 13, [60, 50, 50]); p.rect(5, 4, 10, 11, [110, 90, 85]); outline(p); },
   };
@@ -823,26 +877,18 @@ function drawMap(p, rows, cols) {
   const [a, b, c] = cols; const off = Math.max(0, Math.floor((16 - rows.length) / 2));
   rows.forEach((r, y) => { for (let x = 0; x < r.length; x++) { const ch = r[x]; const yy = y + (rows.length < 14 ? off : 0); if (ch === '#') p.set(x, yy, [25, 25, 25]); else if (ch === 'a') p.set(x, yy, a); else if (ch === 'b') p.set(x, yy, b); else if (ch === 'c') p.set(x, yy, c); } });
 }
+// herramientas en pixel art: a = material, b = brillo, c = sombra, h/H = mango claro/oscuro, # = contorno
+const TOOL_MAPS = {
+  sword: ['.............###', '............#bb#', '...........#bac#', '..........#bac#.', '.........#bac#..', '........#bac#...', '.......#bac#....', '......#bac#.....', '..##.#bac#......', '..#c#bac#.......', '...#cac#........', '....#c#.........', '...#hH#c#.......', '..#hH#.#c#......', '.#hH#...##......', '.##.............'],
+  pickaxe: ['................', '....#######.....', '...#bbbbbbb#....', '..#baacccaab#...', '...##..#hH#cab#.', '......#hH#.#cb#.', '.....#hH#...#a#.', '....#hH#....#a#.', '...#hH#.....#c#.', '..#hH#.......#..', '.#hH#...........', '#hH#............', '#H#.............', '##..............', '................', '................'],
+  axe: ['................', '.......####.....', '......#bbab#....', '.....#bbaaac#...', '.....#baa#hc#...', '......#c#hH#....', '.......#hH#.....', '......#hH#......', '.....#hH#.......', '....#hH#........', '...#hH#.........', '..#hH#..........', '.#hH#...........', '.#H#............', '.##.............', '................'],
+  shovel: ['................', '..........###...', '.........#bbb#..', '........#bbaac#.', '........#baacc#.', '.........#acc#..', '........#hH##...', '.......#hH#.....', '......#hH#......', '.....#hH#.......', '....#hH#........', '...#hH#.........', '..#hH#..........', '.#hH#...........', '.#H#............', '.##.............'],
+  hoe: ['................', '.......#####....', '......#bbbab#...', '.......##hcab#..', '.......#hH##c#..', '......#hH#..##..', '.....#hH#.......', '....#hH#........', '...#hH#.........', '..#hH#..........', '.#hH#...........', '#hH#............', '#H#.............', '##..............', '................', '................']
+};
 function toolIcon(p, type, col) {
-  const hd = [110, 80, 40], hl = [140, 105, 55]; const light = col.map(v => Math.min(255, v * 1.25 + 20)), dark = col.map(v => v * 0.65);
-  const handle = (x0, y0, n) => { for (let i = 0; i < n; i++) { p.set(x0 + i, y0 - i, hl); p.set(x0 + i + 1, y0 - i, hd); } };
-  if (type === 'sword') {
-    for (let i = 0; i < 9; i++) { p.set(5 + i, 10 - i, light); p.set(6 + i, 10 - i, col); p.set(6 + i, 11 - i, dark); }
-    for (let i = -2; i <= 2; i++) p.set(5 + i, 11 + i, dark); handle(2, 13, 3); p.set(1, 14, dark);
-  } else if (type === 'pickaxe') {
-    handle(2, 13, 9);
-    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const dd = Math.hypot(x - 1, y - 14); if (dd > 11.3 && dd < 13.6 && x >= 3 && y <= 12) p.set(x, y, dd > 12.5 ? light : col); }
-  } else if (type === 'axe') {
-    handle(2, 13, 9);
-    for (let y = 1; y < 9; y++) for (let x = 5; x < 12; x++) { if (x - 1 > 13 - y - 3 + 1 && x - y < 6 && Math.hypot(x - 8, y - 4) < 4.6) p.set(x, y, (x + y) % 5 === 0 ? light : col); }
-    for (let y = 1; y < 9; y++) for (let x = 5; x < 12; x++) { const i = p.d[(y * 16 + x) * 4 + 3]; if (i && Math.hypot(x - 8, y - 4) > 3.6) p.set(x, y, light); }
-  } else if (type === 'shovel') {
-    handle(2, 13, 8);
-    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const u = (x - 11.5 + y - 4.5) / 2, v = (x - 11.5 - (y - 4.5)) / 2; if (Math.abs(u) + Math.abs(v) * 0.9 < 2.8) p.set(x, y, v < -0.6 ? light : v > 0.8 ? dark : col); }
-  } else if (type === 'hoe') {
-    handle(2, 13, 9); p.rect(7, 2, 11, 3, col); p.rect(7, 4, 8, 4, dark);
-  }
-  outline(p);
+  const light = col.map(v => Math.min(255, v * 1.25 + 24)), dark = col.map(v => v * 0.62), hl = [150, 112, 60], hd = [96, 68, 36];
+  const map = TOOL_MAPS[type]; if (!map) return;
+  map.forEach((row, y) => { for (let x = 0; x < 16; x++) { const ch = row[x]; const c = ch === '#' ? [28, 26, 30] : ch === 'a' ? col : ch === 'b' ? light : ch === 'c' ? dark : ch === 'h' ? hl : ch === 'H' ? hd : null; if (c) p.set(x, y, c); } });
 }
 function armorIcon(p, slot, col) {
   const light = col.map(v => Math.min(255, v * 1.25 + 20)), dark = col.map(v => v * 0.65);
@@ -857,3 +903,91 @@ function autoTex(p, name) {
   if (ID[name] !== undefined && !REG[ID[name]].isBlock) return itemTexAuto(p, name);
   p.fill([255, 0, 255], 0);
 }
+// ---- texturas renovadas de los bloques más comunes (pixel art con tonos escalonados y relieve)
+function metalBlock(p, c, opt = {}) {
+  const n = tnoise(hashStr(p.name) + 3, 4);
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { let k = 0.95 + n(x, y) * 0.1 + (p.r() - 0.5) * 0.04; if (x === 0 || y === 0) k = 1.22; else if (x === 15 || y === 15) k = 0.68; else if (x === 1 || y === 1) k += 0.08; else if (x === 14 || y === 14) k -= 0.1; p.set(x, y, texShade(c, k)); }
+  if (opt.facets) for (let i = 0; i < 4; i++) { const x = 3 + ((p.r() * 9) | 0), y = 3 + ((p.r() * 9) | 0); p.set(x, y, texShade(c, 1.3)); p.set(x + 1, y + 1, texShade(c, 0.8)); }
+  if (opt.streak) for (let i = 2; i < 9; i++) p.set(i + 2, i, texShade(c, 1.15));
+  if (opt.inner) { for (let i = 3; i < 13; i++) { p.set(i, 3, texShade(c, 0.8)); p.set(3, i, texShade(c, 0.8)); p.set(i, 12, texShade(c, 1.12)); p.set(12, i, texShade(c, 1.12)); } }
+}
+Object.assign(TEXGEN, {
+  grass_top: p => { const n = tnoise(hashStr('grass_top') + 1, 4); for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const t = n(x, y) * 0.5 + p.r() * 0.5; p.set(x, y, stepTone([150, 150, 150], t, 5, 0.78, 1.16)); } for (let i = 0; i < 14; i++) { const x = (p.r() * 16) | 0, y = (p.r() * 15) | 0; p.set(x, y, [176, 176, 176]); p.set(x, y + 1, [118, 118, 118]); } },
+  dirt: p => { const n = tnoise(hashStr('dirt') + 1, 4); for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const t = n(x, y) * 0.45 + p.r() * 0.55; p.set(x, y, stepTone([134, 96, 67], t, 4, 0.78, 1.14)); } for (let i = 0; i < 7; i++) { const x = (p.r() * 15) | 0, y = (p.r() * 15) | 0; p.set(x, y, [150, 140, 128]); if (p.r() < 0.5) p.set(x + 1, y, [120, 112, 104]); } },
+  grass_side: p => { p.copy('dirt'); const g = [94, 152, 56];
+    for (let x = 0; x < 16; x++) { const h = 3 + ((p.r() * 2) | 0) + (p.r() < 0.25 ? 2 : 0); for (let y = 0; y < h; y++) { const k = y === h - 1 ? 0.78 : 0.9 + p.r() * 0.22; p.set(x, y, texShade(g, k)); } } },
+  sand: p => { const n = tnoise(hashStr('sand') + 1, 8); for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, stepTone([219, 207, 163], n(x, y) * 0.4 + p.r() * 0.6, 4, 0.9, 1.06)); p.speck([196, 182, 140], 10, 6); },
+  red_sand: p => { const n = tnoise(hashStr('red_sand') + 1, 8); for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, stepTone([186, 104, 44], n(x, y) * 0.4 + p.r() * 0.6, 4, 0.86, 1.08)); p.speck([160, 84, 30], 12, 6); },
+  gravel: p => { const V = tvoronoi(p.r, 20); const cols = [[136, 128, 126], [112, 106, 104], [160, 154, 150], [122, 100, 90], [98, 94, 92]]; const pick = Array.from({ length: 20 }, () => cols[(p.r() * cols.length) | 0]);
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const [d1, d2, k] = V(x, y); p.set(x, y, d2 - d1 < 0.9 ? texShade(pick[k], 0.7) : texShade(pick[k], 1 + (p.r() - 0.5) * 0.1 + (d1 < 1.2 ? 0.08 : 0))); } },
+  glass: p => { p.clear(); const e = [214, 236, 246];
+    for (let i = 0; i < 16; i++) { p.set(i, 0, e); p.set(i, 15, texShade(e, 0.82)); p.set(0, i, e); p.set(15, i, texShade(e, 0.82)); }
+    for (let i = 0; i < 5; i++) { p.set(3 + i, 2 + i, [255, 255, 255], 170); p.set(4 + i, 2 + i, [255, 255, 255], 110); } for (let i = 0; i < 3; i++) p.set(10 + i, 9 + i, [255, 255, 255], 140); },
+  stone_bricks: p => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const row = y >> 3, ly = y & 7; const lx = (x + (row ? 8 : 0)) & 15; let k = 0.94 + (p.r() - 0.5) * 0.09; if (ly === 7 || lx === 15) k = 0.56; else if (ly === 0 || lx === 0) k = 1.14; else if (ly === 6 || lx === 14) k = 0.8; p.set(x, y, texShade([124, 124, 124], k)); } },
+  iron_block: p => metalBlock(p, [214, 214, 214], { inner: true }), gold_block: p => metalBlock(p, [246, 208, 62], { streak: true }), diamond_block: p => metalBlock(p, [100, 222, 214], { facets: true }),
+  emerald_block: p => metalBlock(p, [60, 200, 110], { facets: true }), lapis_block: p => { metalBlock(p, [40, 78, 188]); p.speck([90, 130, 230], 14, 10); }, redstone_block: p => { metalBlock(p, [176, 24, 14]); p.speck([240, 60, 40], 16, 10); },
+  netherite_block: p => metalBlock(p, [72, 64, 68], { inner: true }), copper_block: p => { metalBlock(p, [194, 108, 80]); p.speck([226, 146, 108], 14, 10); },
+  coal_block: p => { const V = tvoronoi(p.r, 8); for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const [d1, d2] = V(x, y); p.set(x, y, d2 - d1 < 1 ? [14, 14, 16] : texShade([34, 34, 36], 1 + (p.r() - 0.5) * 0.3 + (d1 < 1.5 ? 0.4 : 0))); } },
+  snow_block: p => { const n = tnoise(hashStr('snow') + 1, 4); for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, stepTone([240, 246, 250], n(x, y) * 0.5 + p.r() * 0.5, 3, 0.95, 1.02)); },
+  clay: p => { const n = tnoise(hashStr('clay') + 1, 4); for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, stepTone([160, 166, 179], n(x, y) * 0.6 + p.r() * 0.4, 4, 0.9, 1.08)); },
+  obsidian: p => { const V = tvoronoi(p.r, 9); for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const [d1, d2, k] = V(x, y); const base = k % 3 === 0 ? [44, 26, 70] : [20, 16, 32]; p.set(x, y, d2 - d1 < 0.8 ? [10, 8, 18] : texShade(base, 1 + (p.r() - 0.5) * 0.25 + (d1 < 1.3 ? 0.35 : 0))); } }
+});
+for (const [c, , , wc, tc] of DYE16) {
+  if (!TEXGEN[c + '_wool']) TEXGEN[c + '_wool'] = p => wool(p, wc);
+  TEXGEN[c + '_terracotta'] = p => { const n = tnoise(hashStr(c + 't') + 1, 4); for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, stepTone(tc, n(x, y) * 0.4 + p.r() * 0.6, 4, 0.9, 1.07)); p.speck(texShade(tc, 0.8), 8, 4); };
+  TEXGEN[c + '_concrete'] = p => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, texShade(wc, 0.93 + (p.r() - 0.5) * 0.05)); };
+}
+TEXGEN.terracotta = p => { const n = tnoise(hashStr('terracotta') + 1, 4); for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, stepTone([152, 94, 67], n(x, y) * 0.4 + p.r() * 0.6, 4, 0.9, 1.07)); };
+
+// ---- iconos de objetos renovados (esferas con luz y contorno, montoncitos de polvo, piezas dibujadas a mano)
+function orbIcon(p, cx, cy, r, c, o = {}) {
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    const dx = (x + 0.5 - cx) / r, dy = (y + 0.5 - cy) / (r * (o.sy || 1)); const d2 = dx * dx + dy * dy; if (d2 > 1) continue;
+    const nz = Math.sqrt(1 - d2); const l = Math.max(0, -dx * 0.5 - dy * 0.6 + nz * 0.65); p.set(x, y, stepTone(c, l / 1.1 + (d2 > 0.75 ? -0.15 : 0), 5, 0.55, 1.22));
+  }
+  if (o.hl !== false) { const hx = Math.floor(cx - r * 0.45), hy = Math.floor(cy - r * 0.5 * (o.sy || 1)); p.set(hx, hy, o.hlc || [255, 255, 255]); if (r > 4) p.set(hx + 1, hy, (o.hlc || [255, 255, 255]).map(v => v * 0.85 + c[0] * 0)); }
+}
+function dustIcon(p, c, c2, light) {
+  for (let y = 5; y < 15; y++) for (let x = 1; x < 15; x++) { const dx = (x + 0.5 - 8) / 6.5, dy = (y + 0.5 - 14.5) / 9; if (dx * dx + dy * dy > 1) continue; const dens = 1 - (dx * dx + dy * dy); if (p.r() > 0.35 + dens * 0.6) continue; const r = p.r(); p.set(x, y, r < 0.18 && light ? light : r < 0.6 ? c : c2); }
+  outline(p);
+}
+function mapIcon(p, rows, pal) { rows.forEach((row, y) => { for (let x = 0; x < row.length; x++) { const c = row[x] === '#' ? [24, 22, 26] : pal[row[x]]; if (c) p.set(x, y, c); } }); }
+const LUMP = ['', '', '.....####.......', '....#bbaa##.....', '...#bbaaaaa#....', '...#baaacaa##...', '..#baaaccaaac#..', '..#baacccaacc#..', '..#aaaccaaacc#..', '...#aacaaaacc#..', '...#acaaaccc#...', '....#acccc##....', '.....#####......'];
+const lump = (p, a, b, c) => mapIcon(p, LUMP, { a, b, c });
+const SHARD = ['', '..........##....', '.........#bb#...', '........#bba#...', '.......#bbaa#...', '......#bbaac#...', '.....#bbaacc#...', '....#bbaacc#....', '....#baacc#.....', '...#baacc#......', '...#bacc#.......', '..#bacc#........', '..#acc#.........', '..#cc#..........', '...##...........'];
+Object.assign(TEXGEN, {
+  ender_pearl: p => { orbIcon(p, 8, 8, 6, [24, 94, 84]); for (let a = 0; a < 5.2; a += 0.35) { const x = Math.round(8 + Math.cos(a) * 3.4), y = Math.round(8 + Math.sin(a) * 3.4); p.set(x, y, [70, 168, 148]); } p.set(8, 8, [10, 44, 40]); p.set(7, 8, [14, 56, 50]); outline(p); },
+  eye_of_ender: p => { orbIcon(p, 8, 8, 6, [58, 128, 72], { hl: false }); for (let a = 0; a < 6.3; a += 0.3) p.set(Math.round(8 + Math.cos(a) * 3), Math.round(8 + Math.sin(a) * 3), [150, 214, 120]); p.rect(7, 6, 8, 10, [18, 34, 22]); p.set(7, 5, [40, 70, 44]); p.set(8, 11, [40, 70, 44]); p.set(5, 4, [235, 255, 235]); outline(p); },
+  snowball: p => { orbIcon(p, 8, 8.5, 5.5, [226, 238, 250], { hlc: [255, 255, 255] }); outline(p); },
+  slime_ball: p => { orbIcon(p, 8, 8.5, 5.5, [104, 188, 88]); p.rect(7, 8, 8, 9, [150, 226, 132]); outline(p); },
+  magma_cream: p => { orbIcon(p, 8, 8.5, 5.5, [190, 82, 26]); for (let i = 0; i < 6; i++) p.set(5 + ((p.r() * 7) | 0), 6 + ((p.r() * 6) | 0), [255, 200, 70]); outline(p); },
+  heart_of_the_sea: p => { orbIcon(p, 8, 8, 6, [32, 98, 182]); for (let a = 0; a < 6.3; a += 0.4) p.set(Math.round(8 + Math.cos(a) * 3.6), Math.round(8 + Math.sin(a) * 3.6), [116, 196, 232]); p.rect(7, 7, 8, 8, [190, 240, 255]); outline(p); },
+  spider_eye: p => { orbIcon(p, 8, 8.5, 5.5, [150, 30, 46], { sy: 1.1 }); p.rect(7, 7, 8, 9, [30, 8, 12]); p.set(9, 7, [255, 220, 220]); p.set(4, 9, [200, 60, 70]); p.set(12, 10, [200, 60, 70]); outline(p); },
+  fermented_spider_eye: p => { orbIcon(p, 8, 10, 5, [110, 44, 60], { sy: 1.0 }); p.rect(7, 9, 8, 10, [30, 10, 14]); for (let x = 3; x < 13; x++) { const h = 2 + Math.round(Math.sin((x - 3) / 9 * Math.PI) * 2.5); for (let y = 6 - h; y < 6; y++) p.set(x, y, y === 6 - h ? [196, 150, 110] : [150, 108, 74]); } outline(p); },
+  clay_ball: p => { orbIcon(p, 8, 9, 5, [160, 166, 180]); outline(p); },
+  ink_sac: p => { orbIcon(p, 8, 9.5, 5, [40, 40, 52], { sy: 1.0 }); p.rect(7, 3, 8, 5, [56, 56, 70]); outline(p); },
+  glow_ink_sac: p => { orbIcon(p, 8, 9.5, 5, [40, 150, 140]); p.rect(7, 3, 8, 5, [60, 190, 170]); p.set(8, 10, [180, 255, 240]); outline(p); },
+  ghast_tear: p => { orbIcon(p, 8, 10, 4.5, [196, 226, 240]); for (let y = 3; y < 7; y++) { const w = y < 5 ? 0 : 1; for (let x = 8 - w; x <= 8 + w; x++) p.set(x, y, [214, 238, 250]); } outline(p); },
+  gunpowder: p => dustIcon(p, [96, 96, 98], [62, 62, 64], [140, 140, 142]),
+  glowstone_dust: p => dustIcon(p, [246, 206, 90], [196, 148, 40], [255, 246, 190]),
+  redstone: p => dustIcon(p, [204, 22, 18], [122, 4, 4], [255, 90, 70]),
+  sugar: p => dustIcon(p, [244, 244, 246], [206, 206, 214], [255, 255, 255]),
+  blaze_powder: p => dustIcon(p, [250, 180, 40], [216, 96, 20], [255, 236, 120]),
+  bone_meal: p => dustIcon(p, [240, 236, 224], [198, 194, 182], [255, 255, 250]),
+  coal: p => lump(p, [48, 48, 50], [86, 86, 90], [26, 26, 28]), charcoal: p => lump(p, [64, 48, 38], [100, 80, 62], [36, 26, 20]),
+  flint: p => lump(p, [74, 72, 72], [130, 128, 126], [40, 38, 38]), netherite_scrap: p => lump(p, [92, 70, 64], [128, 104, 96], [58, 42, 38]),
+  raw_iron: p => lump(p, [202, 166, 136], [232, 204, 180], [150, 116, 92]), raw_gold: p => lump(p, [236, 196, 60], [255, 238, 140], [184, 132, 30]), raw_copper: p => lump(p, [206, 118, 82], [236, 160, 124], [150, 76, 50]),
+  amethyst_shard: p => mapIcon(p, SHARD, { a: [160, 110, 220], b: [216, 178, 255], c: [104, 62, 160] }),
+  prismarine_shard: p => mapIcon(p, SHARD, { a: [96, 170, 156], b: [160, 220, 206], c: [56, 110, 100] }),
+  echo_shard: p => mapIcon(p, SHARD, { a: [20, 70, 84], b: [80, 210, 220], c: [10, 36, 44] }),
+  gold_nugget: p => { orbIcon(p, 6.5, 9.5, 2.6, [246, 206, 60]); orbIcon(p, 10, 7.5, 2.4, [246, 206, 60]); orbIcon(p, 9.5, 11, 2, [230, 186, 50], { hl: false }); outline(p); },
+  iron_nugget: p => { orbIcon(p, 6.5, 9.5, 2.6, [212, 212, 214]); orbIcon(p, 10, 7.5, 2.4, [212, 212, 214]); orbIcon(p, 9.5, 11, 2, [190, 190, 194], { hl: false }); outline(p); },
+  feather: p => mapIcon(p, ['..........####..', '.........#bbbb#.', '........#bbaab#.', '.......#bbaaac#.', '......#bbaaac#..', '.....#bbaaac#...', '....#bbaaac#....', '...#bbaaac#.....', '...#baaac#......', '..#baaac#.......', '..#bacc#........', '..#ccc#.........', '.#h##...........', '#h#.............', '##..............', '................'], { a: [226, 226, 232], b: [255, 255, 255], c: [180, 180, 192], h: [150, 140, 120] }),
+  bone: p => mapIcon(p, ['................', '..........##....', '.........#bb#...', '.........#bab##.', '........##baab#.', '.......#baaa##..', '......#baa#.....', '.....#baa#......', '....#baa#.......', '..##baa#........', '.#baaab#........', '.#bab##.........', '..#bb#..........', '...##...........', '................', '................'], { a: [226, 222, 206], b: [250, 248, 236], c: [180, 176, 160] }),
+  string: p => { const pts = [[3, 12], [4, 11], [5, 11], [6, 10], [6, 9], [5, 8], [5, 7], [6, 6], [7, 5], [8, 5], [9, 6], [9, 7], [8, 8], [9, 9], [10, 9], [11, 8], [12, 7], [12, 6], [12, 5]]; for (const [x, y] of pts) p.set(x, y, [236, 236, 240]); p.set(4, 12, [200, 200, 206]); p.set(11, 5, [200, 200, 206]); outline(p); },
+  leather: p => mapIcon(p, ['', '', '...###....###...', '..#baa####aac#..', '..#baaaaaaaac#..', '...#baaaaaac#...', '...#baaaaaac#...', '..#baaaaaaaac#..', '..#baaaaaaaacc#.', '..#baaaaaaaacc#.', '...#aaaccaacc#..', '...##cc##ccc#...', '.....##..###....'], { a: [150, 88, 52], b: [190, 124, 80], c: [104, 58, 32] }),
+  rotten_flesh: p => mapIcon(p, ['', '', '.....####.......', '....#gaab##.....', '...#gaaaagab#...', '..#aaggaaaaab#..', '..#aagaaaggaa#..', '..#gaaaagaaac#..', '...#aaaaaagcc#..', '...#agaaaaacc#..', '....#acggacc#...', '.....##cccc#....', '.......####.....'], { a: [150, 70, 60], b: [196, 110, 96], c: [100, 44, 38], g: [96, 128, 60] }),
+  paper: p => mapIcon(p, ['', '...##########...', '...#aaaaaaab#...', '...#accccccb#...', '...#aaaaaaab#...', '...#acccccab#...', '...#aaaaaaab#...', '...#accccccb#...', '...#aaaaaaab#...', '...#acccccab#...', '...#aaaaaaab#...', '...#accccaab#...', '...#aaaaaab##...', '...#aaaaaab#....', '...########.....'], { a: [244, 244, 236], b: [210, 210, 200], c: [196, 196, 210] }),
+  book: p => mapIcon(p, ['', '...##########...', '..#bbaaaaaaaa#..', '..#baaaaaaaaa#..', '..#baaddddaaa#..', '..#baaaaaaaaa#..', '..#baaaaaaaaa#..', '..#baaaaaaaaa#..', '..#baaaaaaaaa#..', '..#baaaaaaaaa#..', '..#bccccccccc#..', '..#pppppppppp#..', '..#cccccccccc#..', '...##########...'], { a: [120, 54, 40], b: [160, 80, 60], c: [80, 34, 26], d: [214, 180, 90], p: [240, 236, 220] }),
+  bread: p => mapIcon(p, ['', '', '', '', '.....######.....', '...##bbbbbba##..', '..#bbaabaabaac#.', '.#baacaacaacacc#', '.#baaaaaaaaaacc#', '.#aaaaaaaaaaacc#', '..#aaaaaaaaccc#.', '...##cccccccc#..', '.....#######....'], { a: [196, 136, 62], b: [226, 176, 96], c: [150, 96, 40] })
+});

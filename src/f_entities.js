@@ -156,6 +156,7 @@ function updateParticles(dt, world) {
     if (p.collide && world) { const b = world.get(Math.floor(nx), Math.floor(ny), Math.floor(nz)); if (b > 0 && REG[b].solid) { if (p.vy < 0) { ny = Math.floor(ny) + 1.001; p.vy *= -0.3; p.vx *= 0.6; p.vz *= 0.6; } else { p.vx *= -0.3; p.vz *= -0.3; nx = p.x; nz = p.z; } } }
     p.x = nx; p.y = ny; p.z = nz; p.size = Math.max(0.01, p.size + p.grow * dt); p.rot += p.vrot * dt;
     if (p.ext && world) extinguishAt(world, p);
+    if (p.flamer && world) flamerAt(world, p, dt);
     const t = p.life / p.max; p.aCur = p.a * (p.fade ? Math.min(1, t * 2.5) * Math.min(1, (1 - t) * 6 + 0.2) : 1);
     if (p.cool) { const k = Math.min(1, (1 - t) * 1.6); p.g = lerp(p.g0, p.cg, k); p.b = lerp(p.b0, p.cb, k); p.r = lerp(p.r0, p.cr, k); p.emis = k > 0.55 ? 0 : 3.2 * (1 - k / 0.55) + 0.6; }
     L[j++] = p;

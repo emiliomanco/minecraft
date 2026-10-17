@@ -5,7 +5,7 @@ const R = { gl: null, q: 2, dyn: 1, progs: {}, fbo: {}, w: 1, h: 1, view: M4.cre
 const GLSL_COMMON = `
 precision highp float; precision highp int; precision highp sampler2DArray; precision highp sampler2DShadow;
 uniform vec3 u_sunDir; uniform vec3 u_sunReal; uniform vec3 u_sunCol; uniform vec3 u_amb; uniform vec3 u_camPos;
-uniform float u_time; uniform float u_tide; uniform int u_dim; uniform float u_rain; uniform vec3 u_fogCol; uniform vec2 u_fog; uniform float u_under; uniform float u_bright; uniform float u_expo;
+uniform float u_time; uniform float u_tide; uniform int u_dim; uniform float u_rain; uniform float u_wet; uniform vec3 u_fogCol; uniform vec2 u_fog; uniform float u_under; uniform float u_bright; uniform float u_expo;
 uniform sampler2DShadow u_shadow; uniform mat4 u_shadowVP; uniform float u_shadowOn; uniform float u_shadowTexel;
 uniform sampler2DShadow u_shadow2; uniform mat4 u_shadowVP2; uniform float u_shadowTexel2; uniform float u_shadowFar;
 uniform vec4 u_lp[8]; uniform vec3 u_lc[8]; uniform int u_nl;
@@ -222,6 +222,16 @@ void main(){
     if(rr.x<0.06){ vec3 fn=normalize(N+(rr-0.5)*0.8); vec3 Hs=normalize(u_sunDir-V); float g=pow(max(dot(fn,Hs),0.0),800.0)*(1.0-smoothstep(0.1,0.35,length(cf-0.25-0.5*rr.yzx)));
       col+=u_sunCol*direct*g*25.0*(1.0-snowComp)*(1.0-smoothstep(0.08,0.5,fpS)); }
   }
+  // suelo mojado por la lluvia: lo que ve el cielo se oscurece y brilla (reflejo del cielo y del sol); en lo horizontal
+  // quedan manchas de agua más lisas, como charquitos
+  if(u_wet>0.01 && u_dim==0 && !snowS && (fl&(128u|256u|512u|1024u|4096u|8192u))==0u && alpha>0.5){
+    float wk=u_wet*smoothstep(0.86,0.97,sky); float upF=clamp(N.y,0.0,1.0);
+    float pud=smoothstep(0.62,0.8,vnoise(v_world.xz*0.33)+vnoise(v_world.xz*1.4)*0.25)*upF*smoothstep(0.45,1.0,u_wet);
+    col*=mix(1.0,0.6,wk*(0.5+0.5*upF));
+    vec3 Rw=reflect(V,N); float frw=0.04+0.96*pow(1.0-max(dot(-V,N),0.0),5.0); float gw=wk*(0.12+0.3*upF+0.58*pud);
+    col=mix(col,skyColor(Rw)*0.55*sky,clamp(frw*gw,0.0,1.0));
+    col+=u_sunCol*direct*pow(max(dot(Rw,u_sunDir),0.0),40.0+260.0*pud)*gw*(0.3+1.5*pud);
+  }
   if((fl&256u)!=0u && (fl&128u)==0u) col=alb*2.4+col*0.3;
   if((fl&128u)!=0u){
     // costra iluminada por el sol/ambiente + el calor de la roca fundida que asoma por las grietas
@@ -400,7 +410,7 @@ layout(location=0) in vec3 a_pos; layout(location=1) in vec2 a_uv; layout(locati
 uniform mat4 u_vp; uniform mat4 u_model; uniform int u_layers[6]; uniform vec4 u_uvr[6]; out vec3 v_uv;
 void main(){ int f=int(a_face+0.5); vec4 r=u_uvr[f]; v_uv=vec3(mix(r.xy,r.zw,a_uv),float(u_layers[f])); gl_Position=u_vp*u_model*vec4(a_pos,1.0); }`;
 const FS_SHADOWBOX = `#version 300 es
-precision highp float; precision highp sampler2DArray; uniform sampler2DArray u_tex; in vec3 v_uv; out vec4 o; void main(){ if(texture(u_tex,v_uv).a<0.3) discard; o=vec4(1); }`;
+precision highp float; precision highp sampler2DArray; uniform sampler2DArray u_tex; uniform sampler2D u_skin; uniform float u_skinOn; in vec3 v_uv; out vec4 o; void main(){ if((u_skinOn>0.5?texture(u_skin,v_uv.xy).a:texture(u_tex,v_uv).a)<0.3) discard; o=vec4(1); }`;
 const VS_FULL = `#version 300 es
 out vec2 v_uv; void main(){ vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2); v_uv=p; gl_Position=vec4(p*2.0-1.0,1.0,1.0); }`;
 const FS_SKY = `#version 300 es
@@ -455,10 +465,10 @@ const vec3 NR[6]=vec3[6](vec3(1,0,0),vec3(-1,0,0),vec3(0,1,0),vec3(0,-1,0),vec3(
 void main(){ int f=int(a_face+0.5); vec4 wp=u_model*vec4(a_pos,1.0); v_pos=wp.xyz; vec4 r=u_uvr[f]; v_uv=vec3(mix(r.xy,r.zw,a_uv),float(u_layers[f])); v_n=normalize(mat3(u_model)*NR[f]); gl_Position=u_vp*wp; }`;
 const FS_BOX = `#version 300 es
 ${'##COMMON##'}
-uniform sampler2DArray u_tex; uniform vec4 u_tint; uniform vec2 u_light; uniform vec4 u_flash; uniform float u_emis; uniform float u_mode;
+uniform sampler2DArray u_tex; uniform sampler2D u_skin; uniform float u_skinOn; uniform vec4 u_tint; uniform vec2 u_light; uniform vec4 u_flash; uniform float u_emis; uniform float u_mode;
 in vec3 v_pos; in vec3 v_uv; in vec3 v_n; out vec4 o;
 void main(){
-  vec4 t=texture(u_tex,v_uv); if(t.a<0.1) discard;
+  vec4 t=u_skinOn>0.5?texture(u_skin,v_uv.xy):texture(u_tex,v_uv); if(t.a<0.1) discard;
   if(u_mode>0.5){ o=vec4(t.rgb*0.0,t.a*0.6); return; }
   vec3 alb=pow(t.rgb,vec3(2.2))*u_tint.rgb; vec3 N=normalize(v_n);
   float sky=u_light.x, blk=u_light.y; float direct=0.0;
@@ -849,7 +859,7 @@ function setCommon(P) {
   const gl = R.gl, u = P.u;
   if (u.u_sunDir) gl.uniform3fv(u.u_sunDir, ENV.sunDir); if (u.u_sunReal) gl.uniform3fv(u.u_sunReal, ENV.sunReal); if (u.u_sunCol) gl.uniform3fv(u.u_sunCol, ENV.sunCol);
   if (u.u_amb) gl.uniform3fv(u.u_amb, ENV.amb); if (u.u_camPos) gl.uniform3fv(u.u_camPos, R.cam); if (u.u_time) gl.uniform1f(u.u_time, R.time); if (u.u_tide) gl.uniform1f(u.u_tide, oceanTide());
-  if (u.u_dim) gl.uniform1i(u.u_dim, R.dimIdx); if (u.u_rain) gl.uniform1f(u.u_rain, G.rainLevel || 0); if (u.u_fogCol) gl.uniform3fv(u.u_fogCol, ENV.fogCol);
+  if (u.u_dim) gl.uniform1i(u.u_dim, R.dimIdx); if (u.u_rain) gl.uniform1f(u.u_rain, G.rainLevel || 0); if (u.u_wet) gl.uniform1f(u.u_wet, G.mode === 'game' ? G.wet || 0 : 0); if (u.u_fogCol) gl.uniform3fv(u.u_fogCol, ENV.fogCol);
   if (u.u_fog) gl.uniform2fv(u.u_fog, ENV.fog); if (u.u_under) gl.uniform1f(u.u_under, R.under ? 1 : 0); if (u.u_bright) gl.uniform1f(u.u_bright, SETTINGS.brightness); if (u.u_expo) gl.uniform1f(u.u_expo, R.expo || 0.3); if (u.u_camSky) gl.uniform1f(u.u_camSky, R.camSky ?? 1);
   if (u.u_shadowOn) gl.uniform1f(u.u_shadowOn, R.shadowActive ? 1 : 0); if (u.u_shadowVP) gl.uniformMatrix4fv(u.u_shadowVP, false, R.shadowVP);
   if (u.u_shadowTexel) gl.uniform1f(u.u_shadowTexel, 1 / (R.shadowSize || 1));
@@ -873,7 +883,7 @@ function boxVisible(P, x0, y0, z0, x1, y1, z1) { for (const p of P) { const x = 
 // ---------------------------------------------------------- frame
 function renderWorld(world, cam, yaw, pitch, opts = {}) {
   if (R.lost) return; // contexto de GPU perdido: esperar a que se restaure
-  const gl = R.gl; resize(); R.time = performance.now() / 1000;
+  const gl = R.gl; resize(); R.time = (G.mode === 'game' && G.wclock !== undefined) ? G.wclock : performance.now() / 1000; // reloj del mundo: /tick freeze también para olas, hojas, nubes y llamas
   R.dimIdx = world.dim === 'overworld' ? 0 : world.dim === 'nether' ? 1 : 2;
   R.cam = cam; R.under = !!opts.under;
   const fov = (opts.fov || SETTINGS.fov) * Math.PI / 180; const far = Math.max(160, SETTINGS.rd * 16 * 1.6 + 48);
@@ -1046,8 +1056,9 @@ const _layers = new Int32Array(6);
 function drawBox(model, layers, light, tint, flash, emis, uvr) {
   const gl = R.gl; const P = R.boxProg || R.progs.box; const u = P.u;
   gl.uniformMatrix4fv(u.u_model, false, model);
-  if (typeof layers === 'number') _layers.fill(layers); else _layers.set(layers); gl.uniform1iv(u.u_layers, _layers);
-  gl.uniform4fv(u.u_uvr, uvr || UVR_FULL);
+  if (typeof skinBind === 'function') skinBind(P); // piel del atlas (mobs): las UV de cada cara vienen con la pieza
+  if (layers && layers.uv) { _layers.fill(0); gl.uniform1iv(u.u_layers, _layers); gl.uniform4fv(u.u_uvr, layers.uv); if (u.u_skinOn) gl.uniform1f(u.u_skinOn, 1); }
+  else { if (typeof layers === 'number') _layers.fill(layers); else _layers.set(layers); gl.uniform1iv(u.u_layers, _layers); gl.uniform4fv(u.u_uvr, uvr || UVR_FULL); if (u.u_skinOn) gl.uniform1f(u.u_skinOn, 0); }
   gl.uniform2f(u.u_light, light ? light[0] / 15 : 1, light ? light[1] / 15 : 0);
   gl.uniform4fv(u.u_tint, tint || [1, 1, 1, 1]); gl.uniform4fv(u.u_flash, flash || [0, 0, 0, 0]); gl.uniform1f(u.u_emis, emis || 0); gl.uniform1f(u.u_mode, 0);
   gl.drawElements(gl.TRIANGLES, 36, gl.UNSIGNED_SHORT, 0); R.stats.draws++;
