@@ -410,7 +410,7 @@ layout(location=0) in vec3 a_pos; layout(location=1) in vec2 a_uv; layout(locati
 uniform mat4 u_vp; uniform mat4 u_model; uniform int u_layers[6]; uniform vec4 u_uvr[6]; out vec3 v_uv;
 void main(){ int f=int(a_face+0.5); vec4 r=u_uvr[f]; v_uv=vec3(mix(r.xy,r.zw,a_uv),float(u_layers[f])); gl_Position=u_vp*u_model*vec4(a_pos,1.0); }`;
 const FS_SHADOWBOX = `#version 300 es
-precision highp float; precision highp sampler2DArray; uniform sampler2DArray u_tex; in vec3 v_uv; out vec4 o; void main(){ if(texture(u_tex,v_uv).a<0.3) discard; o=vec4(1); }`;
+precision highp float; precision highp sampler2DArray; uniform sampler2DArray u_tex; uniform sampler2D u_skin; uniform float u_skinOn; in vec3 v_uv; out vec4 o; void main(){ if((u_skinOn>0.5?texture(u_skin,v_uv.xy).a:texture(u_tex,v_uv).a)<0.3) discard; o=vec4(1); }`;
 const VS_FULL = `#version 300 es
 out vec2 v_uv; void main(){ vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2); v_uv=p; gl_Position=vec4(p*2.0-1.0,1.0,1.0); }`;
 const FS_SKY = `#version 300 es
@@ -465,10 +465,10 @@ const vec3 NR[6]=vec3[6](vec3(1,0,0),vec3(-1,0,0),vec3(0,1,0),vec3(0,-1,0),vec3(
 void main(){ int f=int(a_face+0.5); vec4 wp=u_model*vec4(a_pos,1.0); v_pos=wp.xyz; vec4 r=u_uvr[f]; v_uv=vec3(mix(r.xy,r.zw,a_uv),float(u_layers[f])); v_n=normalize(mat3(u_model)*NR[f]); gl_Position=u_vp*wp; }`;
 const FS_BOX = `#version 300 es
 ${'##COMMON##'}
-uniform sampler2DArray u_tex; uniform vec4 u_tint; uniform vec2 u_light; uniform vec4 u_flash; uniform float u_emis; uniform float u_mode;
+uniform sampler2DArray u_tex; uniform sampler2D u_skin; uniform float u_skinOn; uniform vec4 u_tint; uniform vec2 u_light; uniform vec4 u_flash; uniform float u_emis; uniform float u_mode;
 in vec3 v_pos; in vec3 v_uv; in vec3 v_n; out vec4 o;
 void main(){
-  vec4 t=texture(u_tex,v_uv); if(t.a<0.1) discard;
+  vec4 t=u_skinOn>0.5?texture(u_skin,v_uv.xy):texture(u_tex,v_uv); if(t.a<0.1) discard;
   if(u_mode>0.5){ o=vec4(t.rgb*0.0,t.a*0.6); return; }
   vec3 alb=pow(t.rgb,vec3(2.2))*u_tint.rgb; vec3 N=normalize(v_n);
   float sky=u_light.x, blk=u_light.y; float direct=0.0;
@@ -1056,8 +1056,9 @@ const _layers = new Int32Array(6);
 function drawBox(model, layers, light, tint, flash, emis, uvr) {
   const gl = R.gl; const P = R.boxProg || R.progs.box; const u = P.u;
   gl.uniformMatrix4fv(u.u_model, false, model);
-  if (typeof layers === 'number') _layers.fill(layers); else _layers.set(layers); gl.uniform1iv(u.u_layers, _layers);
-  gl.uniform4fv(u.u_uvr, uvr || UVR_FULL);
+  if (typeof skinBind === 'function') skinBind(P); // piel del atlas (mobs): las UV de cada cara vienen con la pieza
+  if (layers && layers.uv) { _layers.fill(0); gl.uniform1iv(u.u_layers, _layers); gl.uniform4fv(u.u_uvr, layers.uv); if (u.u_skinOn) gl.uniform1f(u.u_skinOn, 1); }
+  else { if (typeof layers === 'number') _layers.fill(layers); else _layers.set(layers); gl.uniform1iv(u.u_layers, _layers); gl.uniform4fv(u.u_uvr, uvr || UVR_FULL); if (u.u_skinOn) gl.uniform1f(u.u_skinOn, 0); }
   gl.uniform2f(u.u_light, light ? light[0] / 15 : 1, light ? light[1] / 15 : 0);
   gl.uniform4fv(u.u_tint, tint || [1, 1, 1, 1]); gl.uniform4fv(u.u_flash, flash || [0, 0, 0, 0]); gl.uniform1f(u.u_emis, emis || 0); gl.uniform1f(u.u_mode, 0);
   gl.drawElements(gl.TRIANGLES, 36, gl.UNSIGNED_SHORT, 0); R.stats.draws++;

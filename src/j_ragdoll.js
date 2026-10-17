@@ -18,8 +18,9 @@ const rv = { sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], add: (a, b)
 // partes del modelo de una entidad (incluye la armadura del jugador) y su escala
 function ragModelOf(e) {
   if (e.type === 'player') return { parts: MODELS.steve.concat(playerArmorParts(e)), scale: 0.9375, tint: [1, 1, 1, 1] };
-  const d = MOB[e.type]; if (!d) return null; const parts = MODELS[d.model]; if (!parts) return null;
-  let tint = d.tint ? [...d.tint, 1] : [1, 1, 1, 1]; if (e.type === 'sheep' && e.color) tint = [...e.color, 1];
+  const d = MOB[e.type]; if (!d) return null; let parts = modelFor(e, d); if (!parts) return null;
+  if (e.type === 'sheep') { e.woolTint = e.color ? [...e.color, 1] : null; if (e.sheared) parts = parts.filter(p => !p.wool); }
+  const tint = d.tint && !MODELS[e.type] ? [...d.tint, 1] : [1, 1, 1, 1];
   return { parts, scale: (MODEL_SCALE[d.model] || 1) * (d.scale || 1), tint, emis: (e.type === 'blaze' || e.type === 'magma_cube') ? 0.6 : 0 };
 }
 // transformación mundial de una parte en la pose actual (igual que drawModel, sin la escala de la caja)
@@ -28,6 +29,7 @@ function ragPartFrame(pt, e, x, y, z, yaw, scale, t) {
   M4.translate(m, pt.p[0], pt.p[1], pt.p[2]); const off = partOffset(pt, e, t); if (off) M4.translate(m, off[0], off[1], off[2]);
   const pivot = M4.xform(m, 0, 0, 0);
   const r = partRot(pt, e, t); if (r[1]) M4.rotY(m, r[1]); if (r[0]) M4.rotX(m, r[0]); if (r[2]) M4.rotZ(m, r[2]);
+  if (pt.rot) { if (pt.rot[1]) M4.rotY(m, pt.rot[1]); if (pt.rot[0]) M4.rotX(m, pt.rot[0]); if (pt.rot[2]) M4.rotZ(m, pt.rot[2]); }
   const c = M4.xform(m, pt.o[0] + pt.s[0] / 2, pt.o[1] + pt.s[1] / 2, pt.o[2] + pt.s[2] / 2);
   const ax = [rv.norm([m[0], m[1], m[2]]), rv.norm([m[4], m[5], m[6]]), rv.norm([m[8], m[9], m[10]])];
   return { c: [c[0], c[1], c[2]], ax, half: [pt.s[0] * sc / 2, pt.s[1] * sc / 2, pt.s[2] * sc / 2], pivot: [pivot[0], pivot[1], pivot[2]] };
@@ -331,7 +333,7 @@ function drawRagdolls(dim, selfFirstPerson) {
         m[4] = A[1][0] * h[1] * 2; m[5] = A[1][1] * h[1] * 2; m[6] = A[1][2] * h[1] * 2; m[7] = 0;
         m[8] = A[2][0] * h[2] * 2; m[9] = A[2][1] * h[2] * 2; m[10] = A[2][2] * h[2] * 2; m[11] = 0;
         m[12] = cx - (A[0][0] * h[0] + A[1][0] * h[1] + A[2][0] * h[2]); m[13] = cy - (A[0][1] * h[0] + A[1][1] * h[1] + A[2][1] * h[2]); m[14] = cz - (A[0][2] * h[0] + A[1][2] * h[1] + A[2][2] * h[2]); m[15] = 1;
-        drawBox(m, P.pt.t, L, rd.model.tint, flash, rd.model.emis || 0);
+        drawBox(m, P.pt.t, L, P.pt.wool && rd.entity && rd.entity.woolTint ? rd.entity.woolTint : rd.model.tint, flash, rd.model.emis || 0);
       }
     }
   }

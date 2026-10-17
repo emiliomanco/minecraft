@@ -495,7 +495,7 @@ function drawHand() {
     else { M4.rotY(m, -1.2); M4.rotZ(m, 0.25); if (d.tool || d.bow || d.trident) { M4.rotZ(m, 0.4); } M4.translate(m, -0.3, -0.15, 0); M4.scale(m, 0.62, 0.62, 0.04); drawBox(m, d.isBlock ? d.faces[0] : d.icon, light, d.tint ? [0.55, 0.78, 0.35, 1] : null, null, 0, ITEM_UVR); }
   } else {
     M4.translate(m, 0.08, -0.12, 0); M4.rotX(m, 0.75 - s * 1.2); M4.rotY(m, -0.35 - s * 0.3); M4.rotZ(m, -0.15); M4.translate(m, -0.07, -0.35, -0.07); M4.scale(m, 0.15, 0.55, 0.15);
-    drawBox(m, L6({ all: 'steve_skin', top: 'steve_skin' }), light);
+    drawBox(m, MODELS.steve[2].t, light); // brazo derecho con la piel del jugador
   }
 }
 // ------------------------------------------------------------ MENÚS
