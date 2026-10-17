@@ -1,5 +1,5 @@
 // ============================================================================
-//  Escoba: con el clic derecho mantenido se barre de lado a lado delante del jugador.
+//  Escoba: con el clic derecho mantenido se empuja hacia adelante, lejos del jugador.
 //  Empuja todo lo que tiene física (partículas del fluido, ragdolls, escombros, objetos,
 //  mobs y botes) pero solo a la altura del jugador: desde el suelo que pisa hasta la cabeza.
 //  Lo que está un bloque más abajo no se toca.
@@ -9,15 +9,13 @@ const BROOM_REACH = 1.5, BROOM_R = 0.55;
 // llamado cada cuadro mientras se mantiene el clic derecho con la escoba
 function broomUse(p) {
   const now = performance.now(); const dt = BROOM.active ? clamp((now - BROOM.t) / 1000, 0, 0.1) : 1 / 60;
-  BROOM.t = now; BROOM.active = true; BROOM.ph += dt * 7.5;
-  const sw = Math.sin(BROOM.ph) * 0.95, swd = Math.cos(BROOM.ph) * 0.95 * 7.5; // ángulo del barrido y su velocidad angular
-  const a = p.yaw + sw; const dx = -Math.sin(a), dz = -Math.cos(a); // dirección de la cabeza de la escoba
-  const tx = -Math.cos(a), tz = Math.sin(a); // tangente del arco (sentido de ángulo creciente)
-  const base = Math.floor(p.y + 0.01);
-  BROOM.head[0] = p.x + dx * BROOM_REACH; BROOM.head[1] = base + 0.35; BROOM.head[2] = p.z + dz * BROOM_REACH;
-  // la cabeza se mueve por el arco y además empuja hacia fuera (lejos del jugador)
-  const vt = swd * BROOM_REACH; BROOM.v[0] = tx * vt + dx * 2.5; BROOM.v[1] = 0.6; BROOM.v[2] = tz * vt + dz * 2.5;
-  if (!p._brSnd || now - p._brSnd > 260 && Math.abs(Math.cos(BROOM.ph)) > 0.9) { p._brSnd = now; playSound('step', BROOM.head[0], BROOM.head[1], BROOM.head[2], 0.5, ID.sand); }
+  BROOM.t = now; BROOM.active = true; BROOM.ph += dt * 2.2; // escobazos hacia adelante (la cabeza avanza y vuelve)
+  const dx = -Math.sin(p.yaw), dz = -Math.cos(p.yaw); // siempre hacia donde mira el jugador
+  const base = Math.floor(p.y + 0.01); const st = BROOM.ph % 1; const reach = 0.7 + st * 1.1;
+  BROOM.dir = [dx, dz]; BROOM.reach = reach;
+  BROOM.head[0] = p.x + dx * reach; BROOM.head[1] = base + 0.35; BROOM.head[2] = p.z + dz * reach;
+  BROOM.v[0] = dx * 5; BROOM.v[1] = 0.6; BROOM.v[2] = dz * 5; // empuje hacia adelante, nunca de lado
+  if (st < dt * 2.2 + 0.001) playSound('step', BROOM.head[0], BROOM.head[1], BROOM.head[2], 0.5, ID.sand);
   p.swing = Math.max(p.swing || 0, 0.01);
   broomPush(p, base, dt);
   // en multijugador las entidades las simula el anfitrión: se le manda el barrido (unas 20 veces por segundo)
@@ -28,10 +26,12 @@ function broomActive() { return BROOM.active && performance.now() - BROOM.t < 12
 function broomLevel(y, base, p) { return y >= base - 0.05 && y < p.y + 1.8; }
 // ¿punto dentro de la zona barrida (cerca de la cabeza de la escoba, delante del jugador)?
 function broomHit(x, z, p, B = BROOM) {
-  const hx = B.head[0], hz = B.head[2]; const d = Math.hypot(x - hx, z - hz); if (d > BROOM_R + 0.6) return 0;
-  const fx = -Math.sin(p.yaw), fz = -Math.cos(p.yaw); const rx = x - p.x, rz = z - p.z; const rl = Math.hypot(rx, rz) || 1;
-  if ((rx * fx + rz * fz) / rl < -0.2) return 0; // detrás del jugador no
-  return clamp(1 - d / (BROOM_R + 0.6), 0, 1);
+  // franja delante del jugador (de 0,2 bloques hasta la cabeza de la escoba + 0,7) y 0,9 a cada lado
+  const vl = Math.hypot(B.v[0], B.v[2]) || 1; const fx = B.v[0] / vl, fz = B.v[2] / vl;
+  const rx = x - p.x, rz = z - p.z; const f = rx * fx + rz * fz, l = Math.abs(rx * fz - rz * fx);
+  const far = Math.hypot(B.head[0] - p.x, B.head[2] - p.z) + 0.7;
+  if (f < 0.2 || f > far || l > 0.9) return 0;
+  return clamp(1 - l / 0.9 * 0.5, 0, 1);
 }
 function broomPush(p, base, dt, B = BROOM) {
   const V = B.v; const k = 20;
@@ -43,7 +43,6 @@ function broomPush(p, base, dt, B = BROOM) {
     const m = e.type === 'item' ? 1 : e.isBoat ? 0.5 : (e instanceof Mob ? 0.35 : 0.5);
     e.vx = (e.vx || 0) + (V[0] - (e.vx || 0)) * Math.min(1, k * f * m * dt); e.vz = (e.vz || 0) + (V[2] - (e.vz || 0)) * Math.min(1, k * f * m * dt);
     if (e.type === 'item') { e.onGround = false; e.vy = Math.max(e.vy || 0, 1.6 * f); }
-    if (e.isBoat) { e.wy = (e.wy || 0) + (V[0] * (e.z - p.z) - V[2] * (e.x - p.x)) * 0.02 * f; }
   }
   // ragdolls: se desplaza el punto anterior de cada cuerpo (verlet) → ganan velocidad
   if (typeof RAG !== 'undefined') for (const rd of RAG.list) {
@@ -63,7 +62,6 @@ function broomPush(p, base, dt, B = BROOM) {
 }
 // colisionadores de la escoba para el fluido continuo (dos esferas aplastadas a lo largo de la cabeza)
 function broomColliders(add) {
-  if (!broomActive()) return; const p = G.player; const a = p.yaw + Math.sin(BROOM.ph) * 0.95;
-  const tx = -Math.cos(a), tz = Math.sin(a);
-  for (const s of [-0.35, 0.35]) add({ x: BROOM.head[0] + tx * s, y: BROOM.head[1] - 0.15, z: BROOM.head[2] + tz * s, vx: BROOM.v[0], vy: BROOM.v[1], vz: BROOM.v[2] }, 0.42, 0.12);
+  if (!broomActive()) return; const [dx, dz] = BROOM.dir || [0, -1]; const tx = -dz, tz = dx; // a lo ancho de la cabeza
+  for (const s of [-0.5, 0, 0.5]) add({ x: BROOM.head[0] + tx * s, y: BROOM.head[1] - 0.15, z: BROOM.head[2] + tz * s, vx: BROOM.v[0], vy: BROOM.v[1], vz: BROOM.v[2] }, 0.36, 0.12);
 }

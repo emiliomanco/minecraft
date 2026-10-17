@@ -260,7 +260,9 @@ function ragUpdate(dt) {
     if (rd.still < 0.8) { const n = clamp(Math.ceil(dt * 90), 1, 9); for (let s = 0; s < n; s++) ragStep(rd, dt / n); }
     // caída: el golpe contra el suelo hace daño a las entidades vivas en ragdoll (la física normal está en pausa)
     // por la altura de la caída (no por la velocidad del choque, que las correcciones del solver inflan)
-    { const cy = ragCenter(rd.root)[1]; if (rd.peakY === undefined) rd.peakY = cy + (e && e.fallDist || 0); if (cy > rd.peakY) rd.peakY = cy; rd.curY = cy; }
+    { const cy = ragCenter(rd.root)[1]; if (rd.peakY === undefined) rd.peakY = cy + (e && e.fallDist || 0); if (cy > rd.peakY) rd.peakY = cy; rd.curY = cy;
+      // el agua amortigua la caída: sin daño (como en Minecraft) y la altura vuelve a contar desde aquí
+      const c = ragCenter(rd.root); const L = rd.world.get(Math.floor(c[0]), Math.floor(c[1]), Math.floor(c[2])); if (L > 0 && REG[L] && (REG[L].liquid === 1 || REG[L].inWater)) { rd.fallDmg = false; rd.peakY = cy; if (e) e.fallDist = 0; } }
     if (rd.alive && e && rd.fallDmg && rd.maxImpact > 12) { const dmg = fallDamage(rd.peakY - rd.curY); rd.fallDmg = false; if (dmg > 0) { if (e === G.player) e.damage(dmg, 'fall'); else hurtEntity(e, dmg, null, 0, 0, 0, 'fall'); playSound('fall', e.x, e.y, e.z, 0.8); } }
     const c = ragCenter(rd.root);
     if (e && rd.alive) {
@@ -290,7 +292,13 @@ function playerRagdollToggle() {
 // golpe fuerte / explosión: ragdoll temporal si el empujón supera el umbral
 function ragKnock(e, kx, ky, kz) { if (e.ragdoll || !ragdollsOn()) return; const k = Math.hypot(kx, ky, kz); if (k < ragCfg().knock) return; startRagdoll(e, [kx * 0.3, ky * 0.3, kz * 0.3], true, 1.2 + Math.min(1.5, k * 0.08)); }
 // caída rápida: el cuerpo se suelta en el aire y el impacto decide el daño
-function ragFallCheck(e, vy) { if (e.ragdoll || !ragdollsOn() || e.flying || e.gliding) return; if (-vy > ragCfg().fall && !e.onGround) startRagdoll(e, null, true, 1.6); }
+function ragFallCheck(e, vy) {
+  if (e.ragdoll || !ragdollsOn() || e.flying || e.gliding || e.boat || e.onGround || -vy <= ragCfg().fall) return;
+  if (e.armor && e.armor[1] && e.armor[1].id === ID.elytra) return; // puede abrir los élitros
+  // agua debajo (antes del primer sólido): va a caer al agua, no pierde el equilibrio
+  const w = e.world; if (w) { const x = Math.floor(e.x), z = Math.floor(e.z); for (let y = Math.floor(e.y); y > Math.floor(e.y) - 48 && y > 0; y--) { const b = w.get(x, y, z); if (b > 0 && (REG[b].liquid === 1 || REG[b].inWater)) return; if (b > 0 && REG[b].solid) break; } }
+  startRagdoll(e, null, true, 1.6);
+}
 // ---- dibujo
 function drawRagdolls(dim, selfFirstPerson) {
   if (!RAG.list.length) return;

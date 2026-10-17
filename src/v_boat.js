@@ -73,7 +73,8 @@ function boatStep(e, h, w) {
 function boatMount(p, e) {
   if (e.capsized) { showActionMsg('El bote está volcado: métete debajo y golpéalo para enderezarlo'); return; }
   if (e.rider && e.rider !== p) return;
-  if (e.proxy) { netSend({ t: 'boat', a: 'mount', id: e.hostId }); p._boatOffT = 0; return; } // lo confirma el anfitrión (lista de entidades) p.boat = e; e.rider = p; e.ctl = null; p.vx = p.vy = p.vz = 0;
+  if (e.proxy) { netSend({ t: 'boat', a: 'mount', id: e.hostId }); p._boatOffT = 0; return; } /* lo confirma el anfitrión (lista de entidades) */
+  p.boat = e; e.rider = p; e.ctl = null; p.vx = p.vy = p.vz = 0;
 }
 function boatDismount(p, thrown) {
   const e = p.boat; if (!e) return; p.boat = null; e.rider = null; e.ctl = null;

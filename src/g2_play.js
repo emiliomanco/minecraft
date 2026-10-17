@@ -222,7 +222,7 @@ const CREATIVE_TABS = [['Construcción', i => { const d = REG[i]; return d.isBlo
   ['Naturales', i => { const d = REG[i]; return d.isBlock && (/ore|log|leaves|sand|gravel|dirt|grass|nylium|sapling|flower|mushroom|cactus|snow|ice|stone$|netherrack|soul|end_stone|moss|sculk|dripstone|clay|mud|basalt|blackstone|kelp|seagrass|lily|vine|fungus|roots|stem|wart|melon|pumpkin|bush|fern|poppy|dandelion|orchid|cornflower|daisy|amethyst|cane|chorus|petals|debris/.test(d.name)); }],
   ['Funcionales', i => { const d = REG[i]; return d.isBlock && (d.ui || d.light || /portal|spawner|bed|tnt|bars|fence|wall|rail|ladder|slab|scaffold|lever|button|plate|rod|lamp|detector|target|note|slime|honey/.test(d.name)); }],
   ['Herramientas', i => { const d = REG[i]; return !d.isBlock && (d.tool && d.tool.type !== 'sword' || /bucket|flint_and|extinguisher|shears|compass|clock|spyglass|map|lead|brush|broom|boat|fishing|rocket|saddle|name_tag|bone_meal|eye_of|ender_pearl/.test(d.name)); }],
-  ['Combate', i => { const d = REG[i]; return !d.isBlock && (d.armor || (d.tool && d.tool.type === 'sword') || /bow|arrow|shield|trident|mace|totem|elytra|snowball/.test(d.name) || (d.tool && d.tool.type === 'axe')); }],
+  ['Combate', i => { const d = REG[i]; return !d.isBlock && (d.armor || (d.tool && d.tool.type === 'sword') || /bow|arrow|shield|trident|mace|totem|elytra|snowball|obliterator/.test(d.name) || (d.tool && d.tool.type === 'axe')); }],
   ['Comida', i => !REG[i].isBlock && !!REG[i].food],
   ['Ingredientes', i => { const d = REG[i]; return !d.isBlock && !d.food && !d.tool && !d.armor && !d.dur && !d.bucket && !/bow|arrow|shield|trident|mace|totem|elytra/.test(d.name); }],
   ['Buscar', null]];
@@ -350,8 +350,8 @@ function onKeyUp(e) {
 }
 function screenshot() { const el = document.createElement('a'); try { requestAnimationFrame(() => { el.href = $('gl').toDataURL('image/png'); el.download = 'minecraft2_' + Date.now() + '.png'; el.click(); chatMsg('Captura guardada'); }); } catch (e) { } }
 // chat
-function openChat(pre) { const el = $('chatIn'); el.classList.add('on'); el.value = pre; document.exitPointerLock && document.exitPointerLock(); $('chatLog').classList.add('open'); setTimeout(() => el.focus(), 0); }
-function closeChat() { const el = $('chatIn'); el.classList.remove('on'); el.blur(); $('chatLog').classList.remove('open'); lockPointer(); }
+function openChat(pre) { const el = $('chatIn'); el.classList.add('on'); el.value = pre; document.exitPointerLock && document.exitPointerLock(); $('chatLog').classList.add('open'); setTimeout(() => { el.focus(); if (typeof cmdUIUpdate === 'function') cmdUIUpdate(); }, 0); }
+function closeChat() { const el = $('chatIn'); el.classList.remove('on'); if (typeof CMDUI !== 'undefined' && CMDUI.el) CMDUI.el.style.display = 'none'; el.blur(); $('chatLog').classList.remove('open'); lockPointer(); }
 // ------------------------------------------------------------ minar / usar
 const MINE = { target: null, prog: 0, stage: -1, cool: 0, useCool: 0, attackCool: 0 };
 function lookDir(p) { return [-Math.sin(p.yaw) * Math.cos(p.pitch), Math.sin(p.pitch), -Math.cos(p.yaw) * Math.cos(p.pitch)]; }
@@ -362,10 +362,20 @@ function currentTarget() {
   if (ent) return { ent: ent.e, t: ent.t };
   return hit;
 }
+// One-Hit Obliterator: muerte instantánea de cualquier cosa, tenga la vida que tenga (con un rayo de chispas)
+function obliterate(e, p) {
+  p.swing = 1; const kx = -Math.sin(p.yaw) * 2, kz = -Math.cos(p.yaw) * 2;
+  for (let i = 0; i < 40; i++) { const t = i / 40; P_({ x: e.x + (Math.random() - 0.5) * 0.6, y: e.y + (e.h || 1) * t * 1.6, z: e.z + (Math.random() - 0.5) * 0.6, vx: (Math.random() - 0.5) * 4, vy: Math.random() * 3, vz: (Math.random() - 0.5) * 4, life: 0.5 + Math.random() * 0.4, size: 0.12, layer: TEX.spark, add: true, emis: 4, r: 0.85, g: 0.9, b: 1, grav: 4 }); }
+  playSound('crit', e.x, e.y, e.z, 1); playSound('explode', e.x, e.y, e.z, 0.35);
+  if (e.type === 'end_crystal') { if (G.net && G.net.role === 'client') netSend({ t: 'atk', id: e.hostId || e.id, a: 1e9 }); else e.hp = 0; return; }
+  if (e === G.player || e.remotePlayer || e.proxy) { hurtEntity(e, 1e9, p, kx, 3, kz, 'obliterator'); return; }
+  e.invul = 0; hurtEntity(e, 1e9, p, kx, 3, kz, 'obliterator'); if (!e.dead && e.hp > 0) e.hp = 0;
+}
 function attackEntity(e) {
   const p = G.player; const s = p.held(); const d = s ? REG[s.id] : null; let dmg = d && d.dmg ? d.dmg : 1; const sh = enchLvl(s, 'sharpness'); if (sh) dmg += 0.5 * sh + 0.5; const fa = enchLvl(s, 'fire_aspect'); if (fa && e.type !== 'player') e.fire = Math.max(e.fire || 0, 80 * fa);
   if (G.gameMode === 'spectator') return;
-  if (e.isBoat) { boatHit(e, p); p.swing = 1; return; }
+  if (e.isBoat) { if (d && d.obliterator) { boatHit(e, p, false, true); p.swing = 1; return; } boatHit(e, p); p.swing = 1; return; }
+  if (d && d.obliterator) { obliterate(e, p); return; }
   const crit = !p.onGround && p.vy < 0 && !p.inWater; if (crit) { dmg *= 1.5; for (let i = 0; i < 12; i++) P_({ x: e.x, y: e.y + e.h * 0.7, z: e.z, vx: (Math.random() - 0.5) * 5, vy: Math.random() * 4, vz: (Math.random() - 0.5) * 5, life: 0.5, size: 0.1, layer: TEX.spark, add: true, emis: 2, r: 0.9, g: 0.9, b: 0.6, grav: 10 }); }
   if (s && s.id === ID.mace && p.fallDist > 1.5) { dmg += Math.floor(p.fallDist) * 2; p.fallDist = 0; p.vy = 4; explosionFX(p.dim, e.x, e.y, e.z, 0.5); }
   const kb = p.sprinting ? 9 : 5; const kx = -Math.sin(p.yaw) * kb, kz = -Math.cos(p.yaw) * kb;

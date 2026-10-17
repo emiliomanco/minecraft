@@ -306,7 +306,8 @@ defI('shears', 'Tijeras', { stack: 1, dur: 238, shears: true }); defI('compass',
 defI('spyglass', 'Catalejo', { stack: 1, spyglass: true }); defI('map', 'Mapa', { stack: 1 }); defI('lead', 'Rienda');
 defI('turtle_helmet', 'Caparazón de tortuga', { stack: 1, armor: { slot: 0, pts: 2, mat: 'turtle', tough: 0 }, dur: 275 });
 defI('trident', 'Tridente', { stack: 1, dur: 250, dmg: 9, trident: true }); defI('crossbow', 'Ballesta', { stack: 1, dur: 465, bow: true, crossbow: true });
-defI('mace', 'Maza', { stack: 1, dur: 500, dmg: 6, mace: true }); defI('heavy_core', 'Núcleo denso');
+defI('mace', 'Maza', { stack: 1, dur: 500, dmg: 6, mace: true });
+defI('one_hit_obliterator', 'One-Hit Obliterator', { stack: 1, dmg: 1e9, obliterator: true }); // sin receta: solo en el menú creativo defI('heavy_core', 'Núcleo denso');
 defI('experience_bottle', 'Frasco de experiencia', { throwable: 'xpbottle' }); defI('brush', 'Brocha', { stack: 1, dur: 64 }); defI('fishing_rod', 'Caña de pescar', { stack: 1, dur: 64 });
 defI('broom', 'Escoba', { stack: 1, broom: true }); defI('oak_boat', 'Bote', { stack: 1, boatItem: true });
 const TOOLMAT = { wooden: { lvl: 1, speed: 2, dur: 59, dmg: 0, n: 'madera', col: [137, 103, 59] }, stone: { lvl: 2, speed: 4, dur: 131, dmg: 1, n: 'piedra', col: [130, 130, 130] }, iron: { lvl: 3, speed: 6, dur: 250, dmg: 2, n: 'hierro', col: [220, 220, 220] }, golden: { lvl: 1, speed: 12, dur: 32, dmg: 0, n: 'oro', col: [250, 220, 70] }, diamond: { lvl: 4, speed: 8, dur: 1561, dmg: 3, n: 'diamante', col: [80, 230, 220] }, netherite: { lvl: 5, speed: 9, dur: 2031, dmg: 4, n: 'netherita', col: [80, 70, 75] } };
@@ -789,6 +790,14 @@ function itemTexAuto(p, name) {
     spyglass: () => { for (let i = 0; i < 10; i++) { p.set(3 + i, 12 - i, [200, 120, 70]); p.set(4 + i, 12 - i, [170, 100, 60]); } p.rect(11, 2, 13, 4, [180, 130, 230]); outline(p); }, map: () => { p.rect(2, 2, 13, 13, [230, 220, 180]); p.rect(4, 4, 11, 11, [140, 180, 110]); outline(p); }, lead: () => { for (let i = 0; i < 12; i++) p.set(2 + i, 8 + Math.round(Math.sin(i) * 3), [180, 140, 90]); outline(p); },
     turtle_helmet: () => armorIcon(p, 0, [80, 160, 70]), trident: () => { for (let i = 0; i < 11; i++) p.set(2 + i, 13 - i, [80, 150, 140]); p.rect(11, 1, 14, 2, [80, 170, 160]); p.rect(13, 1, 14, 4, [80, 170, 160]); outline(p); },
     crossbow: () => { for (let i = 0; i < 10; i++) p.set(3 + i, 12 - i, [110, 80, 45]); for (let i = 0; i < 8; i++) { p.set(4 + i, 3 + (i >> 2), [80, 80, 85]); p.set(12 - (i >> 2), 4 + i, [80, 80, 85]); } outline(p); },
+    one_hit_obliterator: () => { // tridente negro con anillas doradas, borla roja y chispas blancas
+      const K = [40, 40, 46], Gd = [200, 165, 90], Rd = [175, 30, 35], W = [245, 245, 250];
+      for (let y = 6; y < 14; y++) p.set(7, y, K); for (let y = 6; y < 14; y++) p.set(8, y, [58, 58, 64]);
+      p.set(7, 9, Gd); p.set(8, 9, Gd); p.set(7, 12, Gd); p.set(8, 12, Gd); p.set(7, 14, Rd); p.set(8, 15, Rd); p.set(6, 15, Rd);
+      for (let x = 3; x < 13; x++) p.set(x, 6, K); for (let y = 1; y < 6; y++) { p.set(3, y, K); p.set(12, y, K); } for (let y = 2; y < 6; y++) { p.set(7, y, K); p.set(8, y, K); }
+      p.set(3, 0, K); p.set(12, 0, K); p.set(7, 1, K); p.set(8, 1, K); p.set(3, 3, Gd); p.set(12, 3, Gd); p.set(7, 4, Gd); p.set(8, 4, Gd);
+      for (const [x, y] of [[1, 3], [2, 4], [1, 5], [14, 2], [13, 4], [14, 5], [5, 2], [10, 2], [5, 9], [10, 10], [4, 11], [11, 8]]) p.set(x, y, W);
+    },
     mace: () => { for (let i = 0; i < 9; i++) p.set(3 + i, 12 - i, [120, 100, 80]); p.rect(9, 2, 13, 6, [90, 90, 100]); outline(p); }, heavy_core: () => blob([70, 70, 80], 5),
     brush: () => { for (let i = 0; i < 7; i++) p.set(3 + i, 12 - i, [150, 110, 60]); p.rect(9, 2, 13, 6, [220, 200, 160]); outline(p); }, oak_boat: () => { for (let x = 1; x < 15; x++) { const d = Math.abs(x - 7.5); const y0 = 8 + Math.max(0, d - 4.5) * 0.9; for (let y = Math.round(y0); y < 13; y++) p.set(x, y, [150, 115, 65].map(v => v + (p.r() - 0.5) * 18 - (y === 12 ? 30 : 0))); } p.rect(6, 6, 7, 11, [110, 80, 45]); outline(p); }, broom: () => { for (let i = 0; i < 9; i++) p.set(12 - i, 1 + i, [125, 90, 50]); for (let y = 9; y < 15; y++) for (let x = 1; x < 7; x++) if (x + (14 - y) * 0.5 < 8 && x - (y - 9) * 0.4 > 0) p.set(x, y, [205, 175, 80].map(v => v + (p.r() - 0.5) * 30)); p.rect(3, 9, 5, 10, [150, 60, 40]); outline(p); }, fishing_rod: () => { for (let i = 0; i < 12; i++) p.set(2 + i, 13 - i, [120, 90, 50]); for (let y = 2; y < 14; y++) p.set(13, y, [230, 230, 230]); },
     beetroot: () => { blob([170, 30, 50], 4.5); p.rect(7, 2, 8, 4, [60, 140, 40]); }, beetroot_seeds: () => { for (let i = 0; i < 6; i++) p.set(4 + ((p.r() * 8) | 0), 6 + ((p.r() * 6) | 0), [150, 110, 60]); }, beetroot_soup: () => { for (let y = 7; y < 13; y++) for (let x = 3; x < 13; x++) if (Math.hypot((x - 7.5) / 5, (y - 7) / 5.5) < 1) p.set(x, y, [140, 100, 60]); p.rect(4, 7, 11, 8, [170, 30, 50]); outline(p); },

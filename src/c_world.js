@@ -237,21 +237,33 @@ class Generator {
   }
   // acantilados y salientes: en las laderas de montaña la superficie se deforma con ruido 3D (paredes verticales,
   // voladizos y repisas) en vez de ser una columna simple; luego se viste la nueva superficie (roca, pasto o nieve)
-  cliffs3D(B, x, z, wx, wz, ci, waterTop) {
-    const h = ci.h, amp = Math.min(16, (ci.mountain - 25) * 0.12); if (amp < 1) return;
-    const y0 = Math.max(waterTop + 2, h - 28), y1 = Math.min(this.H - 3, h + 22); let top = -1;
-    for (let y = y0; y <= y1; y++) {
-      const n = this.nW.fbm3(wx * 0.035, y * 0.05, wz * 0.035, 2) + this.nV.n3(wx * 0.09, y * 0.11, wz * 0.09) * 0.35;
-      const dens = (h - y) / amp + n * 1.6; const i = x | z << 4 | y << 8;
-      if (dens > 0) { if (!B[i]) B[i] = ID.stone; top = y; } else if (B[i] && y > h - 28) B[i] = 0;
+  // montañas del terreno realista: el material de la superficie sale de la pendiente y la altura (sin bloques flotantes):
+  // paredes de roca, nieve solo donde se puede posar (poca pendiente y frío), canchales de grava al pie de las paredes,
+  // y pasto/tierra en las faldas suaves. Bajo una pared de roca no hay tierra (no quedan muros marrones).
+  mountainSurface(B, M, x, z, wx, wz, ci) {
+    const h = ci.h; if (h >= this.H - 2) return;
+    const hx1 = this.col(wx + 1, wz).h, hx0 = this.col(wx - 1, wz).h, hz1 = this.col(wx, wz + 1).h, hz0 = this.col(wx, wz - 1).h;
+    const g = Math.max(Math.abs(hx1 - hx0), Math.abs(hz1 - hz0)) / 2; // pendiente (bloques de subida por bloque)
+    const lowNb = Math.min(hx1, hx0, hz1, hz0); // pie de una pared: el vecino más bajo
+    const n = this.nV.n2(wx * 0.07, wz * 0.07), n2 = this.nS.n2(wx * 0.21, wz * 0.21);
+    const cold = ci.Te < CLT[1] + n * 0.04; // línea de nieve irregular
+    const set = (y, id) => { if (y > 4 && y < this.H) B[x | z << 4 | y << 8] = id; };
+    const stoneVar = y => { const v = this.nV.n3(wx * 0.06, y * 0.09, wz * 0.06); return v > 0.5 ? ID.andesite : v < -0.55 ? ID.cobblestone : v > 0.38 && v < 0.42 ? ID.calcite : ID.stone; };
+    let top, fill, depth = 3;
+    if (g >= 2.2) { top = null; fill = null; depth = 6; } // pared: roca hasta el fondo
+    else if (cold) { // manchas grandes de nieve o de roca (no un damero escalón a escalón); la nieve también cubre el frente de cada escalón
+      const patch = this.nW.n2(wx * 0.028, wz * 0.028) * 0.8 + n2 * 0.25;
+      if (g < 1.1 + patch * 0.9) { top = ID.snow_block; fill = ID.snow_block; depth = Math.min(3, 1 + Math.ceil(g)); } else { top = null; fill = null; depth = 4; }
     }
-    if (top < 0) return;
-    // vestir: lo que queda al aire arriba de cada tramo sólido
-    const snowy = ci.Te < CLT[1];
-    for (let y = y1; y >= y0; y--) { const i = x | z << 4 | y << 8; if (!B[i] || B[i] === ID.bedrock) continue; const up = y + 1 < this.H ? B[x | z << 4 | (y + 1) << 8] : 0; if (up) continue;
-      const steep = Math.abs(this.col(wx + 1, wz).h - this.col(wx - 1, wz).h) + Math.abs(this.col(wx, wz + 1).h - this.col(wx, wz - 1).h) > 7;
-      B[i] = snowy ? ID.snow_block : steep ? ID.stone : (y > SEA + 150 ? ID.stone : ID.grass_block);
-      if (!snowy && !steep && y - 1 >= y0 && B[x | z << 4 | (y - 1) << 8] === ID.stone) B[x | z << 4 | (y - 1) << 8] = ID.dirt; }
+    else if (g >= 1.3) { top = n2 > 0.35 ? ID.gravel : n2 < -0.45 ? ID.coarse_dirt || ID.dirt : null; fill = null; depth = 4; } // ladera empinada: roca con canchales
+    else if (h > SEA + 150) { top = n2 > 0.1 ? ID.gravel : null; fill = null; } // muy alto: sin pasto
+    else return; // falda suave: lo que puso el bioma (pasto y tierra)
+    for (let k = 0; k < depth; k++) { const y = h - k; const cur = B[x | z << 4 | y << 8]; if (!cur || cur === ID.bedrock || cur === ID.water) break; set(y, k === 0 && top ? top : (fill || stoneVar(y))); }
+    if (fill === ID.snow_block) for (let k = depth; k < depth + 3; k++) { const y = h - k; if (B[x | z << 4 | y << 8] === ID.dirt || B[x | z << 4 | y << 8] === ID.snow_block) set(y, stoneVar(y)); else break; } // debajo de la nieve, roca
+    // canchal al pie de una pared alta (la grava se acumula abajo)
+    if (g < 1.3 && !cold && h - lowNb <= 1 && Math.max(hx1, hx0, hz1, hz0) - h > 6 && n2 > -0.2) set(h, ID.gravel);
+    // nieve en polvo sobre roca poco empinada en lo frío
+    if (cold && top === null && g < 1.9 && this.nW.n2(wx * 0.028 + 50, wz * 0.028) > 0.35 && h + 1 < this.H && !B[x | z << 4 | (h + 1) << 8]) { /* solo en algunas zonas, no en cada escalón */ set(h + 1, ID.snow); M[x | z << 4 | (h + 1) << 8] = 2 + ((n2 + 1) * 2 | 0); }
   }
   // clima continuo con bordes orgánicos (dominio deformado); valores ~[-0.7, 0.7] con mediana 0
   climateAt(x, z) {
@@ -356,7 +368,7 @@ class Generator {
         if (id === ID.deepslate) { const v = this.nV.n3(wx * 0.06 + 99, y * 0.06, wz * 0.06); if (v > 0.6) id = ID.tuff; }
         B[i] = id;
       }
-      if (this.climate >= 3 && ci.mountain > 25) this.cliffs3D(B, x, z, wx, wz, ci, waterTop);
+      if (this.climate >= 3 && ci.mountain > 3 && h >= waterTop) this.mountainSurface(B, M, x, z, wx, wz, ci);
       // tallar cuevas
       const top = h - (h < SEA + 2 ? 6 : 0);
       for (let y = 5; y < top; y++) {
@@ -858,22 +870,54 @@ defStruct({
   name: 'stronghold', dim: 'overworld', radius: 56, fixed: strongholdSpots,
   build(S, c, r) {
     const y = 60; const bricks = (x, yy, z) => { const h = hash3(c.seed, x, yy, z); return h < 0.15 ? ID.mossy_stone_bricks : h < 0.28 ? ID.cracked_stone_bricks : ID.stone_bricks; };
-    // sala del portal
-    const px = c.x, pz = c.z;
-    S.hollow(px - 6, y, pz - 8, px + 6, y + 8, pz + 8, bricks);
-    S.fill(px - 5, y + 1, pz - 7, px + 5, y + 7, pz + 7, 0);
-    S.fill(px - 2, y, pz - 2, px + 2, y, pz + 2, ID.lava); S.fill(px - 3, y + 1, pz - 3, px + 3, y + 1, pz + 3, ID.stone_bricks);
-    S.fill(px - 3, y + 2, pz - 3, px + 3, y + 2, pz + 3, 0);
-    for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) {
-      const ring = (Math.abs(dx) === 2) !== (Math.abs(dz) === 2); if (ring) S.set(px + dx, y + 2, pz + dz, r() < 0.1 ? ID.end_portal_frame_eye : ID.end_portal_frame, (dz === -2 ? 0 : dz === 2 ? 2 : dx === -2 ? 3 : 1));
-      else if (Math.abs(dx) < 2 && Math.abs(dz) < 2) S.set(px + dx, y + 1, pz + dz, ID.lava);
+    // sala del portal: nave alta con bóveda escalonada, columnas con arcos, canales de lava a los lados, pasillo con
+    // canales de agua, escalinata hasta el estrado del portal (colgado de cadenas con faroles) y una gran lámpara de cristal
+    const px = c.x, pz = c.z; const X0 = px - 10, X1 = px + 10, Z0 = pz - 14, Z1 = pz + 12, YT = y + 15;
+    S.hollow(X0, y - 1, Z0, X1, YT, Z1, bricks); S.fill(X0 + 1, y + 1, Z0 + 1, X1 - 1, YT - 1, Z1 - 1, 0);
+    S.fillFn(X0 + 1, y, Z0 + 1, X1 - 1, y, Z1 - 1, (x, yy, z) => ((x + z) & 3) === 0 && hash3(c.seed, x, 7, z) < 0.5 ? ID.chiseled_stone_bricks : bricks(x, yy, z));
+    // bóveda escalonada
+    for (let k = 1; k <= 3; k++) S.fillFn(X0 + 1, YT - k, Z0 + 1, X1 - 1, YT - k, Z1 - 1, (x, yy, z) => Math.abs(x - px) >= 10 - k ? bricks(x, yy, z) : undefined);
+    // canales de lava a lo largo de las paredes (con borde) y puentecitos
+    for (const sx of [-1, 1]) {
+      const cx0 = px + sx * 7, cx1 = px + sx * 8;
+      S.fill(Math.min(cx0, cx1), y - 1, Z0 + 2, Math.max(cx0, cx1), y - 1, Z1 - 2, ID.stone_bricks);
+      S.fill(Math.min(cx0, cx1), y, Z0 + 2, Math.max(cx0, cx1), y, Z1 - 2, ID.lava);
+      S.fill(px + sx * 6, y + 1, Z0 + 2, px + sx * 6, y + 1, Z1 - 2, ID.stone_slab);
+      for (let z = Z0 + 4; z <= Z1 - 4; z += 8) S.fill(Math.min(cx0, cx1), y + 1, z, Math.max(cx0, cx1), y + 1, z, ID.stone_slab);
     }
-    S.fill(px - 1, y + 2, pz + 5, px + 1, y + 2, pz + 5, ID.stone_bricks); S.spawner(px, y + 2, pz + 5, 'silverfish');
-    S.set(px - 5, y + 4, pz, ID.torch); S.set(px + 5, y + 4, pz, ID.torch);
+    // columnas con arcos y nichos con barrotes entre ellas
+    for (let z = Z0 + 2; z <= Z1 - 2; z += 4) for (const sx of [-1, 1]) {
+      const x = px + sx * 9; S.fill(x, y + 1, z, x, YT - 5, z, ID.stone_bricks); S.set(x, y + 1, z, ID.chiseled_stone_bricks); S.set(x, YT - 5, z, ID.chiseled_stone_bricks);
+      S.set(x - sx, YT - 6, z, ID.stone_brick_stairs, (sx > 0 ? 1 : 3) | 4); S.set(x - sx, y + 5, z, ID.lantern);
+      for (const dz of [-1, 1]) if (z + dz > Z0 && z + dz < Z1) S.set(x, YT - 6, z + dz, ID.stone_brick_stairs, (dz > 0 ? 0 : 2) | 4);
+      if (z + 2 < Z1 - 1) { const wx = px + sx * 10; S.fill(wx, y + 3, z + 2, wx, y + 6, z + 2, ID.iron_bars); S.set(wx, y + 2, z + 2, ID.chiseled_stone_bricks); S.set(wx, y + 7, z + 2, ID.chiseled_stone_bricks); }
+    }
+    // pasillo central desde la entrada con dos canales de agua
+    for (const sx of [-2, 2]) S.fill(px + sx, y, Z0 + 1, px + sx, y, pz - 8, ID.water);
+    S.fill(X0 + 1, y - 1, Z0 + 1, X1 - 1, y - 1, pz - 8, ID.stone_bricks);
+    // estrado del portal (3 de alto) con escalinata de 5 de ancho
+    S.fill(px - 4, y + 1, pz - 4, px + 4, y + 3, pz + 5, ID.stone_bricks);
+    S.fillFn(px - 4, y + 3, pz - 4, px + 4, y + 3, pz + 5, (x, yy, z) => (Math.abs(x - px) === 4 || z === pz - 4 || z === pz + 5) ? ID.chiseled_stone_bricks : undefined);
+    for (let k = 0; k < 3; k++) { if (k < 2) S.fill(px - 2, y + 1, pz - 5 - k, px + 2, y + 2 - k, pz - 5 - k, ID.stone_bricks); S.fill(px - 2, y + 3 - k, pz - 5 - k, px + 2, y + 3 - k, pz - 5 - k, ID.stone_brick_stairs, 2); }
+    S.fill(px - 1, y + 3, pz - 1, px + 1, y + 3, pz + 1, ID.lava);
+    for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) {
+      const ring = (Math.abs(dx) === 2) !== (Math.abs(dz) === 2); if (ring) S.set(px + dx, y + 4, pz + dz, r() < 0.1 ? ID.end_portal_frame_eye : ID.end_portal_frame, (dz === -2 ? 0 : dz === 2 ? 2 : dx === -2 ? 3 : 1));
+    }
+    // cadenas con faroles en las cuatro esquinas del portal
+    for (const [dx, dz] of [[-2, -2], [2, -2], [-2, 2], [2, 2]]) { S.fill(px + dx, y + 6, pz + dz, px + dx, YT - 4, pz + dz, ID.iron_bars); S.set(px + dx, y + 5, pz + dz, ID.lantern); }
+    // generador de lepismas detrás del portal, en un pedestal
+    S.set(px, y + 4, pz + 4, ID.chiseled_stone_bricks); S.spawner(px, y + 5, pz + 4, 'silverfish');
+    // gran lámpara de cristal colgada sobre la escalinata
+    const cz = pz - 8; S.fill(px - 2, YT - 4, cz - 2, px + 2, YT - 4, cz + 2, ID.glass); S.fill(px - 1, YT - 5, cz - 1, px + 1, YT - 5, cz + 1, ID.glass); S.fill(px, YT - 3, cz, px, YT - 1, cz, ID.iron_bars);
+    for (const [dx, dz] of [[-2, -2], [2, -2], [-2, 2], [2, 2], [0, -2], [0, 2], [-2, 0], [2, 0]]) { const l = (dx && dz) ? 2 : 1; S.fill(px + dx, YT - 4 - l, cz + dz, px + dx, YT - 5, cz + dz, ID.iron_bars); S.set(px + dx, YT - 5 - l, cz + dz, ID.lantern); }
+    S.set(px, YT - 6, cz, ID.lantern);
+    // telarañas en los rincones altos
+    for (let k = 0; k < 18; k++) { const x = X0 + 1 + ((r() * 19) | 0), z = Z0 + 1 + ((r() * 25) | 0), yy = YT - 4 - ((r() * 3) | 0); if (Math.abs(x - px) >= 6) S.set(x, yy, z, ID.cobweb); }
+    // entrada desde el pasillo norte
+    S.fill(px - 1, y + 1, Z0, px + 1, y + 3, Z0, 0);
     // pasillos en cruz
     const corridor = (x0, z0, x1, z1) => { S.fillFn(Math.min(x0, x1) - 2, y, Math.min(z0, z1) - 2, Math.max(x0, x1) + 2, y + 4, Math.max(z0, z1) + 2, (x, yy, z) => { const inX = x0 === x1 ? Math.abs(x - x0) < 2 : true, inZ = z0 === z1 ? Math.abs(z - z0) < 2 : true; if (yy > y && yy < y + 4 && inX && inZ) return 0; return bricks(x, yy, z); }); };
-    corridor(px, pz - 9, px, pz - 36); corridor(px - 30, pz - 36, px + 30, pz - 36); corridor(px - 30, pz - 36, px - 30, pz + 30); corridor(px + 30, pz - 36, px + 30, pz + 10);
-    S.fill(px - 1, y + 1, pz - 9, px + 1, y + 3, pz - 8, 0);
+    corridor(px, pz - 15, px, pz - 36); corridor(px - 30, pz - 36, px + 30, pz - 36); corridor(px - 30, pz - 36, px - 30, pz + 30); corridor(px + 30, pz - 36, px + 30, pz + 10);
     // biblioteca
     const lx = px - 30, lz = pz + 20; S.hollow(lx - 7, y, lz - 6, lx + 7, y + 7, lz + 6, bricks); S.fill(lx - 6, y + 1, lz - 5, lx + 6, y + 6, lz + 5, 0);
     for (let dx = -6; dx <= 6; dx++) for (let k = 1; k <= 5; k++) { if (dx % 3 !== 0) { S.set(lx + dx, y + k, lz - 5, ID.bookshelf); S.set(lx + dx, y + k, lz + 5, ID.bookshelf); } }

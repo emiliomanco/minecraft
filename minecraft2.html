@@ -93,6 +93,8 @@ input.tf:focus{border-color:#fff}
 #chatLog.open .cmsg{opacity:1!important}
 #chatIn{position:absolute;left:4px;right:4px;bottom:4px;height:30px;background:rgba(0,0,0,.6);border:none;color:#fff;font:inherit;font-size:22px;padding:0 6px;outline:none;display:none;pointer-events:auto}
 #chatIn.on{display:block}
+#cmdSug{position:absolute;bottom:36px;left:10px;background:rgba(0,0,0,.82);font-size:20px;line-height:24px;padding:3px 6px;display:none;z-index:30;pointer-events:auto;min-width:160px;border-bottom:2px dotted #ddd}
+#cmdSug div{color:#bbb;white-space:pre;cursor:pointer}#cmdSug div.on{color:#ff5}#cmdSug div.more,#cmdSug div.hint{color:#888;font-size:16px}
 #titleWrap{position:absolute;top:28%;left:0;right:0;text-align:center;opacity:0;transition:opacity .6s}
 #bigTitle{font-size:72px;text-shadow:4px 4px 0 #333}#subTitle{font-size:32px;text-shadow:2px 2px 0 #333}
 #bossbar{position:absolute;top:8px;left:50%;transform:translateX(-50%);text-align:center;display:none;font-size:22px;text-shadow:2px 2px 0 #333}
@@ -394,7 +396,7 @@ const PHYS_DEF = {
   oceans: { mode: 'real', waves: 1, foam: true, shore: 3 },
   liquids: { mode: 'real', waterSpeed: 1, lavaVisc: 1, splash: true, continuous: true },
   snow: { mode: 'real', depth: 1 },
-  ragdoll: { mode: 'real', corpse: 4, knock: 6, fall: 20, max: 20 },
+  ragdoll: { mode: 'real', corpse: 4, knock: 6, fall: 32, max: 20 },
   fire: { mode: 'real', height: 1, spread: 1 },
   smoke: { mode: 'real', amount: 1, life: 1 },
   explosions: { mode: 'real', debris: 1, place: true, fireball: true, shock: 1 },
@@ -411,6 +413,8 @@ for (const k in PHYS_DEF) {
   // ajustes antiguos (on/finite/prints = false) → modo vanilla
   if (o.on === false || o.finite === false || o.prints === false) o.mode = 'vanilla'; delete o.on; delete o.finite; delete o.prints; delete o.infinite;
 }
+// el ragdoll por caída saltaba a los ~6 bloques (20 m/s): el nuevo mínimo es 32 m/s (~16 bloques)
+if (!SETTINGS._ragFall2) { SETTINGS._ragFall2 = true; SETTINGS.physics.ragdoll.fall = Math.max(SETTINGS.physics.ragdoll.fall || 0, 32); }
 // valores efectivos de un apartado de físicas; real = false si está en modo vanilla
 function physCfg(sec) { const o = Object.assign({}, PHYS_DEF[sec], (SETTINGS.physics || {})[sec] || {}); o.real = o.mode !== 'vanilla'; return o; }
 function saveSettings() { try { localStorage.setItem('mc2-settings', JSON.stringify(SETTINGS)); } catch (e) { } }
@@ -731,7 +735,8 @@ defI('shears', 'Tijeras', { stack: 1, dur: 238, shears: true }); defI('compass',
 defI('spyglass', 'Catalejo', { stack: 1, spyglass: true }); defI('map', 'Mapa', { stack: 1 }); defI('lead', 'Rienda');
 defI('turtle_helmet', 'Caparazón de tortuga', { stack: 1, armor: { slot: 0, pts: 2, mat: 'turtle', tough: 0 }, dur: 275 });
 defI('trident', 'Tridente', { stack: 1, dur: 250, dmg: 9, trident: true }); defI('crossbow', 'Ballesta', { stack: 1, dur: 465, bow: true, crossbow: true });
-defI('mace', 'Maza', { stack: 1, dur: 500, dmg: 6, mace: true }); defI('heavy_core', 'Núcleo denso');
+defI('mace', 'Maza', { stack: 1, dur: 500, dmg: 6, mace: true });
+defI('one_hit_obliterator', 'One-Hit Obliterator', { stack: 1, dmg: 1e9, obliterator: true }); // sin receta: solo en el menú creativo defI('heavy_core', 'Núcleo denso');
 defI('experience_bottle', 'Frasco de experiencia', { throwable: 'xpbottle' }); defI('brush', 'Brocha', { stack: 1, dur: 64 }); defI('fishing_rod', 'Caña de pescar', { stack: 1, dur: 64 });
 defI('broom', 'Escoba', { stack: 1, broom: true }); defI('oak_boat', 'Bote', { stack: 1, boatItem: true });
 const TOOLMAT = { wooden: { lvl: 1, speed: 2, dur: 59, dmg: 0, n: 'madera', col: [137, 103, 59] }, stone: { lvl: 2, speed: 4, dur: 131, dmg: 1, n: 'piedra', col: [130, 130, 130] }, iron: { lvl: 3, speed: 6, dur: 250, dmg: 2, n: 'hierro', col: [220, 220, 220] }, golden: { lvl: 1, speed: 12, dur: 32, dmg: 0, n: 'oro', col: [250, 220, 70] }, diamond: { lvl: 4, speed: 8, dur: 1561, dmg: 3, n: 'diamante', col: [80, 230, 220] }, netherite: { lvl: 5, speed: 9, dur: 2031, dmg: 4, n: 'netherita', col: [80, 70, 75] } };
@@ -1214,6 +1219,14 @@ function itemTexAuto(p, name) {
     spyglass: () => { for (let i = 0; i < 10; i++) { p.set(3 + i, 12 - i, [200, 120, 70]); p.set(4 + i, 12 - i, [170, 100, 60]); } p.rect(11, 2, 13, 4, [180, 130, 230]); outline(p); }, map: () => { p.rect(2, 2, 13, 13, [230, 220, 180]); p.rect(4, 4, 11, 11, [140, 180, 110]); outline(p); }, lead: () => { for (let i = 0; i < 12; i++) p.set(2 + i, 8 + Math.round(Math.sin(i) * 3), [180, 140, 90]); outline(p); },
     turtle_helmet: () => armorIcon(p, 0, [80, 160, 70]), trident: () => { for (let i = 0; i < 11; i++) p.set(2 + i, 13 - i, [80, 150, 140]); p.rect(11, 1, 14, 2, [80, 170, 160]); p.rect(13, 1, 14, 4, [80, 170, 160]); outline(p); },
     crossbow: () => { for (let i = 0; i < 10; i++) p.set(3 + i, 12 - i, [110, 80, 45]); for (let i = 0; i < 8; i++) { p.set(4 + i, 3 + (i >> 2), [80, 80, 85]); p.set(12 - (i >> 2), 4 + i, [80, 80, 85]); } outline(p); },
+    one_hit_obliterator: () => { // tridente negro con anillas doradas, borla roja y chispas blancas
+      const K = [40, 40, 46], Gd = [200, 165, 90], Rd = [175, 30, 35], W = [245, 245, 250];
+      for (let y = 6; y < 14; y++) p.set(7, y, K); for (let y = 6; y < 14; y++) p.set(8, y, [58, 58, 64]);
+      p.set(7, 9, Gd); p.set(8, 9, Gd); p.set(7, 12, Gd); p.set(8, 12, Gd); p.set(7, 14, Rd); p.set(8, 15, Rd); p.set(6, 15, Rd);
+      for (let x = 3; x < 13; x++) p.set(x, 6, K); for (let y = 1; y < 6; y++) { p.set(3, y, K); p.set(12, y, K); } for (let y = 2; y < 6; y++) { p.set(7, y, K); p.set(8, y, K); }
+      p.set(3, 0, K); p.set(12, 0, K); p.set(7, 1, K); p.set(8, 1, K); p.set(3, 3, Gd); p.set(12, 3, Gd); p.set(7, 4, Gd); p.set(8, 4, Gd);
+      for (const [x, y] of [[1, 3], [2, 4], [1, 5], [14, 2], [13, 4], [14, 5], [5, 2], [10, 2], [5, 9], [10, 10], [4, 11], [11, 8]]) p.set(x, y, W);
+    },
     mace: () => { for (let i = 0; i < 9; i++) p.set(3 + i, 12 - i, [120, 100, 80]); p.rect(9, 2, 13, 6, [90, 90, 100]); outline(p); }, heavy_core: () => blob([70, 70, 80], 5),
     brush: () => { for (let i = 0; i < 7; i++) p.set(3 + i, 12 - i, [150, 110, 60]); p.rect(9, 2, 13, 6, [220, 200, 160]); outline(p); }, oak_boat: () => { for (let x = 1; x < 15; x++) { const d = Math.abs(x - 7.5); const y0 = 8 + Math.max(0, d - 4.5) * 0.9; for (let y = Math.round(y0); y < 13; y++) p.set(x, y, [150, 115, 65].map(v => v + (p.r() - 0.5) * 18 - (y === 12 ? 30 : 0))); } p.rect(6, 6, 7, 11, [110, 80, 45]); outline(p); }, broom: () => { for (let i = 0; i < 9; i++) p.set(12 - i, 1 + i, [125, 90, 50]); for (let y = 9; y < 15; y++) for (let x = 1; x < 7; x++) if (x + (14 - y) * 0.5 < 8 && x - (y - 9) * 0.4 > 0) p.set(x, y, [205, 175, 80].map(v => v + (p.r() - 0.5) * 30)); p.rect(3, 9, 5, 10, [150, 60, 40]); outline(p); }, fishing_rod: () => { for (let i = 0; i < 12; i++) p.set(2 + i, 13 - i, [120, 90, 50]); for (let y = 2; y < 14; y++) p.set(13, y, [230, 230, 230]); },
     beetroot: () => { blob([170, 30, 50], 4.5); p.rect(7, 2, 8, 4, [60, 140, 40]); }, beetroot_seeds: () => { for (let i = 0; i < 6; i++) p.set(4 + ((p.r() * 8) | 0), 6 + ((p.r() * 6) | 0), [150, 110, 60]); }, beetroot_soup: () => { for (let y = 7; y < 13; y++) for (let x = 3; x < 13; x++) if (Math.hypot((x - 7.5) / 5, (y - 7) / 5.5) < 1) p.set(x, y, [140, 100, 60]); p.rect(4, 7, 11, 8, [170, 30, 50]); outline(p); },
@@ -1511,21 +1524,33 @@ class Generator {
   }
   // acantilados y salientes: en las laderas de montaña la superficie se deforma con ruido 3D (paredes verticales,
   // voladizos y repisas) en vez de ser una columna simple; luego se viste la nueva superficie (roca, pasto o nieve)
-  cliffs3D(B, x, z, wx, wz, ci, waterTop) {
-    const h = ci.h, amp = Math.min(16, (ci.mountain - 25) * 0.12); if (amp < 1) return;
-    const y0 = Math.max(waterTop + 2, h - 28), y1 = Math.min(this.H - 3, h + 22); let top = -1;
-    for (let y = y0; y <= y1; y++) {
-      const n = this.nW.fbm3(wx * 0.035, y * 0.05, wz * 0.035, 2) + this.nV.n3(wx * 0.09, y * 0.11, wz * 0.09) * 0.35;
-      const dens = (h - y) / amp + n * 1.6; const i = x | z << 4 | y << 8;
-      if (dens > 0) { if (!B[i]) B[i] = ID.stone; top = y; } else if (B[i] && y > h - 28) B[i] = 0;
+  // montañas del terreno realista: el material de la superficie sale de la pendiente y la altura (sin bloques flotantes):
+  // paredes de roca, nieve solo donde se puede posar (poca pendiente y frío), canchales de grava al pie de las paredes,
+  // y pasto/tierra en las faldas suaves. Bajo una pared de roca no hay tierra (no quedan muros marrones).
+  mountainSurface(B, M, x, z, wx, wz, ci) {
+    const h = ci.h; if (h >= this.H - 2) return;
+    const hx1 = this.col(wx + 1, wz).h, hx0 = this.col(wx - 1, wz).h, hz1 = this.col(wx, wz + 1).h, hz0 = this.col(wx, wz - 1).h;
+    const g = Math.max(Math.abs(hx1 - hx0), Math.abs(hz1 - hz0)) / 2; // pendiente (bloques de subida por bloque)
+    const lowNb = Math.min(hx1, hx0, hz1, hz0); // pie de una pared: el vecino más bajo
+    const n = this.nV.n2(wx * 0.07, wz * 0.07), n2 = this.nS.n2(wx * 0.21, wz * 0.21);
+    const cold = ci.Te < CLT[1] + n * 0.04; // línea de nieve irregular
+    const set = (y, id) => { if (y > 4 && y < this.H) B[x | z << 4 | y << 8] = id; };
+    const stoneVar = y => { const v = this.nV.n3(wx * 0.06, y * 0.09, wz * 0.06); return v > 0.5 ? ID.andesite : v < -0.55 ? ID.cobblestone : v > 0.38 && v < 0.42 ? ID.calcite : ID.stone; };
+    let top, fill, depth = 3;
+    if (g >= 2.2) { top = null; fill = null; depth = 6; } // pared: roca hasta el fondo
+    else if (cold) { // manchas grandes de nieve o de roca (no un damero escalón a escalón); la nieve también cubre el frente de cada escalón
+      const patch = this.nW.n2(wx * 0.028, wz * 0.028) * 0.8 + n2 * 0.25;
+      if (g < 1.1 + patch * 0.9) { top = ID.snow_block; fill = ID.snow_block; depth = Math.min(3, 1 + Math.ceil(g)); } else { top = null; fill = null; depth = 4; }
     }
-    if (top < 0) return;
-    // vestir: lo que queda al aire arriba de cada tramo sólido
-    const snowy = ci.Te < CLT[1];
-    for (let y = y1; y >= y0; y--) { const i = x | z << 4 | y << 8; if (!B[i] || B[i] === ID.bedrock) continue; const up = y + 1 < this.H ? B[x | z << 4 | (y + 1) << 8] : 0; if (up) continue;
-      const steep = Math.abs(this.col(wx + 1, wz).h - this.col(wx - 1, wz).h) + Math.abs(this.col(wx, wz + 1).h - this.col(wx, wz - 1).h) > 7;
-      B[i] = snowy ? ID.snow_block : steep ? ID.stone : (y > SEA + 150 ? ID.stone : ID.grass_block);
-      if (!snowy && !steep && y - 1 >= y0 && B[x | z << 4 | (y - 1) << 8] === ID.stone) B[x | z << 4 | (y - 1) << 8] = ID.dirt; }
+    else if (g >= 1.3) { top = n2 > 0.35 ? ID.gravel : n2 < -0.45 ? ID.coarse_dirt || ID.dirt : null; fill = null; depth = 4; } // ladera empinada: roca con canchales
+    else if (h > SEA + 150) { top = n2 > 0.1 ? ID.gravel : null; fill = null; } // muy alto: sin pasto
+    else return; // falda suave: lo que puso el bioma (pasto y tierra)
+    for (let k = 0; k < depth; k++) { const y = h - k; const cur = B[x | z << 4 | y << 8]; if (!cur || cur === ID.bedrock || cur === ID.water) break; set(y, k === 0 && top ? top : (fill || stoneVar(y))); }
+    if (fill === ID.snow_block) for (let k = depth; k < depth + 3; k++) { const y = h - k; if (B[x | z << 4 | y << 8] === ID.dirt || B[x | z << 4 | y << 8] === ID.snow_block) set(y, stoneVar(y)); else break; } // debajo de la nieve, roca
+    // canchal al pie de una pared alta (la grava se acumula abajo)
+    if (g < 1.3 && !cold && h - lowNb <= 1 && Math.max(hx1, hx0, hz1, hz0) - h > 6 && n2 > -0.2) set(h, ID.gravel);
+    // nieve en polvo sobre roca poco empinada en lo frío
+    if (cold && top === null && g < 1.9 && this.nW.n2(wx * 0.028 + 50, wz * 0.028) > 0.35 && h + 1 < this.H && !B[x | z << 4 | (h + 1) << 8]) { /* solo en algunas zonas, no en cada escalón */ set(h + 1, ID.snow); M[x | z << 4 | (h + 1) << 8] = 2 + ((n2 + 1) * 2 | 0); }
   }
   // clima continuo con bordes orgánicos (dominio deformado); valores ~[-0.7, 0.7] con mediana 0
   climateAt(x, z) {
@@ -1630,7 +1655,7 @@ class Generator {
         if (id === ID.deepslate) { const v = this.nV.n3(wx * 0.06 + 99, y * 0.06, wz * 0.06); if (v > 0.6) id = ID.tuff; }
         B[i] = id;
       }
-      if (this.climate >= 3 && ci.mountain > 25) this.cliffs3D(B, x, z, wx, wz, ci, waterTop);
+      if (this.climate >= 3 && ci.mountain > 3 && h >= waterTop) this.mountainSurface(B, M, x, z, wx, wz, ci);
       // tallar cuevas
       const top = h - (h < SEA + 2 ? 6 : 0);
       for (let y = 5; y < top; y++) {
@@ -2132,22 +2157,54 @@ defStruct({
   name: 'stronghold', dim: 'overworld', radius: 56, fixed: strongholdSpots,
   build(S, c, r) {
     const y = 60; const bricks = (x, yy, z) => { const h = hash3(c.seed, x, yy, z); return h < 0.15 ? ID.mossy_stone_bricks : h < 0.28 ? ID.cracked_stone_bricks : ID.stone_bricks; };
-    // sala del portal
-    const px = c.x, pz = c.z;
-    S.hollow(px - 6, y, pz - 8, px + 6, y + 8, pz + 8, bricks);
-    S.fill(px - 5, y + 1, pz - 7, px + 5, y + 7, pz + 7, 0);
-    S.fill(px - 2, y, pz - 2, px + 2, y, pz + 2, ID.lava); S.fill(px - 3, y + 1, pz - 3, px + 3, y + 1, pz + 3, ID.stone_bricks);
-    S.fill(px - 3, y + 2, pz - 3, px + 3, y + 2, pz + 3, 0);
-    for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) {
-      const ring = (Math.abs(dx) === 2) !== (Math.abs(dz) === 2); if (ring) S.set(px + dx, y + 2, pz + dz, r() < 0.1 ? ID.end_portal_frame_eye : ID.end_portal_frame, (dz === -2 ? 0 : dz === 2 ? 2 : dx === -2 ? 3 : 1));
-      else if (Math.abs(dx) < 2 && Math.abs(dz) < 2) S.set(px + dx, y + 1, pz + dz, ID.lava);
+    // sala del portal: nave alta con bóveda escalonada, columnas con arcos, canales de lava a los lados, pasillo con
+    // canales de agua, escalinata hasta el estrado del portal (colgado de cadenas con faroles) y una gran lámpara de cristal
+    const px = c.x, pz = c.z; const X0 = px - 10, X1 = px + 10, Z0 = pz - 14, Z1 = pz + 12, YT = y + 15;
+    S.hollow(X0, y - 1, Z0, X1, YT, Z1, bricks); S.fill(X0 + 1, y + 1, Z0 + 1, X1 - 1, YT - 1, Z1 - 1, 0);
+    S.fillFn(X0 + 1, y, Z0 + 1, X1 - 1, y, Z1 - 1, (x, yy, z) => ((x + z) & 3) === 0 && hash3(c.seed, x, 7, z) < 0.5 ? ID.chiseled_stone_bricks : bricks(x, yy, z));
+    // bóveda escalonada
+    for (let k = 1; k <= 3; k++) S.fillFn(X0 + 1, YT - k, Z0 + 1, X1 - 1, YT - k, Z1 - 1, (x, yy, z) => Math.abs(x - px) >= 10 - k ? bricks(x, yy, z) : undefined);
+    // canales de lava a lo largo de las paredes (con borde) y puentecitos
+    for (const sx of [-1, 1]) {
+      const cx0 = px + sx * 7, cx1 = px + sx * 8;
+      S.fill(Math.min(cx0, cx1), y - 1, Z0 + 2, Math.max(cx0, cx1), y - 1, Z1 - 2, ID.stone_bricks);
+      S.fill(Math.min(cx0, cx1), y, Z0 + 2, Math.max(cx0, cx1), y, Z1 - 2, ID.lava);
+      S.fill(px + sx * 6, y + 1, Z0 + 2, px + sx * 6, y + 1, Z1 - 2, ID.stone_slab);
+      for (let z = Z0 + 4; z <= Z1 - 4; z += 8) S.fill(Math.min(cx0, cx1), y + 1, z, Math.max(cx0, cx1), y + 1, z, ID.stone_slab);
     }
-    S.fill(px - 1, y + 2, pz + 5, px + 1, y + 2, pz + 5, ID.stone_bricks); S.spawner(px, y + 2, pz + 5, 'silverfish');
-    S.set(px - 5, y + 4, pz, ID.torch); S.set(px + 5, y + 4, pz, ID.torch);
+    // columnas con arcos y nichos con barrotes entre ellas
+    for (let z = Z0 + 2; z <= Z1 - 2; z += 4) for (const sx of [-1, 1]) {
+      const x = px + sx * 9; S.fill(x, y + 1, z, x, YT - 5, z, ID.stone_bricks); S.set(x, y + 1, z, ID.chiseled_stone_bricks); S.set(x, YT - 5, z, ID.chiseled_stone_bricks);
+      S.set(x - sx, YT - 6, z, ID.stone_brick_stairs, (sx > 0 ? 1 : 3) | 4); S.set(x - sx, y + 5, z, ID.lantern);
+      for (const dz of [-1, 1]) if (z + dz > Z0 && z + dz < Z1) S.set(x, YT - 6, z + dz, ID.stone_brick_stairs, (dz > 0 ? 0 : 2) | 4);
+      if (z + 2 < Z1 - 1) { const wx = px + sx * 10; S.fill(wx, y + 3, z + 2, wx, y + 6, z + 2, ID.iron_bars); S.set(wx, y + 2, z + 2, ID.chiseled_stone_bricks); S.set(wx, y + 7, z + 2, ID.chiseled_stone_bricks); }
+    }
+    // pasillo central desde la entrada con dos canales de agua
+    for (const sx of [-2, 2]) S.fill(px + sx, y, Z0 + 1, px + sx, y, pz - 8, ID.water);
+    S.fill(X0 + 1, y - 1, Z0 + 1, X1 - 1, y - 1, pz - 8, ID.stone_bricks);
+    // estrado del portal (3 de alto) con escalinata de 5 de ancho
+    S.fill(px - 4, y + 1, pz - 4, px + 4, y + 3, pz + 5, ID.stone_bricks);
+    S.fillFn(px - 4, y + 3, pz - 4, px + 4, y + 3, pz + 5, (x, yy, z) => (Math.abs(x - px) === 4 || z === pz - 4 || z === pz + 5) ? ID.chiseled_stone_bricks : undefined);
+    for (let k = 0; k < 3; k++) { if (k < 2) S.fill(px - 2, y + 1, pz - 5 - k, px + 2, y + 2 - k, pz - 5 - k, ID.stone_bricks); S.fill(px - 2, y + 3 - k, pz - 5 - k, px + 2, y + 3 - k, pz - 5 - k, ID.stone_brick_stairs, 2); }
+    S.fill(px - 1, y + 3, pz - 1, px + 1, y + 3, pz + 1, ID.lava);
+    for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) {
+      const ring = (Math.abs(dx) === 2) !== (Math.abs(dz) === 2); if (ring) S.set(px + dx, y + 4, pz + dz, r() < 0.1 ? ID.end_portal_frame_eye : ID.end_portal_frame, (dz === -2 ? 0 : dz === 2 ? 2 : dx === -2 ? 3 : 1));
+    }
+    // cadenas con faroles en las cuatro esquinas del portal
+    for (const [dx, dz] of [[-2, -2], [2, -2], [-2, 2], [2, 2]]) { S.fill(px + dx, y + 6, pz + dz, px + dx, YT - 4, pz + dz, ID.iron_bars); S.set(px + dx, y + 5, pz + dz, ID.lantern); }
+    // generador de lepismas detrás del portal, en un pedestal
+    S.set(px, y + 4, pz + 4, ID.chiseled_stone_bricks); S.spawner(px, y + 5, pz + 4, 'silverfish');
+    // gran lámpara de cristal colgada sobre la escalinata
+    const cz = pz - 8; S.fill(px - 2, YT - 4, cz - 2, px + 2, YT - 4, cz + 2, ID.glass); S.fill(px - 1, YT - 5, cz - 1, px + 1, YT - 5, cz + 1, ID.glass); S.fill(px, YT - 3, cz, px, YT - 1, cz, ID.iron_bars);
+    for (const [dx, dz] of [[-2, -2], [2, -2], [-2, 2], [2, 2], [0, -2], [0, 2], [-2, 0], [2, 0]]) { const l = (dx && dz) ? 2 : 1; S.fill(px + dx, YT - 4 - l, cz + dz, px + dx, YT - 5, cz + dz, ID.iron_bars); S.set(px + dx, YT - 5 - l, cz + dz, ID.lantern); }
+    S.set(px, YT - 6, cz, ID.lantern);
+    // telarañas en los rincones altos
+    for (let k = 0; k < 18; k++) { const x = X0 + 1 + ((r() * 19) | 0), z = Z0 + 1 + ((r() * 25) | 0), yy = YT - 4 - ((r() * 3) | 0); if (Math.abs(x - px) >= 6) S.set(x, yy, z, ID.cobweb); }
+    // entrada desde el pasillo norte
+    S.fill(px - 1, y + 1, Z0, px + 1, y + 3, Z0, 0);
     // pasillos en cruz
     const corridor = (x0, z0, x1, z1) => { S.fillFn(Math.min(x0, x1) - 2, y, Math.min(z0, z1) - 2, Math.max(x0, x1) + 2, y + 4, Math.max(z0, z1) + 2, (x, yy, z) => { const inX = x0 === x1 ? Math.abs(x - x0) < 2 : true, inZ = z0 === z1 ? Math.abs(z - z0) < 2 : true; if (yy > y && yy < y + 4 && inX && inZ) return 0; return bricks(x, yy, z); }); };
-    corridor(px, pz - 9, px, pz - 36); corridor(px - 30, pz - 36, px + 30, pz - 36); corridor(px - 30, pz - 36, px - 30, pz + 30); corridor(px + 30, pz - 36, px + 30, pz + 10);
-    S.fill(px - 1, y + 1, pz - 9, px + 1, y + 3, pz - 8, 0);
+    corridor(px, pz - 15, px, pz - 36); corridor(px - 30, pz - 36, px + 30, pz - 36); corridor(px - 30, pz - 36, px - 30, pz + 30); corridor(px + 30, pz - 36, px + 30, pz + 10);
     // biblioteca
     const lx = px - 30, lz = pz + 20; S.hollow(lx - 7, y, lz - 6, lx + 7, y + 7, lz + 6, bricks); S.fill(lx - 6, y + 1, lz - 5, lx + 6, y + 6, lz + 5, 0);
     for (let dx = -6; dx <= 6; dx++) for (let k = 1; k <= 5; k++) { if (dx % 3 !== 0) { S.set(lx + dx, y + k, lz - 5, ID.bookshelf); S.set(lx + dx, y + k, lz + 5, ID.bookshelf); } }
@@ -4631,10 +4688,19 @@ function updatePlayerPhysics(p, dt, input) {
   if (p.gliding && (!elytra || p.onGround || p.inWater)) p.gliding = false;
   if (p.gliding) {
     const lx = -Math.sin(p.yaw) * Math.cos(p.pitch), ly = Math.sin(p.pitch), lz = -Math.cos(p.yaw) * Math.cos(p.pitch);
-    const sp = Math.hypot(p.vx, p.vy, p.vz); p.vy -= 16 * dt * (1 - Math.cos(p.pitch) * 0.75);
-    const hs = Math.hypot(p.vx, p.vz); const tgt = Math.max(sp, 6);
-    if (ly < 0) { p.vy += -ly * 0.1 * hs * dt * 20 * 0.05; }
-    p.vx = lerp(p.vx, lx * tgt, dt * 1.6); p.vz = lerp(p.vz, lz * tgt, dt * 1.6); p.vy = lerp(p.vy, ly * tgt, dt * 0.6);
+    // planeo como en Minecraft (pasos fijos de 1/20 s, velocidades en bloques por paso): la inclinación da sustentación,
+    // en picado se gana velocidad y al subir se gasta
+    p._ely = (p._ely || 0) + dt;
+    while (p._ely >= 0.05) {
+      p._ely -= 0.05; let vx = p.vx * 0.05, vy = p.vy * 0.05, vz = p.vz * 0.05;
+      const pr = -p.pitch; const hl = Math.hypot(lx, lz), hv = Math.hypot(vx, vz); const c2 = Math.cos(pr) ** 2;
+      vy += -0.08 + c2 * 0.06;
+      if (vy < 0 && hl > 0) { const lift = vy * -0.1 * c2; vy += lift; vx += lx * lift / hl; vz += lz * lift / hl; }
+      if (pr < 0 && hl > 0) { const up = hv * -Math.sin(pr) * 0.04; vy += up * 3.2; vx -= lx * up / hl; vz -= lz * up / hl; }
+      if (hl > 0) { vx += (lx / hl * hv - vx) * 0.1; vz += (lz / hl * hv - vz) * 0.1; }
+      vx *= 0.99; vy *= 0.98; vz *= 0.99;
+      p.vx = vx * 20; p.vy = vy * 20; p.vz = vz * 20;
+    }
     if (p.boost > 0) { p.boost -= dt; p.vx += lx * 30 * dt; p.vy += ly * 30 * dt; p.vz += lz * 30 * dt; const m = Math.hypot(p.vx, p.vy, p.vz); if (m > 33) { p.vx *= 33 / m; p.vy *= 33 / m; p.vz *= 33 / m; } if (Math.random() < 0.6) smoke(p.x, p.y, p.z, { size: 0.3, life: 0.8, r: 0.8, g: 0.8, b: 0.8, a: 0.4 }); }
     const before = Math.hypot(p.vx, p.vz); moveEntity(w, p, p.vx * dt, p.vy * dt, p.vz * dt);
     if (p.hc && before > 10) p.damage((before - 10) * 0.5, 'fall');
@@ -4699,22 +4765,22 @@ function playerTick(p) {
   const w = p.world; if (!w || p.dead) return;
   if (p.invul > 0) p.invul--; if (p.hurtTime > 0) p.hurtTime--;
   for (const k in p.effects) { if (--p.effects[k] <= 0) delete p.effects[k]; }
-  if (p.effects.regen && G.tick % 25 === 0 && p.hp < p.maxHp) p.hp = Math.min(p.maxHp, p.hp + 1);
+  if (p.effects.regen && G.rtick % 25 === 0 && p.hp < p.maxHp) p.hp = Math.min(p.maxHp, p.hp + 1);
   if (p.effects.levitation) p.vy = 2;
   const survival = G.gameMode === 'survival' || G.gameMode === 'adventure';
   // aire
-  if (p.eyeInWater && survival && !(p.armor[0] && p.armor[0].id === ID.turtle_helmet && p.air > 0 && G.tick % 2) && !(Math.random() < enchLvl(p.armor[0], 'respiration') / (enchLvl(p.armor[0], 'respiration') + 1))) { p.air--; if (p.air <= -20) { p.air = 0; p.damage(2, 'drown'); } } else p.air = Math.min(300, p.air + 5);
+  if (p.eyeInWater && survival && !(p.armor[0] && p.armor[0].id === ID.turtle_helmet && p.air > 0 && G.rtick % 2) && !(Math.random() < enchLvl(p.armor[0], 'respiration') / (enchLvl(p.armor[0], 'respiration') + 1))) { p.air--; if (p.air <= -20) { p.air = 0; p.damage(2, 'drown'); } } else p.air = Math.min(300, p.air + 5);
   // fuego/lava
-  if (p.inLava && survival) { p.fire = 300; if (G.tick % 10 === 0) p.damage(4, 'lava'); }
-  const fireB = entityInBlock(w, p, d => d.id === ID.fire); if (fireB && survival) { p.fire = Math.max(p.fire, 160); if (G.tick % 10 === 0) p.damage(1, 'fire'); }
-  if (p.fire > 0) { p.fire--; if (p.inWater) p.fire = 0; if (survival && G.tick % 20 === 0 && !p.inLava) p.damage(1, 'fire'); if (Math.random() < 0.5) flame(p.x + (Math.random() - 0.5) * 0.6, p.y + Math.random() * 1.6, p.z + (Math.random() - 0.5) * 0.6, { size: 0.35 }); }
+  if (p.inLava && survival) { p.fire = 300; if (G.rtick % 10 === 0) p.damage(4, 'lava'); }
+  const fireB = entityInBlock(w, p, d => d.id === ID.fire); if (fireB && survival) { p.fire = Math.max(p.fire, 160); if (G.rtick % 10 === 0) p.damage(1, 'fire'); }
+  if (p.fire > 0) { p.fire--; if (p.inWater) p.fire = 0; if (survival && G.rtick % 20 === 0 && !p.inLava) p.damage(1, 'fire'); if (Math.random() < 0.5) flame(p.x + (Math.random() - 0.5) * 0.6, p.y + Math.random() * 1.6, p.z + (Math.random() - 0.5) * 0.6, { size: 0.35 }); }
   const hurtB = entityInBlock(w, p, d => d.id === ID.cactus); const under = blockAt(w, p.x, p.y - 0.1, p.z);
-  if ((hurtB || ((under === ID.magma_block || under === ID.campfire) && !p.sneaking) || entityInBlock(w, p, d => d.campfire)) && survival && G.tick % 10 === 0) p.damage(1, hurtB ? 'cactus' : 'fire');
+  if ((hurtB || ((under === ID.magma_block || under === ID.campfire) && !p.sneaking) || entityInBlock(w, p, d => d.campfire)) && survival && G.rtick % 10 === 0) p.damage(1, hurtB ? 'cactus' : 'fire');
   if (!survival) { p.food = 20; p.air = 300; return; }
   // hambre
   if (p.exh >= 4) { p.exh -= 4; if (p.sat > 0) p.sat = Math.max(0, p.sat - 1); else if (G.difficulty > 0) p.food = Math.max(0, p.food - 1); }
   if (p.food >= 18 && p.hp < p.maxHp) { if (++p.regenT >= (p.food >= 20 && p.sat > 0 ? 10 : 80)) { p.regenT = 0; p.hp = Math.min(p.maxHp, p.hp + 1); p.exh += 6; } }
-  else if (G.difficulty === 0 && p.hp < p.maxHp && G.tick % 20 === 0) p.hp++;
+  else if (G.difficulty === 0 && p.hp < p.maxHp && G.rtick % 20 === 0) p.hp++;
   if (p.food <= 0) { if (++p.starveT >= 80) { p.starveT = 0; if (p.hp > (G.difficulty >= 3 ? 0 : G.difficulty === 2 ? 1 : 10)) p.damage(1, 'starve'); } }
 }
 // ------------------------------------------------------------ IA y tick de entidades
@@ -5736,7 +5802,7 @@ function furnaceTick() {
   }
 }
 // ------------------------------------------------------------ comandos
-function runCommand(cmd) {
+function runCommandBase(cmd) { // los comandos de siempre; runCommand (u_cmds.js) atiende antes /tp, /weather, /tick y /kill
   const a = cmd.trim().slice(1).split(/\s+/); const c = a[0].toLowerCase(); const p = G.player;
   const allowed = G.cheats !== false || (G.net && G.net.role === 'host');
   if (!allowed && c !== 'help' && c !== 'seed') return chatMsg('Los trucos no están activados en este mundo.', '#f88');
@@ -5989,7 +6055,7 @@ const CREATIVE_TABS = [['Construcción', i => { const d = REG[i]; return d.isBlo
   ['Naturales', i => { const d = REG[i]; return d.isBlock && (/ore|log|leaves|sand|gravel|dirt|grass|nylium|sapling|flower|mushroom|cactus|snow|ice|stone$|netherrack|soul|end_stone|moss|sculk|dripstone|clay|mud|basalt|blackstone|kelp|seagrass|lily|vine|fungus|roots|stem|wart|melon|pumpkin|bush|fern|poppy|dandelion|orchid|cornflower|daisy|amethyst|cane|chorus|petals|debris/.test(d.name)); }],
   ['Funcionales', i => { const d = REG[i]; return d.isBlock && (d.ui || d.light || /portal|spawner|bed|tnt|bars|fence|wall|rail|ladder|slab|scaffold|lever|button|plate|rod|lamp|detector|target|note|slime|honey/.test(d.name)); }],
   ['Herramientas', i => { const d = REG[i]; return !d.isBlock && (d.tool && d.tool.type !== 'sword' || /bucket|flint_and|extinguisher|shears|compass|clock|spyglass|map|lead|brush|broom|boat|fishing|rocket|saddle|name_tag|bone_meal|eye_of|ender_pearl/.test(d.name)); }],
-  ['Combate', i => { const d = REG[i]; return !d.isBlock && (d.armor || (d.tool && d.tool.type === 'sword') || /bow|arrow|shield|trident|mace|totem|elytra|snowball/.test(d.name) || (d.tool && d.tool.type === 'axe')); }],
+  ['Combate', i => { const d = REG[i]; return !d.isBlock && (d.armor || (d.tool && d.tool.type === 'sword') || /bow|arrow|shield|trident|mace|totem|elytra|snowball|obliterator/.test(d.name) || (d.tool && d.tool.type === 'axe')); }],
   ['Comida', i => !REG[i].isBlock && !!REG[i].food],
   ['Ingredientes', i => { const d = REG[i]; return !d.isBlock && !d.food && !d.tool && !d.armor && !d.dur && !d.bucket && !/bow|arrow|shield|trident|mace|totem|elytra/.test(d.name); }],
   ['Buscar', null]];
@@ -6117,8 +6183,8 @@ function onKeyUp(e) {
 }
 function screenshot() { const el = document.createElement('a'); try { requestAnimationFrame(() => { el.href = $('gl').toDataURL('image/png'); el.download = 'minecraft2_' + Date.now() + '.png'; el.click(); chatMsg('Captura guardada'); }); } catch (e) { } }
 // chat
-function openChat(pre) { const el = $('chatIn'); el.classList.add('on'); el.value = pre; document.exitPointerLock && document.exitPointerLock(); $('chatLog').classList.add('open'); setTimeout(() => el.focus(), 0); }
-function closeChat() { const el = $('chatIn'); el.classList.remove('on'); el.blur(); $('chatLog').classList.remove('open'); lockPointer(); }
+function openChat(pre) { const el = $('chatIn'); el.classList.add('on'); el.value = pre; document.exitPointerLock && document.exitPointerLock(); $('chatLog').classList.add('open'); setTimeout(() => { el.focus(); if (typeof cmdUIUpdate === 'function') cmdUIUpdate(); }, 0); }
+function closeChat() { const el = $('chatIn'); el.classList.remove('on'); if (typeof CMDUI !== 'undefined' && CMDUI.el) CMDUI.el.style.display = 'none'; el.blur(); $('chatLog').classList.remove('open'); lockPointer(); }
 // ------------------------------------------------------------ minar / usar
 const MINE = { target: null, prog: 0, stage: -1, cool: 0, useCool: 0, attackCool: 0 };
 function lookDir(p) { return [-Math.sin(p.yaw) * Math.cos(p.pitch), Math.sin(p.pitch), -Math.cos(p.yaw) * Math.cos(p.pitch)]; }
@@ -6129,10 +6195,20 @@ function currentTarget() {
   if (ent) return { ent: ent.e, t: ent.t };
   return hit;
 }
+// One-Hit Obliterator: muerte instantánea de cualquier cosa, tenga la vida que tenga (con un rayo de chispas)
+function obliterate(e, p) {
+  p.swing = 1; const kx = -Math.sin(p.yaw) * 2, kz = -Math.cos(p.yaw) * 2;
+  for (let i = 0; i < 40; i++) { const t = i / 40; P_({ x: e.x + (Math.random() - 0.5) * 0.6, y: e.y + (e.h || 1) * t * 1.6, z: e.z + (Math.random() - 0.5) * 0.6, vx: (Math.random() - 0.5) * 4, vy: Math.random() * 3, vz: (Math.random() - 0.5) * 4, life: 0.5 + Math.random() * 0.4, size: 0.12, layer: TEX.spark, add: true, emis: 4, r: 0.85, g: 0.9, b: 1, grav: 4 }); }
+  playSound('crit', e.x, e.y, e.z, 1); playSound('explode', e.x, e.y, e.z, 0.35);
+  if (e.type === 'end_crystal') { if (G.net && G.net.role === 'client') netSend({ t: 'atk', id: e.hostId || e.id, a: 1e9 }); else e.hp = 0; return; }
+  if (e === G.player || e.remotePlayer || e.proxy) { hurtEntity(e, 1e9, p, kx, 3, kz, 'obliterator'); return; }
+  e.invul = 0; hurtEntity(e, 1e9, p, kx, 3, kz, 'obliterator'); if (!e.dead && e.hp > 0) e.hp = 0;
+}
 function attackEntity(e) {
   const p = G.player; const s = p.held(); const d = s ? REG[s.id] : null; let dmg = d && d.dmg ? d.dmg : 1; const sh = enchLvl(s, 'sharpness'); if (sh) dmg += 0.5 * sh + 0.5; const fa = enchLvl(s, 'fire_aspect'); if (fa && e.type !== 'player') e.fire = Math.max(e.fire || 0, 80 * fa);
   if (G.gameMode === 'spectator') return;
-  if (e.isBoat) { boatHit(e, p); p.swing = 1; return; }
+  if (e.isBoat) { if (d && d.obliterator) { boatHit(e, p, false, true); p.swing = 1; return; } boatHit(e, p); p.swing = 1; return; }
+  if (d && d.obliterator) { obliterate(e, p); return; }
   const crit = !p.onGround && p.vy < 0 && !p.inWater; if (crit) { dmg *= 1.5; for (let i = 0; i < 12; i++) P_({ x: e.x, y: e.y + e.h * 0.7, z: e.z, vx: (Math.random() - 0.5) * 5, vy: Math.random() * 4, vz: (Math.random() - 0.5) * 5, life: 0.5, size: 0.1, layer: TEX.spark, add: true, emis: 2, r: 0.9, g: 0.9, b: 0.6, grav: 10 }); }
   if (s && s.id === ID.mace && p.fallDist > 1.5) { dmg += Math.floor(p.fallDist) * 2; p.fallDist = 0; p.vy = 4; explosionFX(p.dim, e.x, e.y, e.z, 0.5); }
   const kb = p.sprinting ? 9 : 5; const kx = -Math.sin(p.yaw) * kb, kz = -Math.cos(p.yaw) * kb;
@@ -6466,7 +6542,7 @@ function hostHandle(c, m) {
     case 'sb': { if (!w) return; w.ensure(m.x >> 4, m.z >> 4); w.set(m.x, m.y, m.z, m.id, m.m); break; }
     case 'drop': { const e = dropItem(m.d, m.x, m.y, m.z, m.s, m.vx, m.vy, m.vz, 40); break; }
     case 'proj': { const p = shoot(m.ty, m.d, m.x, m.y, m.z, m.vx, m.vy, m.vz, c.ent, m.ex); break; }
-    case 'atk': { let t = G.entities.get(m.id); if (m.id === G.player.id) t = G.player; if (t) hurtEntity(t, m.a, c.ent, m.kx || 0, m.ky || 0, m.kz || 0); break; }
+    case 'atk': { let t = G.entities.get(m.id); if (m.id === G.player.id) t = G.player; if (t && m.a >= 1e8) t.invul = 0; if (t) hurtEntity(t, m.a, c.ent, m.kx || 0, m.ky || 0, m.kz || 0); break; }
     case 'co': { if (!w) return; const [x, y, z] = m.k.split(':')[1].split(',').map(Number); const cont = getContainer(w, m.k, m.kind, x, y, z); c.send({ t: 'cd', k: m.k, c: cont, kind: m.kind, b: m.b }); break; }
     case 'cu': { const cur = G.containers[m.k]; if (cur) { cur.items = m.c.items; } else G.containers[m.k] = m.c; break; }
     case 'chat': { const txt = m.sys ? m.m : '<' + (c.ent ? c.ent.name : '?') + '> ' + m.m; chatMsg(txt, m.sys ? '#ff8' : null); netBroadcast({ t: 'chat', m: txt, sys: m.sys }); break; }
@@ -6488,7 +6564,7 @@ function hostNetTick() {
   const pl = [{ i: G.player.id, n: G.player.name, x: G.player.x, y: G.player.y, z: G.player.z, yw: G.player.yaw, pt: G.player.pitch, d: G.player.dim, sn: G.player.sneaking, h: G.player.held() ? G.player.held().id : 0, ar: G.player.armor.map(a => a ? a.id : 0), dead: G.player.dead, sp: G.gameMode === 'spectator', gl: G.player.gliding, sw: G.player.swing }];
   for (const c of n.conns.values()) { const e = c.ent; if (e) pl.push({ i: e.id, n: e.name, x: e.x, y: e.y, z: e.z, yw: e.yaw, pt: e.pitch, d: e.dim, sn: e.sneaking, h: e.heldItem || 0, ar: (e.armor || []).map(a => a ? a.id : 0), dead: e.dead, sp: e.spectator, gl: e.gliding, sw: e.swing }); }
   netBroadcast({ t: 'ps', l: pl });
-  if (G.tick % 2 === 0) for (const c of n.conns.values()) {
+  if (G.rtick % 2 === 0) for (const c of n.conns.values()) {
     const p = c.ent; if (!p) continue; const list = [];
     for (const e of G.entities.values()) {
       if (e.dim !== p.dim || e.remotePlayer || e.removed) continue; if (Math.abs(e.x - p.x) > 96 || Math.abs(e.z - p.z) > 96) continue;
@@ -6500,7 +6576,7 @@ function hostNetTick() {
     }
     c.send({ t: 'es', d: p.dim, l: list });
   }
-  if (G.tick % 100 === 0) netBroadcast({ t: 'time', v: G.time, r: G.rain });
+  if (G.rtick % 100 === 0) netBroadcast({ t: 'time', v: G.time, r: G.rain });
 }
 // --------------------------------------------------------------------- CLIENTE
 function joinGame(code, lan, name) {
@@ -6533,7 +6609,8 @@ function clientHandle(m, resolve, reject) {
     case 'hurt': if (G.player) G.player.damage(m.a, m.c || 'mob', null, m.kx, m.ky, m.kz); break;
     case 'give': if (G.player) { const left = giveItem(G.player, m.s); playSound('pop', G.player.x, G.player.y, G.player.z, 0.4); if (left > 0) netSend({ t: 'drop', d: G.player.dim, x: G.player.x, y: G.player.y + 1, z: G.player.z, s: { ...m.s, c: left } }); } break;
     case 'tp': if (G.player) { G.player.x = m.x; G.player.y = m.y; G.player.z = m.z; G.player.vy = 0; G.player.fallDist = 0; } break;
-    case 'time': G.time = m.v; if (m.r !== undefined) G.rain = m.r; break;
+    case 'time': G.time = m.v; if (m.r !== undefined) { if (m.r !== G.rain) G.weatherFast = 80; G.rain = m.r; } break;
+    case 'tick': G.tickFrozen = !!m.f; G.tickRate = m.r || 1; break;
     case 'chat': chatMsg(m.m, m.sys ? '#ff8' : null); break;
     case 'cd': if (UI.pendingKey === m.k) { UI.pendingKey = null; openScreen(m.kind, { c: m.c, key: m.k, block: m.b, title: REG[m.b].disp }); } break;
     case 'fx': if (m.k === 'boom') explosionFX(m.d, m.x, m.y, m.z, m.p); break;
@@ -6569,7 +6646,7 @@ function updateProxyEntities(dim, list) {
 function clientNetTick() {
   const n = G.net; if (!n || n.role !== 'client' || !G.player) return; const p = G.player;
   netSend({ t: 'p', x: +p.x.toFixed(3), y: +p.y.toFixed(3), z: +p.z.toFixed(3), yw: +p.yaw.toFixed(3), pt: +p.pitch.toFixed(3), dim: p.dim, sn: p.sneaking, h: p.held() ? p.held().id : 0, ar: p.armor.map(a => a ? a.id : 0), hp: p.hp, cr: G.gameMode === 'creative', sp: G.gameMode === 'spectator', dead: p.dead, sw: p.swing, gl: p.gliding });
-  if (G.tick % 100 === 0) netSend({ t: 'st', s: playerState(p) });
+  if (G.rtick % 100 === 0) netSend({ t: 'st', s: playerState(p) });
 }
 function smoothProxies(dt) { for (const e of G.entities.values()) { if (!e.proxy) continue; if (e.tx === undefined) continue; if (e.isBoat && e.tr) { const k2 = Math.min(1, dt * 12); for (let i = 0; i < 9; i++) e.rot[i] += (e.tr[i] - e.rot[i]) * k2; e.prot = e.rot; } const k = Math.min(1, dt * 12); const ox = e.x, oz = e.z; e.x += (e.tx - e.x) * k; e.y += (e.ty - e.y) * k; e.z += (e.tz - e.z) * k; e.px = e.x; e.py = e.y; e.pz = e.z; e.pyaw = e.yaw; if (e.type !== 'player') { const hd = Math.hypot(e.x - ox, e.z - oz); e.walk += hd * 1.5; e.walkAmt = lerp(e.walkAmt, Math.min(1, hd / dt / 3), 0.2); } else { const hd = Math.hypot(e.x - ox, e.z - oz); e.walk += hd; e.walkAmt = lerp(e.walkAmt || 0, Math.min(1, hd / Math.max(dt, 0.001) / 4), 0.2); } } }
 
@@ -6836,7 +6913,9 @@ function ragUpdate(dt) {
     if (rd.still < 0.8) { const n = clamp(Math.ceil(dt * 90), 1, 9); for (let s = 0; s < n; s++) ragStep(rd, dt / n); }
     // caída: el golpe contra el suelo hace daño a las entidades vivas en ragdoll (la física normal está en pausa)
     // por la altura de la caída (no por la velocidad del choque, que las correcciones del solver inflan)
-    { const cy = ragCenter(rd.root)[1]; if (rd.peakY === undefined) rd.peakY = cy + (e && e.fallDist || 0); if (cy > rd.peakY) rd.peakY = cy; rd.curY = cy; }
+    { const cy = ragCenter(rd.root)[1]; if (rd.peakY === undefined) rd.peakY = cy + (e && e.fallDist || 0); if (cy > rd.peakY) rd.peakY = cy; rd.curY = cy;
+      // el agua amortigua la caída: sin daño (como en Minecraft) y la altura vuelve a contar desde aquí
+      const c = ragCenter(rd.root); const L = rd.world.get(Math.floor(c[0]), Math.floor(c[1]), Math.floor(c[2])); if (L > 0 && REG[L] && (REG[L].liquid === 1 || REG[L].inWater)) { rd.fallDmg = false; rd.peakY = cy; if (e) e.fallDist = 0; } }
     if (rd.alive && e && rd.fallDmg && rd.maxImpact > 12) { const dmg = fallDamage(rd.peakY - rd.curY); rd.fallDmg = false; if (dmg > 0) { if (e === G.player) e.damage(dmg, 'fall'); else hurtEntity(e, dmg, null, 0, 0, 0, 'fall'); playSound('fall', e.x, e.y, e.z, 0.8); } }
     const c = ragCenter(rd.root);
     if (e && rd.alive) {
@@ -6866,7 +6945,13 @@ function playerRagdollToggle() {
 // golpe fuerte / explosión: ragdoll temporal si el empujón supera el umbral
 function ragKnock(e, kx, ky, kz) { if (e.ragdoll || !ragdollsOn()) return; const k = Math.hypot(kx, ky, kz); if (k < ragCfg().knock) return; startRagdoll(e, [kx * 0.3, ky * 0.3, kz * 0.3], true, 1.2 + Math.min(1.5, k * 0.08)); }
 // caída rápida: el cuerpo se suelta en el aire y el impacto decide el daño
-function ragFallCheck(e, vy) { if (e.ragdoll || !ragdollsOn() || e.flying || e.gliding) return; if (-vy > ragCfg().fall && !e.onGround) startRagdoll(e, null, true, 1.6); }
+function ragFallCheck(e, vy) {
+  if (e.ragdoll || !ragdollsOn() || e.flying || e.gliding || e.boat || e.onGround || -vy <= ragCfg().fall) return;
+  if (e.armor && e.armor[1] && e.armor[1].id === ID.elytra) return; // puede abrir los élitros
+  // agua debajo (antes del primer sólido): va a caer al agua, no pierde el equilibrio
+  const w = e.world; if (w) { const x = Math.floor(e.x), z = Math.floor(e.z); for (let y = Math.floor(e.y); y > Math.floor(e.y) - 48 && y > 0; y--) { const b = w.get(x, y, z); if (b > 0 && (REG[b].liquid === 1 || REG[b].inWater)) return; if (b > 0 && REG[b].solid) break; } }
+  startRagdoll(e, null, true, 1.6);
+}
 // ---- dibujo
 function drawRagdolls(dim, selfFirstPerson) {
   if (!RAG.list.length) return;
@@ -7131,7 +7216,7 @@ function waterSurfaceAt(w, x, y, z) {
   return by + liquidSurface(w, bx, by, bz);
 }
 // ---- cubos con capacidad: 10 L (10000 ml) = un bloque de líquido; cada partícula del fluido continuo son 0,08 L
-const BUCKET_ML = 10000, ML_PER_PART = 80, ML_PER_EIGHTH = 1250; // un cubo (10 L) = un bloque = 125 partículas
+const BUCKET_ML = 10000, ML_PER_EIGHTH = 1250; const ML_PER_PART = BUCKET_ML / 216; // (216 = FL_PPB, que se define después) un cubo (10 L) = un bloque = 216 partículas
 function bucketLabel(s) { const d = s && REG[s.id]; if (!d || d.bucket === undefined || !d.bucket) return ''; return ' (' + (((s.ml ?? BUCKET_ML)) / 1000).toFixed(1) + ' L)'; }
 const BKT_ACC = new Map();
 // recoge hasta `room` ml del líquido que hay en una caja pequeña e invisible alrededor de donde apunta el jugador
@@ -7148,7 +7233,7 @@ function bucketCollect(w, p, dir, cont, room) {
   }
   if (!c || (cont && cont !== liq)) return { liq: cont, ml: 0 };
   if (!isStatic) { // partículas dentro de la caja (de la última lectura de la GPU)
-    const rb = FL.rb, o = rb.orgNow; if (!rb.ready) return { liq, ml: 0 }; const want = Math.min(15, Math.floor(room / ML_PER_PART)); let n = 0;
+    const rb = FL.rb, o = rb.orgNow; if (!rb.ready) return { liq, ml: 0 }; const want = Math.min(26, Math.floor(room / ML_PER_PART)); let n = 0;
     const bx = Math.floor(c[0]), by = Math.floor(c[1]), bz = Math.floor(c[2]);
     for (let dy = -1; dy <= 1 && n < want; dy++) for (let dz = -1; dz <= 1 && n < want; dz++) for (let dx = -1; dx <= 1 && n < want; dx++) {
       const cell = FL.occ.get(FLK(bx + dx, by + dy, bz + dz)); if (!cell) continue;
@@ -7991,12 +8076,12 @@ const FL = {
   rb: { pbo: null, sync: null, frame: 0, pos: null, vel: null, n: 0, ready: false, org: [0, 0, 0] },
   ents: new Float32Array(32), entV: new Float32Array(32), nEnt: 0
 };
-const FL_H = 0.4, FL_S = 0.2, FL_R = 0.08, FL_T = 262144, FL_PPB = 125; // 125 partículas por bloque (0,1 L de los cubos cada una)
+const FL_K = 6, FL_S = 1 / FL_K, FL_H = 0.34, FL_R = 0.066, FL_T = 262144, FL_PPB = FL_K * FL_K * FL_K; // 6×6×6 = 216 partículas por bloque, más pequeñas
 const GLSL_FLHEAD = `#version 300 es
 precision highp float; precision highp int; precision highp sampler2D; precision highp sampler3D;
 uniform sampler2D u_pos, u_vel, u_pred, u_lam, u_key, u_tab; uniform sampler3D u_vox;
 uniform ivec3 u_vdim; uniform int u_M; uniform float u_dt, u_kp, u_ks, u_eps;
-const float H=0.4, H2=0.16, RAD=0.08;
+const float H=0.34, H2=0.1156, RAD=0.066;
 uniform float u_time, u_rain, u_tide; uniform vec3 u_org;
 // oleaje del mar (el mismo que dibuja VS_CHUNK): x = desplazamiento de la superficie, yz = velocidad orbital horizontal
 uniform float u_waveK;
@@ -8173,7 +8258,7 @@ precision highp float; in vec2 v_q; in vec4 v_c; out vec4 o; void main(){ float 
 function flInit() {
   const gl = R.gl; FL.gl = gl; FL.ok = false;
   if (!gl.getExtension('EXT_color_buffer_float')) return;
-  FL.N = R.q >= 3 ? 131072 : 65536; FL.rows = FL.N / FL.W;
+  FL.N = R.q >= 3 ? 262144 : 131072; FL.rows = FL.N / FL.W;
   const P = {}; const C = (n, vs, fs) => { P[n] = compileRaw(vs, fs); };
   try {
     C('pred', VS_FLQUAD, FS_FLPRED); C('key', VS_FLQUAD, FS_FLKEY); C('sort', VS_FLQUAD, FS_FLSORT); C('tab', VS_FLTAB, FS_FLTAB);
@@ -8556,7 +8641,7 @@ function flRender() {
   gl.bindFramebuffer(gl.READ_FRAMEBUFFER, R.fbo.scene.fb); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, R.fbo.copy.fb);
   const K = FL.rskip || 0;
   if (!(K & 16)) gl.blitFramebuffer(0, 0, R.w, R.h, 0, 0, R.w, R.h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
-  const off = [FL.org[0] - R.cam[0], FL.org[1] - R.cam[1], FL.org[2] - R.cam[2]]; const rad = 0.155;
+  const off = [FL.org[0] - R.cam[0], FL.org[1] - R.cam[1], FL.org[2] - R.cam[2]]; const rad = 0.13;
   gl.bindVertexArray(FL.vao); gl.disable(gl.CULL_FACE);
   const sphU = P => { gl.useProgram(P.p); gl.uniformMatrix4fv(P.u.u_view, false, R.view); gl.uniformMatrix4fv(P.u.u_proj, false, R.proj); gl.uniform3f(P.u.u_off, off[0], off[1], off[2]); gl.uniform1f(P.u.u_rad, rad);
     flBindTex(P, 'u_pos', 0, FL.pos[FL.cur]); flBindTex(P, 'u_vel', 1, FL.vel[FL.cur]); flBindTex(P, 'u_lam', 2, FL.lam); flBindTex(P, 'u_scl', 9, FL.scaleTex); flBindTex(P, 'u_depthCopy', 3, R.fbo.copy.depth);
@@ -8606,13 +8691,13 @@ function flSetStatic(w, x, y, z, liq, amt, placed) {
   const m = liqMeta(Math.min(8, amt), false, false) | (placed && liq === 1 ? LIQ_PLACED : 0);
   if (b !== id || w.getMeta(x, y, z) !== m) w.set(x, y, z, id, m);
 }
-// a octavos de líquido en la celda → partículas (4×4 por capa de 1/4 de bloque, de abajo arriba)
+// a octavos de líquido en la celda → partículas (FL_K×FL_K por capa, de abajo arriba)
 function flSpawnCell(w, x, y, z, a, phase, vx, vy, vz) {
-  const n = Math.min(FL_PPB, Math.round(a / 8 * FL_PPB)); const s = FL_S; let k = 0;
-  const order = []; for (let i = 0; i < 25; i++) order.push(i);
-  for (let layer = 0; layer < 5 && k < n; layer++) {
-    for (let i = 24; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; const t = order[i]; order[i] = order[j]; order[j] = t; }
-    for (let q = 0; q < 25 && k < n; q++, k++) { const gx = order[q] % 5, gz = (order[q] / 5) | 0; const jt = () => (Math.random() - 0.5) * 0.03;
+  const n = Math.min(FL_PPB, Math.round(a / 8 * FL_PPB)); const s = FL_S; let k = 0; const KK = FL_K * FL_K;
+  const order = []; for (let i = 0; i < KK; i++) order.push(i);
+  for (let layer = 0; layer < FL_K && k < n; layer++) {
+    for (let i = KK - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; const t = order[i]; order[i] = order[j]; order[j] = t; }
+    for (let q = 0; q < KK && k < n; q++, k++) { const gx = order[q] % FL_K, gz = (order[q] / FL_K) | 0; const jt = () => (Math.random() - 0.5) * 0.03;
       flSpawn(x + (gx + 0.5) * s + jt(), y + (layer + 0.5) * s + jt(), z + (gz + 0.5) * s + jt(), vx + jt() * 5, vy, vz + jt() * 5, phase); }
   }
   return k;
@@ -9129,7 +9214,7 @@ function emberUpdate(w, dt) {
 
 // ===== t_broom.js
 // ============================================================================
-//  Escoba: con el clic derecho mantenido se barre de lado a lado delante del jugador.
+//  Escoba: con el clic derecho mantenido se empuja hacia adelante, lejos del jugador.
 //  Empuja todo lo que tiene física (partículas del fluido, ragdolls, escombros, objetos,
 //  mobs y botes) pero solo a la altura del jugador: desde el suelo que pisa hasta la cabeza.
 //  Lo que está un bloque más abajo no se toca.
@@ -9139,15 +9224,13 @@ const BROOM_REACH = 1.5, BROOM_R = 0.55;
 // llamado cada cuadro mientras se mantiene el clic derecho con la escoba
 function broomUse(p) {
   const now = performance.now(); const dt = BROOM.active ? clamp((now - BROOM.t) / 1000, 0, 0.1) : 1 / 60;
-  BROOM.t = now; BROOM.active = true; BROOM.ph += dt * 7.5;
-  const sw = Math.sin(BROOM.ph) * 0.95, swd = Math.cos(BROOM.ph) * 0.95 * 7.5; // ángulo del barrido y su velocidad angular
-  const a = p.yaw + sw; const dx = -Math.sin(a), dz = -Math.cos(a); // dirección de la cabeza de la escoba
-  const tx = -Math.cos(a), tz = Math.sin(a); // tangente del arco (sentido de ángulo creciente)
-  const base = Math.floor(p.y + 0.01);
-  BROOM.head[0] = p.x + dx * BROOM_REACH; BROOM.head[1] = base + 0.35; BROOM.head[2] = p.z + dz * BROOM_REACH;
-  // la cabeza se mueve por el arco y además empuja hacia fuera (lejos del jugador)
-  const vt = swd * BROOM_REACH; BROOM.v[0] = tx * vt + dx * 2.5; BROOM.v[1] = 0.6; BROOM.v[2] = tz * vt + dz * 2.5;
-  if (!p._brSnd || now - p._brSnd > 260 && Math.abs(Math.cos(BROOM.ph)) > 0.9) { p._brSnd = now; playSound('step', BROOM.head[0], BROOM.head[1], BROOM.head[2], 0.5, ID.sand); }
+  BROOM.t = now; BROOM.active = true; BROOM.ph += dt * 2.2; // escobazos hacia adelante (la cabeza avanza y vuelve)
+  const dx = -Math.sin(p.yaw), dz = -Math.cos(p.yaw); // siempre hacia donde mira el jugador
+  const base = Math.floor(p.y + 0.01); const st = BROOM.ph % 1; const reach = 0.7 + st * 1.1;
+  BROOM.dir = [dx, dz]; BROOM.reach = reach;
+  BROOM.head[0] = p.x + dx * reach; BROOM.head[1] = base + 0.35; BROOM.head[2] = p.z + dz * reach;
+  BROOM.v[0] = dx * 5; BROOM.v[1] = 0.6; BROOM.v[2] = dz * 5; // empuje hacia adelante, nunca de lado
+  if (st < dt * 2.2 + 0.001) playSound('step', BROOM.head[0], BROOM.head[1], BROOM.head[2], 0.5, ID.sand);
   p.swing = Math.max(p.swing || 0, 0.01);
   broomPush(p, base, dt);
   // en multijugador las entidades las simula el anfitrión: se le manda el barrido (unas 20 veces por segundo)
@@ -9158,10 +9241,12 @@ function broomActive() { return BROOM.active && performance.now() - BROOM.t < 12
 function broomLevel(y, base, p) { return y >= base - 0.05 && y < p.y + 1.8; }
 // ¿punto dentro de la zona barrida (cerca de la cabeza de la escoba, delante del jugador)?
 function broomHit(x, z, p, B = BROOM) {
-  const hx = B.head[0], hz = B.head[2]; const d = Math.hypot(x - hx, z - hz); if (d > BROOM_R + 0.6) return 0;
-  const fx = -Math.sin(p.yaw), fz = -Math.cos(p.yaw); const rx = x - p.x, rz = z - p.z; const rl = Math.hypot(rx, rz) || 1;
-  if ((rx * fx + rz * fz) / rl < -0.2) return 0; // detrás del jugador no
-  return clamp(1 - d / (BROOM_R + 0.6), 0, 1);
+  // franja delante del jugador (de 0,2 bloques hasta la cabeza de la escoba + 0,7) y 0,9 a cada lado
+  const vl = Math.hypot(B.v[0], B.v[2]) || 1; const fx = B.v[0] / vl, fz = B.v[2] / vl;
+  const rx = x - p.x, rz = z - p.z; const f = rx * fx + rz * fz, l = Math.abs(rx * fz - rz * fx);
+  const far = Math.hypot(B.head[0] - p.x, B.head[2] - p.z) + 0.7;
+  if (f < 0.2 || f > far || l > 0.9) return 0;
+  return clamp(1 - l / 0.9 * 0.5, 0, 1);
 }
 function broomPush(p, base, dt, B = BROOM) {
   const V = B.v; const k = 20;
@@ -9173,7 +9258,6 @@ function broomPush(p, base, dt, B = BROOM) {
     const m = e.type === 'item' ? 1 : e.isBoat ? 0.5 : (e instanceof Mob ? 0.35 : 0.5);
     e.vx = (e.vx || 0) + (V[0] - (e.vx || 0)) * Math.min(1, k * f * m * dt); e.vz = (e.vz || 0) + (V[2] - (e.vz || 0)) * Math.min(1, k * f * m * dt);
     if (e.type === 'item') { e.onGround = false; e.vy = Math.max(e.vy || 0, 1.6 * f); }
-    if (e.isBoat) { e.wy = (e.wy || 0) + (V[0] * (e.z - p.z) - V[2] * (e.x - p.x)) * 0.02 * f; }
   }
   // ragdolls: se desplaza el punto anterior de cada cuerpo (verlet) → ganan velocidad
   if (typeof RAG !== 'undefined') for (const rd of RAG.list) {
@@ -9193,9 +9277,8 @@ function broomPush(p, base, dt, B = BROOM) {
 }
 // colisionadores de la escoba para el fluido continuo (dos esferas aplastadas a lo largo de la cabeza)
 function broomColliders(add) {
-  if (!broomActive()) return; const p = G.player; const a = p.yaw + Math.sin(BROOM.ph) * 0.95;
-  const tx = -Math.cos(a), tz = Math.sin(a);
-  for (const s of [-0.35, 0.35]) add({ x: BROOM.head[0] + tx * s, y: BROOM.head[1] - 0.15, z: BROOM.head[2] + tz * s, vx: BROOM.v[0], vy: BROOM.v[1], vz: BROOM.v[2] }, 0.42, 0.12);
+  if (!broomActive()) return; const [dx, dz] = BROOM.dir || [0, -1]; const tx = -dz, tz = dx; // a lo ancho de la cabeza
+  for (const s of [-0.5, 0, 0.5]) add({ x: BROOM.head[0] + tx * s, y: BROOM.head[1] - 0.15, z: BROOM.head[2] + tz * s, vx: BROOM.v[0], vy: BROOM.v[1], vz: BROOM.v[2] }, 0.36, 0.12);
 }
 
 // ===== v_boat.js
@@ -9274,7 +9357,8 @@ function boatStep(e, h, w) {
 function boatMount(p, e) {
   if (e.capsized) { showActionMsg('El bote está volcado: métete debajo y golpéalo para enderezarlo'); return; }
   if (e.rider && e.rider !== p) return;
-  if (e.proxy) { netSend({ t: 'boat', a: 'mount', id: e.hostId }); p._boatOffT = 0; return; } // lo confirma el anfitrión (lista de entidades) p.boat = e; e.rider = p; e.ctl = null; p.vx = p.vy = p.vz = 0;
+  if (e.proxy) { netSend({ t: 'boat', a: 'mount', id: e.hostId }); p._boatOffT = 0; return; } /* lo confirma el anfitrión (lista de entidades) */
+  p.boat = e; e.rider = p; e.ctl = null; p.vx = p.vy = p.vz = 0;
 }
 function boatDismount(p, thrown) {
   const e = p.boat; if (!e) return; p.boat = null; e.rider = null; e.ctl = null;
@@ -9357,6 +9441,137 @@ function boatNetApply(e, o) {
   if (e.capsized && !was) playSound('splash', e.x, e.y, e.z, 0.8);
 }
 
+// ===== u_cmds.js
+// ============================================================================
+//  Comandos: /tp, /weather, /tick y /kill nuevos (el resto sigue en runCommandBase) y el menú de
+//  autocompletado del chat: al escribir "/" aparece la lista de comandos y, después de cada espacio,
+//  las opciones del siguiente argumento. Tab completa, ↑/↓ eligen.
+// ============================================================================
+const CMD_TIMES = ['day', 'noon', 'night', 'midnight', 'sunrise', 'sunset'];
+const CMD_MODES = ['survival', 'creative', 'spectator', 'adventure'];
+const CMD_EFFECTS = ['speed', 'regeneration', 'jump_boost', 'haste', 'resistance', 'night_vision'];
+function cmdPlayers() { const out = []; if (G.player) out.push(G.player.name || 'Jugador'); for (const e of G.entities.values()) if ((e.remotePlayer || (e.proxy && e.type === 'player')) && e.name) out.push(e.name); return out; }
+function cmdCoord(axis) { const p = G.player; if (!p) return ['~']; const v = axis === 0 ? p.x : axis === 1 ? p.y + p.world.yOff : p.z; return ['~', String(Math.floor(v))]; }
+function cmdItems() { return REG.filter(d => d && d.name).map(d => d.name); }
+function cmdStructs() { return typeof STRUCTS !== 'undefined' ? STRUCTS.map(s => s.name) : []; }
+// cada comando: lista de argumentos; cada argumento es una lista fija, una función (args) => lista, o un texto de ayuda '<...>'
+const CMD_SPEC = {
+  help: [],
+  gamemode: [CMD_MODES],
+  time: [['set', 'add', 'query'], a => a[1] === 'set' ? CMD_TIMES.concat(['1000', '6000', '13000']) : a[1] === 'add' ? ['100', '1000', '6000'] : []],
+  weather: [['clear', 'rain', 'thunder'], ['<segundos>', '60', '300', '1200']],
+  tp: [a => ['~'].concat(cmdCoord(0).slice(1), cmdPlayers(), ['@s', '@p']), a => /^[~\-\d^]/.test(a[1] || '') ? cmdCoord(1) : ['~'].concat(cmdCoord(0).slice(1), cmdPlayers()), a => /^[~\-\d^]/.test(a[1] || '') ? cmdCoord(2) : cmdCoord(1), a => /^[~\-\d^]/.test(a[1] || '') ? [] : cmdCoord(2)],
+  teleport: null,
+  give: [cmdItems, ['1', '16', '64']],
+  kill: [() => ['@s', '@e', '@e[type=', '@p'].concat(Object.keys(MOB))],
+  seed: [],
+  summon: [() => Object.keys(MOB), () => cmdCoord(0), () => cmdCoord(1), () => cmdCoord(2)],
+  spawnpoint: [],
+  difficulty: [['peaceful', 'easy', 'normal', 'hard']],
+  locate: [['structure'], cmdStructs],
+  clear: [],
+  dimension: [['overworld', 'nether', 'end']],
+  gamerule: [['keepInventory'], ['true', 'false']],
+  effect: [['give'], CMD_EFFECTS, ['30', '60', '300']],
+  tick: [['freeze', 'unfreeze', 'rate', 'step', 'query', '0.25', '0.5', '2', '4'], a => a[1] === 'rate' ? ['0.1', '0.5', '1', '2', '4', '10'] : a[1] === 'step' ? ['1', '20', '100'] : []]
+};
+CMD_SPEC.teleport = CMD_SPEC.tp;
+const CMD_HELP = { help: 'lista de comandos', gamemode: '<modo>', time: 'set|add|query', weather: 'clear|rain|thunder [segundos]', tp: '<x y z> | <jugador> | <quién> <x y z|destino>', give: '<objeto> [cantidad]', kill: '[@s|@e|@e[type=mob]|mob]', seed: '', summon: '<mob> [x y z]', spawnpoint: '', difficulty: '<dificultad>', locate: 'structure <nombre>', clear: '', dimension: '<dimensión>', gamerule: 'keepInventory <true|false>', effect: 'give <efecto> [segundos]', tick: 'freeze | unfreeze | <velocidad> | rate <x> | step [ticks] | query' };
+// ---- ejecución
+function runCommand(cmd) {
+  const a = cmd.trim().slice(1).split(/\s+/); const c = (a[0] || '').toLowerCase(); const p = G.player;
+  const allowed = G.cheats !== false || (G.net && G.net.role === 'host');
+  if (!allowed && c !== 'help' && c !== 'seed') return chatMsg('Los trucos no están activados en este mundo.', '#f88');
+  const yo = p.world.yOff;
+  const coord = (v, cur, local) => v === undefined ? cur : v.startsWith('~') ? cur + (+v.slice(1) || 0) : (isNaN(+v) ? NaN : +v);
+  const isCoord = v => v !== undefined && /^(~-?\d*\.?\d*|-?\d+\.?\d*)$/.test(v);
+  const findEnt = name => { if (!name) return null; const n = name.toLowerCase(); if (n === '@s') return p; if (n === '@p') return p; if (p.name && p.name.toLowerCase() === n) return p; for (const e of G.entities.values()) if (e.name && e.name.toLowerCase() === n && !e.removed) return e; for (const e of G.entities.values()) if (e.type === n && !e.removed) return e; return null; };
+  switch (c) {
+    case 'help': chatMsg('Comandos (escribe / para ver el menú): ' + Object.keys(CMD_SPEC).filter(k => k !== 'teleport').map(k => '/' + k).join(', ')); return;
+    case 'tp': case 'teleport': {
+      // /tp x y z · /tp <destino> · /tp <quién> x y z · /tp <quién> <destino>
+      let who = p, rest = a.slice(1);
+      if (rest.length && !isCoord(rest[0]) && (rest.length === 4 || rest.length === 2)) { who = findEnt(rest[0]); rest = rest.slice(1); if (!who) return chatMsg('No se encontró: ' + a[1], '#f88'); }
+      let tx, ty, tz, td = who.dim;
+      if (rest.length >= 3 && rest.slice(0, 3).every(isCoord)) { const wy = (G.worlds[who.dim] || p.world).yOff; tx = coord(rest[0], who.x); ty = coord(rest[1], who.y + wy) - wy; tz = coord(rest[2], who.z); }
+      else if (rest.length === 1) { const t = findEnt(rest[0]); if (!t) return chatMsg('No se encontró: ' + rest[0], '#f88'); tx = t.x; ty = t.y; tz = t.z; td = t.dim; }
+      else return chatMsg('Uso: /tp ' + CMD_HELP.tp, '#f88');
+      if (![tx, ty, tz].every(Number.isFinite)) return chatMsg('Coordenadas no válidas', '#f88');
+      if (who === p) {
+        if (p.boat) boatDismount(p); if (p.ragdoll) endRagdoll(p.ragdoll);
+        if (td !== p.dim) changeDim(p, td, tx, ty, tz); else { ensureArea(p.world, tx, tz, 1); p.x = tx; p.y = ty; p.z = tz; }
+        p.px = p.x; p.py = p.y; p.pz = p.z; p.vx = p.vy = p.vz = 0; p.fallDist = 0;
+      } else if (who.remotePlayer) netSendTo(who.conn, { t: 'tp', x: tx, y: ty, z: tz });
+      else if (who.proxy) return chatMsg('Solo el anfitrión puede mover a otros', '#f88');
+      else { who.x = who.px = tx; who.y = who.py = ty; who.z = who.pz = tz; who.vx = who.vy = who.vz = 0; }
+      chatMsg('Teletransportado a ' + [tx, ty + (G.worlds[td] || p.world).yOff, tz].map(v => Math.round(v * 10) / 10).join(' ')); return;
+    }
+    case 'weather': {
+      const k = (a[1] || '').toLowerCase(); if (!['clear', 'rain', 'thunder'].includes(k)) return chatMsg('Uso: /weather ' + CMD_HELP.weather, '#f88');
+      if (G.net && G.net.role === 'client') return chatMsg('Solo el anfitrión puede cambiar el clima', '#f88');
+      const secs = +a[2]; G.rain = k === 'clear' ? 0 : 1; G.thunder = k === 'thunder'; G.rainTimer = secs > 0 ? secs * 20 : (k === 'clear' ? 18000 : 6000); G.weatherFast = 80; // el cambio se nota enseguida
+      if (G.net && G.net.role === 'host') netBroadcast({ t: 'time', v: G.time, r: G.rain });
+      chatMsg('Clima: ' + ({ clear: 'despejado', rain: 'lluvia', thunder: 'tormenta' })[k] + (secs > 0 ? ' durante ' + secs + ' s' : '')); return;
+    }
+    case 'tick': {
+      if (G.net && G.net.role === 'client') return chatMsg('Solo el anfitrión puede cambiar el tick', '#f88');
+      const k = (a[1] || 'query').toLowerCase();
+      if (k === 'freeze') { G.tickFrozen = true; chatMsg('Mundo congelado (los jugadores siguen moviéndose). /tick unfreeze para continuar'); }
+      else if (k === 'unfreeze') { G.tickFrozen = false; G.tickStep = 0; chatMsg('Mundo en marcha a x' + (G.tickRate || 1)); }
+      else if (k === 'step') { const n = Math.max(1, Math.min(2000, +a[2] || 1)); G.tickStep = (G.tickStep || 0) + n; chatMsg('Avanzando ' + n + ' ticks'); }
+      else if (k === 'query') { chatMsg('Tick: ' + (G.tickFrozen ? 'congelado' : 'x' + (G.tickRate || 1)) + ' (20 ticks/s normal)'); return; }
+      else { const v = +(k === 'rate' ? a[2] : k); if (!(v > 0)) return chatMsg('Uso: /tick ' + CMD_HELP.tick, '#f88'); G.tickRate = clamp(v, 0.05, 20); G.tickFrozen = false; chatMsg('Velocidad del mundo: x' + G.tickRate + ' (' + Math.round(20 * G.tickRate * 10) / 10 + ' ticks/s)'); }
+      if (G.net && G.net.role === 'host') netBroadcast({ t: 'tick', f: G.tickFrozen, r: G.tickRate });
+      return;
+    }
+    case 'kill': {
+      const t = (a[1] || '@s').toLowerCase();
+      if (t === '@s' || t === '@p' || (p.name && t === p.name.toLowerCase())) { p.hp = 0; p.die('void'); return; }
+      const m = t.match(/^@e(?:\[type=(?:minecraft:)?([a-z_]+)\])?$/); const type = m ? m[1] : (MOB[t] || t === 'item' ? t : null);
+      if (!m && !type) return chatMsg('Uso: /kill ' + CMD_HELP.kill, '#f88');
+      let n = 0; for (const e of G.entities.values()) { if (e.removed || e.dead || e.remotePlayer || e.type === 'player' || e.proxy) continue; if (type && e.type !== type) continue; if (e.isBoat || e.type === 'item' || e instanceof Projectile) e.removed = true; else { e.invul = 0; hurtEntity(e, 1e9, null, 0, 0, 0, 'void'); if (!e.dead && e.hp > 0) e.hp = 0; } n++; }
+      chatMsg(n + ' entidad' + (n === 1 ? '' : 'es') + ' eliminada' + (n === 1 ? '' : 's')); return;
+    }
+  }
+  runCommandBase(cmd);
+}
+// ---- menú de autocompletado
+const CMDUI = { list: [], sel: 0, el: null, start: 0 };
+function cmdSuggest(text) {
+  if (!text.startsWith('/')) return { items: [], from: 0, hint: '' };
+  const body = text.slice(1); const parts = body.split(' '); const idx = parts.length - 1; const cur = parts[idx].toLowerCase(); const from = text.length - parts[idx].length;
+  if (idx === 0) { const names = Object.keys(CMD_SPEC).filter(k => k.startsWith(cur)); return { items: names, from, hint: '' }; }
+  const spec = CMD_SPEC[parts[0].toLowerCase()]; if (!spec) return { items: [], from, hint: 'comando desconocido' };
+  const prov = spec[idx - 1]; const args = [parts[0]].concat(parts.slice(1));
+  if (!prov) return { items: [], from, hint: '' };
+  let list = typeof prov === 'function' ? prov(args) : prov; list = list || [];
+  const hints = list.filter(s => s.startsWith('<')); const real = list.filter(s => !s.startsWith('<'));
+  let items = real.filter(s => s.toLowerCase().startsWith(cur)); if (cur && items.length === 0) items = real.filter(s => s.toLowerCase().includes(cur));
+  return { items: items.slice(0, 200), from, hint: hints.join(' ') || (items.length ? '' : (CMD_HELP[parts[0].toLowerCase()] || '')) };
+}
+function cmdUIUpdate() {
+  const inp = $('chatIn'); let el = CMDUI.el; if (!el) { el = CMDUI.el = document.createElement('div'); el.id = 'cmdSug'; document.body.appendChild(el); }
+  const r = cmdSuggest(inp.value); CMDUI.list = r.items; CMDUI.from = r.from; if (CMDUI.sel >= r.items.length) CMDUI.sel = 0;
+  if (!inp.classList.contains('on') || (!r.items.length && !r.hint)) { el.style.display = 'none'; return; }
+  const top = Math.max(0, Math.min(CMDUI.sel - 5, r.items.length - 10)); const shown = r.items.slice(top, top + 10);
+  el.innerHTML = ''; el.style.display = 'block';
+  // alineado con el argumento que se está escribiendo
+  const meas = document.createElement('span'); meas.style.cssText = 'visibility:hidden;position:absolute;white-space:pre;font:' + getComputedStyle(inp).font; meas.textContent = inp.value.slice(0, r.from); document.body.appendChild(meas); el.style.left = (4 + 6 + meas.offsetWidth) + 'px'; meas.remove();
+  for (let i = 0; i < shown.length; i++) { const d = document.createElement('div'); d.textContent = shown[i]; if (top + i === CMDUI.sel) d.className = 'on'; const k = top + i; d.onmousedown = ev => { ev.preventDefault(); CMDUI.sel = k; cmdApply(); }; el.appendChild(d); }
+  if (r.items.length > 10) { const d = document.createElement('div'); d.className = 'more'; d.textContent = '… ' + r.items.length + ' opciones (↑/↓)'; el.appendChild(d); }
+  if (!r.items.length && r.hint) { const d = document.createElement('div'); d.className = 'hint'; d.textContent = r.hint; el.appendChild(d); }
+}
+function cmdApply() {
+  const inp = $('chatIn'); const s = CMDUI.list[CMDUI.sel]; if (!s) return false;
+  inp.value = inp.value.slice(0, CMDUI.from) + s + (s.endsWith('=') ? '' : ' '); CMDUI.sel = 0; cmdUIUpdate(); return true;
+}
+function cmdUIKey(e) {
+  if (!$('chatIn').value.startsWith('/')) return;
+  if (e.key === 'Tab') { e.preventDefault(); cmdApply(); }
+  else if (e.key === 'ArrowDown' && CMDUI.list.length) { e.preventDefault(); CMDUI.sel = (CMDUI.sel + 1) % CMDUI.list.length; cmdUIUpdate(); }
+  else if (e.key === 'ArrowUp' && CMDUI.list.length) { e.preventDefault(); CMDUI.sel = (CMDUI.sel - 1 + CMDUI.list.length) % CMDUI.list.length; cmdUIUpdate(); }
+}
+
 // ===== i_main.js
 // ============================================================================
 //  Principal: bucle, chunks, cámara, sonido, menús, opciones, guardado
@@ -9374,8 +9589,8 @@ function audioInit() {
   const rs = c.createBufferSource(); rs.buffer = b; rs.loop = true; const rf = c.createBiquadFilter(); rf.type = 'highpass'; rf.frequency.value = 900; const rg = c.createGain(); rg.gain.value = 0; rs.connect(rf); rf.connect(rg); rg.connect(AU.master); rs.start(); AU.rain = rg;
 }
 const MAT_SND = id => { const d = REG[id]; if (!d) return 'stone'; const n = d.name; if (/glass|ice/.test(n)) return 'glass'; if (/wool|carpet/.test(n)) return 'wool'; if (/sand|snow/.test(n)) return 'sand'; if (/gravel|dirt|farmland|path|mud|clay|soul/.test(n)) return 'gravel'; if (/grass|leaves|sapling|vine|fern|flower|kelp|moss|wart|roots|azalea/.test(n) || d.render === 'cross') return 'grass'; if (d.tool === 'axe' || /planks|log|wood|stem|bookshelf|chest|table|barrel/.test(n)) return 'wood'; return 'stone'; };
-function noiseHit(t, dur, freq, q, vol, type = 'bandpass', dest) { const c = AU.ctx; const s = c.createBufferSource(); s.buffer = AU.noise; s.playbackRate.value = 0.8 + Math.random() * 0.4; const f = c.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q; const g = c.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0008, t + dur); s.connect(f); f.connect(g); g.connect(dest || AU.out || AU.master); s.start(t, Math.random() * 1.5); s.stop(t + dur + 0.05); return g; }
-function tone(t, dur, f0, f1, vol, type = 'sine', dest) { const c = AU.ctx; const o = c.createOscillator(); o.type = type; o.frequency.setValueAtTime(f0, t); if (f1) o.frequency.exponentialRampToValueAtTime(f1, t + dur); const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); o.connect(g); g.connect(dest || AU.out || AU.master); o.start(t); o.stop(t + dur + 0.05); }
+function noiseHit(t, dur, freq, q, vol, type = 'bandpass', dest) { if (!(vol > 0) || !Number.isFinite(vol + freq + dur + t)) return; const c = AU.ctx; const s = c.createBufferSource(); s.buffer = AU.noise; s.playbackRate.value = 0.8 + Math.random() * 0.4; const f = c.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q; const g = c.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0008, t + dur); s.connect(f); f.connect(g); g.connect(dest || AU.out || AU.master); s.start(t, Math.random() * 1.5); s.stop(t + dur + 0.05); return g; }
+function tone(t, dur, f0, f1, vol, type = 'sine', dest) { if (!(vol > 0) || !Number.isFinite(vol + f0 + dur + t + (f1 || 0)) || f1 < 0) return; const c = AU.ctx; const o = c.createOscillator(); o.type = type; o.frequency.setValueAtTime(f0, t); if (f1) o.frequency.exponentialRampToValueAtTime(f1, t + dur); const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); o.connect(g); g.connect(dest || AU.out || AU.master); o.start(t); o.stop(t + dur + 0.05); }
 // categorías de sonido (Opciones → Audio)
 const SND_CAT = { click: 'ui', dig: 'blocks', place: 'blocks', break: 'blocks', glass: 'blocks', chest_open: 'blocks', chest_close: 'blocks', bucket: 'blocks', bucket_empty: 'blocks', ignite: 'blocks', note: 'blocks', fizz: 'blocks', portal: 'blocks', portal_ignite: 'blocks', end_portal: 'blocks',
   step: 'players', step_stone: 'players', hurt: 'players', eat: 'players', burp: 'players', drink: 'players', fall: 'players', bow: 'players', throw: 'players', break_item: 'players', levelup: 'players', hit: 'players', crit: 'players', arrow_hit: 'players', pop: 'players',
@@ -9474,7 +9689,7 @@ function findSpawn(w) {
   return { x: 0.5, z: 0.5 };
 }
 function resetGameState() {
-  G.entities = new Map(); G.particles = []; G.containers = {}; G.spawned = new Set(); G.tick = 0; G.dragonKilled = false; G.endInit = false; G.gateway = null; G.creditsShown = false; G.playerStates = {}; G.rain = 0; G.rainLevel = 0; G.rainTimer = 12000 + Math.random() * 24000;
+  G.entities = new Map(); G.particles = []; G.containers = {}; G.spawned = new Set(); G.tick = 0; G.rtick = 0; G.tickFrozen = false; G.tickRate = 1; G.dragonKilled = false; G.endInit = false; G.gateway = null; G.creditsShown = false; G.playerStates = {}; G.rain = 0; G.rainLevel = 0; G.rainTimer = 12000 + Math.random() * 24000;
   TICK_TIMERS.length = 0; NETBATCH.length = 0; R.plights = []; UI.open = null; G.paused = false; G.wardenWarn = 0;
 }
 function migrateWorld(data) { // v2 -> v3: los objetos pasaron de id 256+ a 1000+
@@ -9591,7 +9806,7 @@ function manageChunks(w, x, z, budget) {
   if (G.net && G.net.role === 'host') for (const e of G.entities.values()) if (e.remotePlayer) { const ww = G.worlds[e.dim]; if (!ww) continue; const ecx = Math.floor(e.x) >> 4, ecz = Math.floor(e.z) >> 4; for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) if (!ww.chunk(ecx + dx, ecz + dz)) { if (WK.ok) requestGen(ww, ecx + dx, ecz + dz); else { if (performance.now() - t0 > budget * 1.5) return; ww.ensure(ecx + dx, ecz + dz); } } }
 }
 // ------------------------------------------------------------ BUCLE
-let lastT = performance.now(), acc = 0, fpsN = 0, fpsT = 0, FPS = 0, dbgT = 0;
+let lastT = performance.now(), acc = 0, accW = 0, fpsN = 0, fpsT = 0, FPS = 0, dbgT = 0;
 const MENU = { world: null, yaw: 0 };
 function frame(now) {
   requestAnimationFrame(frame);
@@ -9648,11 +9863,10 @@ function loadingFrame(dt) {
   renderWorld(w, [p.x, p.y + 1.6, p.z], p.yaw, p.pitch, {});
   if (ready >= total || performance.now() - G.loadStart > 25000) finishLoading();
 }
+// tick "real" (20 por segundo, siempre): el jugador, la red, el HUD y el guardado. /tick no lo afecta
 function gameTick() {
   const t0 = performance.now(); const p = G.player; const client = G.net && G.net.role === 'client';
-  G.tick++;
-  if (!client) { G.time++; if (--G.rainTimer <= 0) { G.rain = G.rain ? 0 : 1; G.rainTimer = G.rain ? 6000 + Math.random() * 6000 : 18000 + Math.random() * 30000; } }
-  G.rainLevel = lerp(G.rainLevel || 0, G.rain ? 1 : 0, 0.004);
+  G.rtick = (G.rtick || 0) + 1;
   if (!p.dead) {
     playerTick(p);
     const inP = entityInBlock(p.world, p, d => !!d.portal);
@@ -9664,6 +9878,18 @@ function gameTick() {
       if (sensor && (G.tick - (G.wardenT || 0)) > 100) { G.wardenT = G.tick; G.wardenWarn = (G.wardenWarn || 0) + 1; const msgs = ['El sculk vibra...', 'Algo se acerca...', 'Se acerca...', '¡Un Warden emerge!']; chatMsg(msgs[Math.min(3, G.wardenWarn - 1)], '#4cc'); if (G.wardenWarn >= 4 && ![...G.entities.values()].some(e => e.type === 'warden')) { const a = Math.random() * 6.28; const wx = p.x + Math.cos(a) * 7, wz = p.z + Math.sin(a) * 7; const m = spawnMob('warden', p.dim, wx, w.surfaceY(Math.floor(wx), Math.floor(wz)) > p.y + 5 ? p.y : p.y, wz); if (m) { m.target = p; m.persist = true; } G.wardenWarn = 0; for (let i = 0; i < 30; i++) smoke(wx, p.y, wz, { r: 0.1, g: 0.15, b: 0.15, size: 0.6 }); } }
     }
   }
+  if (G.net) { if (G.net.role === 'host') hostNetTick(); else clientNetTick(); }
+  if (G.rtick % 10 === 0) updateHUD();
+  if (G.rtick % 6000 === 0 && !client) saveWorld(true);
+  musicTick();
+  TICK_MS = lerp(TICK_MS, performance.now() - t0, 0.1);
+}
+// tick del mundo: tiempo, clima, entidades, fluidos, fuego, cultivos... /tick lo congela, acelera o ralentiza
+function worldTick() {
+  const p = G.player; const client = G.net && G.net.role === 'client';
+  G.tick++;
+  if (!client) { G.time++; if (--G.rainTimer <= 0) { G.rain = G.rain ? 0 : 1; G.thunder = G.rain && Math.random() < 0.3; G.rainTimer = G.rain ? 6000 + Math.random() * 6000 : 18000 + Math.random() * 30000; } }
+  G.rainLevel = lerp(G.rainLevel || 0, G.rain ? 1 : 0, G.weatherFast > 0 ? 0.05 : 0.004); if (G.weatherFast > 0) G.weatherFast--;
   // entidades
   if (typeof processPathQueue === 'function') processPathQueue();
   for (const [k, e] of G.entities) { if (e.removed) { G.entities.delete(k); continue; } if (e.proxy || e.remotePlayer) continue; if (client && !(e instanceof Projectile && e.type === 'eye')) continue; try { entityTick(e, 0.05); } catch (err) { console.error(err); e.removed = true; } }
@@ -9677,27 +9903,27 @@ function gameTick() {
     furnaceTick();
   }
   runTickTimers();
-  if (G.net) { if (G.net.role === 'host') hostNetTick(); else clientNetTick(); }
-  if (G.tick % 10 === 0) updateHUD();
-  if (G.tick % 6000 === 0 && !client) saveWorld(true);
-  musicTick();
-  TICK_MS = lerp(TICK_MS, performance.now() - t0, 0.1);
 }
 function gameFrame(dt) {
   const p = G.player; const w = G.world;
   const pausedSP = G.paused && !G.net;
-  if (!pausedSP) { acc += dt * 1000; let n = 0; while (acc >= 50 && n < 4) { gameTick(); acc -= 50; n++; } if (n >= 4) acc = 0; }
+  const rate = G.tickFrozen ? (G.tickStep > 0 ? 1 : 0) : (G.tickRate || 1); // /tick: el mundo se congela o cambia de velocidad; los jugadores no
+  if (!pausedSP) {
+    acc += dt * 1000; let n = 0; while (acc >= 50 && n < 4) { gameTick(); acc -= 50; n++; } if (n >= 4) acc = 0;
+    accW += dt * 1000 * rate; let m = 0; const mx = Math.max(4, Math.ceil(rate * 4)); while (accW >= 50 && m < mx) { worldTick(); accW -= 50; m++; if (G.tickFrozen && G.tickStep > 0 && --G.tickStep <= 0) { accW = 0; break; } } if (m >= mx) accW = 0;
+  }
+  const wdt = pausedSP ? 0 : Math.min(0.1, dt * rate);
   const typing = $('chatIn').classList.contains('on');
   const input = (UI.open || typing || G.paused || p.dead) ? {} : { f: held('forward'), b: held('back'), l: held('left'), r: held('right'), jump: held('jump'), sneak: SETTINGS.ctl.toggleSneak ? !!INPUT.tSneak : held('sneak'), sprint: SETTINGS.ctl.toggleSprint ? (held('forward') ? !!INPUT.tSprint : (INPUT.tSprint = false)) : held('sprint'), useHeld: p.eatT > 0 || p.bowT > 0 };
   if (!pausedSP && !p.dead && !p.ragdoll && p.boat) { p.savePrev(); boatRide(p, dt, input, pausedSP ? 1 : clamp(acc / 50, 0, 1)); }
   else if (!pausedSP && !p.dead && !p.ragdoll) { p.savePrev(); const steps = dt > 0.034 ? 2 : 1; for (let i = 0; i < steps; i++) updatePlayerPhysics(p, dt / steps, input); }
   if (!pausedSP && p.ragdoll && input.jump && p.ragdoll.alive && p.ragdoll.t > 0.5) p.ragdoll.dur = 0; // saltar = levantarse
-  if (!pausedSP && typeof ragUpdate === 'function') ragUpdate(dt);
-  if (!pausedSP && typeof debrisUpdate === 'function') { debrisUpdate(dt); boomUpdate(dt); }
+  if (!pausedSP && typeof ragUpdate === 'function') ragUpdate(wdt);
+  if (!pausedSP && typeof debrisUpdate === 'function') { debrisUpdate(wdt); boomUpdate(wdt); }
   if (!pausedSP && typeof snowStampTick === 'function') snowStampTick(dt);
   if (!pausedSP) updateInteraction(dt);
-  smoothProxies(dt); updateParticles(pausedSP ? 0 : dt, w);
-  if (!pausedSP) { emitterFX(w, dt); weatherFX(w, dt); if (typeof vfxTick === 'function') vfxTick(w, dt); if (typeof efUpdate === 'function') efUpdate(w, dt); if (typeof emberUpdate === 'function') emberUpdate(w, dt); }
+  smoothProxies(dt); updateParticles(wdt, w);
+  if (!pausedSP && wdt > 0) { emitterFX(w, wdt); weatherFX(w, wdt); if (typeof vfxTick === 'function') vfxTick(w, wdt); if (typeof efUpdate === 'function') efUpdate(w, wdt); if (typeof emberUpdate === 'function') emberUpdate(w, wdt); }
   updateLights(dt);
   manageChunks(w, p.x, p.z, R.q === 0 ? 5 : 8);
   // cámara
@@ -9713,13 +9939,13 @@ function gameFrame(dt) {
   const zoomOn = held('zoom') && !UI.open && !G.paused && !$('chatIn').classList.contains('on'); G.zoomCur = lerp(G.zoomCur || 1, zoomOn ? (G.zoomMag || SETTINGS.ctl.zoomMag || 4) : 1, Math.min(1, dt * 12));
   const tfov = SETTINGS.fov * (p.sprinting && !zoomOn ? 1.12 : 1) * (p.spy ? 0.14 : 1) * (p.bowT > 0 ? 1 - Math.min(1, p.bowT) * 0.15 : 1) * (p.gliding ? 1.1 : 1) / G.zoomCur;
   G.fovCur = lerp(G.fovCur || tfov, tfov, Math.min(1, dt * 10));
-  R.yawCam = yaw; const alpha = pausedSP ? 1 : acc / 50;
+  R.yawCam = yaw; const alpha = pausedSP ? 1 : acc / 50, alphaW = pausedSP || rate === 0 ? 1 : clamp(accW / 50, 0, 1);
   // ondas del agua (estelas, salpicaduras, chorros): fuentes y un paso de simulación en GPU antes de dibujar
-  if (typeof ripUpdate === 'function') { if (!pausedSP) ripSources(w, dt); ripUpdate(pausedSP ? 0 : dt); }
-  if (typeof flUpdate === 'function') flUpdate(pausedSP ? 0 : dt, w); // fluido continuo (partículas en GPU)
+  if (typeof ripUpdate === 'function') { if (!pausedSP) ripSources(w, dt); ripUpdate(wdt); }
+  if (typeof flUpdate === 'function') flUpdate(wdt, w); // fluido continuo (partículas en GPU)
   renderWorld(w, eye, yaw, pitch, {
     fov: G.fovCur, under, roll, bob, biome: w.biomeAt(Math.floor(p.x), Math.floor(p.z)),
-    drawEntities: () => { drawAllEntities(p.dim, alpha, perspective > 0 && G.gameMode !== 'spectator'); },
+    drawEntities: () => { drawAllEntities(p.dim, alphaW, perspective > 0 && G.gameMode !== 'spectator'); },
     particles: G.particles, flames: G._flames, fireCells: G._fireCells, drawOverlay: tr => drawOverlays(tr), drawHand: perspective === 0 && !hudHidden && G.gameMode !== 'spectator' && !p.spy && !p.ragdoll && (G.zoomCur || 1) < 1.3 ? drawHand : null,
     exposure: p.effects.night ? 1.6 : 1
   });
@@ -9962,7 +10188,7 @@ function optPhysics(ui) {
   v = mode('ragdoll', 'los mobs y el jugador caen como muñecos de trapo al morir, con golpes fuertes y caídas grandes (tecla ' + keyLabel(SETTINGS.keys.ragdoll) + ' para activarlo tú).', 'animación de muerte clásica.');
   ui.slider('Duración del cuerpo', ...PK('ragdoll', 'corpse'), 1, 20, 0.5, x => x + ' s', 'Cuánto tiempo queda el cuerpo en el suelo antes de desaparecer.', { off: v });
   ui.slider('Golpe mínimo', ...PK('ragdoll', 'knock'), 3, 15, 0.5, x => x, 'Fuerza de empuje necesaria para tumbar a alguien (explosiones, golpes fuertes). Menos = se tumban con más facilidad.', { off: v });
-  ui.slider('Caída mínima', ...PK('ragdoll', 'fall'), 10, 40, 1, x => x + ' m/s', 'Velocidad de caída a partir de la cual se pierde el equilibrio.', { off: v });
+  ui.slider('Caída mínima', ...PK('ragdoll', 'fall'), 15, 60, 1, x => x + ' m/s (~' + Math.round(x * x / 64) + ' bloques)', 'Velocidad de caída a partir de la cual se pierde el equilibrio. Nunca pasa si hay agua debajo o llevas élitros.', { off: v });
   ui.slider('Máximo de ragdolls', ...PK('ragdoll', 'max'), 2, 40, 1, x => x, 'Ragdolls a la vez (más = más carga de CPU).', { off: v });
   ui.sec('Fuego');
   v = mode('fire', 'llamas volumétricas que se pegan a la superficie que arde y se funden entre ellas (calidad Realista o mejor).', 'llamas clásicas.');
@@ -10065,6 +10291,7 @@ function setupMenus() {
   $('dRespawn').onclick = () => respawn(); $('dTitle').onclick = () => quitToTitle(true);
   $('qBack').onclick = () => goMenu(); $('crBack').onclick = () => { hideScreens(); lockPointer(); };
   // chat
+  $('chatIn').addEventListener('input', () => cmdUIUpdate()); $('chatIn').addEventListener('keydown', e => cmdUIKey(e));
   $('chatIn').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') { const v = $('chatIn').value.trim(); if (v) { if (v.startsWith('/')) runCommand(v); else { const txt = '<' + G.player.name + '> ' + v; if (G.net && G.net.role === 'client') netSend({ t: 'chat', m: v }); else { chatMsg(txt); if (G.net) netBroadcast({ t: 'chat', m: txt }); } } } closeChat(); } else if (e.key === 'Escape') closeChat(); });
 }
 let optReturn = 'sMain';

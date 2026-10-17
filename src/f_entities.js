@@ -420,10 +420,19 @@ function updatePlayerPhysics(p, dt, input) {
   if (p.gliding && (!elytra || p.onGround || p.inWater)) p.gliding = false;
   if (p.gliding) {
     const lx = -Math.sin(p.yaw) * Math.cos(p.pitch), ly = Math.sin(p.pitch), lz = -Math.cos(p.yaw) * Math.cos(p.pitch);
-    const sp = Math.hypot(p.vx, p.vy, p.vz); p.vy -= 16 * dt * (1 - Math.cos(p.pitch) * 0.75);
-    const hs = Math.hypot(p.vx, p.vz); const tgt = Math.max(sp, 6);
-    if (ly < 0) { p.vy += -ly * 0.1 * hs * dt * 20 * 0.05; }
-    p.vx = lerp(p.vx, lx * tgt, dt * 1.6); p.vz = lerp(p.vz, lz * tgt, dt * 1.6); p.vy = lerp(p.vy, ly * tgt, dt * 0.6);
+    // planeo como en Minecraft (pasos fijos de 1/20 s, velocidades en bloques por paso): la inclinación da sustentación,
+    // en picado se gana velocidad y al subir se gasta
+    p._ely = (p._ely || 0) + dt;
+    while (p._ely >= 0.05) {
+      p._ely -= 0.05; let vx = p.vx * 0.05, vy = p.vy * 0.05, vz = p.vz * 0.05;
+      const pr = -p.pitch; const hl = Math.hypot(lx, lz), hv = Math.hypot(vx, vz); const c2 = Math.cos(pr) ** 2;
+      vy += -0.08 + c2 * 0.06;
+      if (vy < 0 && hl > 0) { const lift = vy * -0.1 * c2; vy += lift; vx += lx * lift / hl; vz += lz * lift / hl; }
+      if (pr < 0 && hl > 0) { const up = hv * -Math.sin(pr) * 0.04; vy += up * 3.2; vx -= lx * up / hl; vz -= lz * up / hl; }
+      if (hl > 0) { vx += (lx / hl * hv - vx) * 0.1; vz += (lz / hl * hv - vz) * 0.1; }
+      vx *= 0.99; vy *= 0.98; vz *= 0.99;
+      p.vx = vx * 20; p.vy = vy * 20; p.vz = vz * 20;
+    }
     if (p.boost > 0) { p.boost -= dt; p.vx += lx * 30 * dt; p.vy += ly * 30 * dt; p.vz += lz * 30 * dt; const m = Math.hypot(p.vx, p.vy, p.vz); if (m > 33) { p.vx *= 33 / m; p.vy *= 33 / m; p.vz *= 33 / m; } if (Math.random() < 0.6) smoke(p.x, p.y, p.z, { size: 0.3, life: 0.8, r: 0.8, g: 0.8, b: 0.8, a: 0.4 }); }
     const before = Math.hypot(p.vx, p.vz); moveEntity(w, p, p.vx * dt, p.vy * dt, p.vz * dt);
     if (p.hc && before > 10) p.damage((before - 10) * 0.5, 'fall');
@@ -488,22 +497,22 @@ function playerTick(p) {
   const w = p.world; if (!w || p.dead) return;
   if (p.invul > 0) p.invul--; if (p.hurtTime > 0) p.hurtTime--;
   for (const k in p.effects) { if (--p.effects[k] <= 0) delete p.effects[k]; }
-  if (p.effects.regen && G.tick % 25 === 0 && p.hp < p.maxHp) p.hp = Math.min(p.maxHp, p.hp + 1);
+  if (p.effects.regen && G.rtick % 25 === 0 && p.hp < p.maxHp) p.hp = Math.min(p.maxHp, p.hp + 1);
   if (p.effects.levitation) p.vy = 2;
   const survival = G.gameMode === 'survival' || G.gameMode === 'adventure';
   // aire
-  if (p.eyeInWater && survival && !(p.armor[0] && p.armor[0].id === ID.turtle_helmet && p.air > 0 && G.tick % 2) && !(Math.random() < enchLvl(p.armor[0], 'respiration') / (enchLvl(p.armor[0], 'respiration') + 1))) { p.air--; if (p.air <= -20) { p.air = 0; p.damage(2, 'drown'); } } else p.air = Math.min(300, p.air + 5);
+  if (p.eyeInWater && survival && !(p.armor[0] && p.armor[0].id === ID.turtle_helmet && p.air > 0 && G.rtick % 2) && !(Math.random() < enchLvl(p.armor[0], 'respiration') / (enchLvl(p.armor[0], 'respiration') + 1))) { p.air--; if (p.air <= -20) { p.air = 0; p.damage(2, 'drown'); } } else p.air = Math.min(300, p.air + 5);
   // fuego/lava
-  if (p.inLava && survival) { p.fire = 300; if (G.tick % 10 === 0) p.damage(4, 'lava'); }
-  const fireB = entityInBlock(w, p, d => d.id === ID.fire); if (fireB && survival) { p.fire = Math.max(p.fire, 160); if (G.tick % 10 === 0) p.damage(1, 'fire'); }
-  if (p.fire > 0) { p.fire--; if (p.inWater) p.fire = 0; if (survival && G.tick % 20 === 0 && !p.inLava) p.damage(1, 'fire'); if (Math.random() < 0.5) flame(p.x + (Math.random() - 0.5) * 0.6, p.y + Math.random() * 1.6, p.z + (Math.random() - 0.5) * 0.6, { size: 0.35 }); }
+  if (p.inLava && survival) { p.fire = 300; if (G.rtick % 10 === 0) p.damage(4, 'lava'); }
+  const fireB = entityInBlock(w, p, d => d.id === ID.fire); if (fireB && survival) { p.fire = Math.max(p.fire, 160); if (G.rtick % 10 === 0) p.damage(1, 'fire'); }
+  if (p.fire > 0) { p.fire--; if (p.inWater) p.fire = 0; if (survival && G.rtick % 20 === 0 && !p.inLava) p.damage(1, 'fire'); if (Math.random() < 0.5) flame(p.x + (Math.random() - 0.5) * 0.6, p.y + Math.random() * 1.6, p.z + (Math.random() - 0.5) * 0.6, { size: 0.35 }); }
   const hurtB = entityInBlock(w, p, d => d.id === ID.cactus); const under = blockAt(w, p.x, p.y - 0.1, p.z);
-  if ((hurtB || ((under === ID.magma_block || under === ID.campfire) && !p.sneaking) || entityInBlock(w, p, d => d.campfire)) && survival && G.tick % 10 === 0) p.damage(1, hurtB ? 'cactus' : 'fire');
+  if ((hurtB || ((under === ID.magma_block || under === ID.campfire) && !p.sneaking) || entityInBlock(w, p, d => d.campfire)) && survival && G.rtick % 10 === 0) p.damage(1, hurtB ? 'cactus' : 'fire');
   if (!survival) { p.food = 20; p.air = 300; return; }
   // hambre
   if (p.exh >= 4) { p.exh -= 4; if (p.sat > 0) p.sat = Math.max(0, p.sat - 1); else if (G.difficulty > 0) p.food = Math.max(0, p.food - 1); }
   if (p.food >= 18 && p.hp < p.maxHp) { if (++p.regenT >= (p.food >= 20 && p.sat > 0 ? 10 : 80)) { p.regenT = 0; p.hp = Math.min(p.maxHp, p.hp + 1); p.exh += 6; } }
-  else if (G.difficulty === 0 && p.hp < p.maxHp && G.tick % 20 === 0) p.hp++;
+  else if (G.difficulty === 0 && p.hp < p.maxHp && G.rtick % 20 === 0) p.hp++;
   if (p.food <= 0) { if (++p.starveT >= 80) { p.starveT = 0; if (p.hp > (G.difficulty >= 3 ? 0 : G.difficulty === 2 ? 1 : 10)) p.damage(1, 'starve'); } }
 }
 // ------------------------------------------------------------ IA y tick de entidades

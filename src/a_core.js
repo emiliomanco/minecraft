@@ -130,7 +130,7 @@ const PHYS_DEF = {
   oceans: { mode: 'real', waves: 1, foam: true, shore: 3 },
   liquids: { mode: 'real', waterSpeed: 1, lavaVisc: 1, splash: true, continuous: true },
   snow: { mode: 'real', depth: 1 },
-  ragdoll: { mode: 'real', corpse: 4, knock: 6, fall: 20, max: 20 },
+  ragdoll: { mode: 'real', corpse: 4, knock: 6, fall: 32, max: 20 },
   fire: { mode: 'real', height: 1, spread: 1 },
   smoke: { mode: 'real', amount: 1, life: 1 },
   explosions: { mode: 'real', debris: 1, place: true, fireball: true, shock: 1 },
@@ -147,6 +147,8 @@ for (const k in PHYS_DEF) {
   // ajustes antiguos (on/finite/prints = false) → modo vanilla
   if (o.on === false || o.finite === false || o.prints === false) o.mode = 'vanilla'; delete o.on; delete o.finite; delete o.prints; delete o.infinite;
 }
+// el ragdoll por caída saltaba a los ~6 bloques (20 m/s): el nuevo mínimo es 32 m/s (~16 bloques)
+if (!SETTINGS._ragFall2) { SETTINGS._ragFall2 = true; SETTINGS.physics.ragdoll.fall = Math.max(SETTINGS.physics.ragdoll.fall || 0, 32); }
 // valores efectivos de un apartado de físicas; real = false si está en modo vanilla
 function physCfg(sec) { const o = Object.assign({}, PHYS_DEF[sec], (SETTINGS.physics || {})[sec] || {}); o.real = o.mode !== 'vanilla'; return o; }
 function saveSettings() { try { localStorage.setItem('mc2-settings', JSON.stringify(SETTINGS)); } catch (e) { } }

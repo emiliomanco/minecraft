@@ -483,7 +483,7 @@ function furnaceTick() {
   }
 }
 // ------------------------------------------------------------ comandos
-function runCommand(cmd) {
+function runCommandBase(cmd) { // los comandos de siempre; runCommand (u_cmds.js) atiende antes /tp, /weather, /tick y /kill
   const a = cmd.trim().slice(1).split(/\s+/); const c = a[0].toLowerCase(); const p = G.player;
   const allowed = G.cheats !== false || (G.net && G.net.role === 'host');
   if (!allowed && c !== 'help' && c !== 'seed') return chatMsg('Los trucos no están activados en este mundo.', '#f88');

@@ -68,7 +68,7 @@ function hostHandle(c, m) {
     case 'sb': { if (!w) return; w.ensure(m.x >> 4, m.z >> 4); w.set(m.x, m.y, m.z, m.id, m.m); break; }
     case 'drop': { const e = dropItem(m.d, m.x, m.y, m.z, m.s, m.vx, m.vy, m.vz, 40); break; }
     case 'proj': { const p = shoot(m.ty, m.d, m.x, m.y, m.z, m.vx, m.vy, m.vz, c.ent, m.ex); break; }
-    case 'atk': { let t = G.entities.get(m.id); if (m.id === G.player.id) t = G.player; if (t) hurtEntity(t, m.a, c.ent, m.kx || 0, m.ky || 0, m.kz || 0); break; }
+    case 'atk': { let t = G.entities.get(m.id); if (m.id === G.player.id) t = G.player; if (t && m.a >= 1e8) t.invul = 0; if (t) hurtEntity(t, m.a, c.ent, m.kx || 0, m.ky || 0, m.kz || 0); break; }
     case 'co': { if (!w) return; const [x, y, z] = m.k.split(':')[1].split(',').map(Number); const cont = getContainer(w, m.k, m.kind, x, y, z); c.send({ t: 'cd', k: m.k, c: cont, kind: m.kind, b: m.b }); break; }
     case 'cu': { const cur = G.containers[m.k]; if (cur) { cur.items = m.c.items; } else G.containers[m.k] = m.c; break; }
     case 'chat': { const txt = m.sys ? m.m : '<' + (c.ent ? c.ent.name : '?') + '> ' + m.m; chatMsg(txt, m.sys ? '#ff8' : null); netBroadcast({ t: 'chat', m: txt, sys: m.sys }); break; }
@@ -90,7 +90,7 @@ function hostNetTick() {
   const pl = [{ i: G.player.id, n: G.player.name, x: G.player.x, y: G.player.y, z: G.player.z, yw: G.player.yaw, pt: G.player.pitch, d: G.player.dim, sn: G.player.sneaking, h: G.player.held() ? G.player.held().id : 0, ar: G.player.armor.map(a => a ? a.id : 0), dead: G.player.dead, sp: G.gameMode === 'spectator', gl: G.player.gliding, sw: G.player.swing }];
   for (const c of n.conns.values()) { const e = c.ent; if (e) pl.push({ i: e.id, n: e.name, x: e.x, y: e.y, z: e.z, yw: e.yaw, pt: e.pitch, d: e.dim, sn: e.sneaking, h: e.heldItem || 0, ar: (e.armor || []).map(a => a ? a.id : 0), dead: e.dead, sp: e.spectator, gl: e.gliding, sw: e.swing }); }
   netBroadcast({ t: 'ps', l: pl });
-  if (G.tick % 2 === 0) for (const c of n.conns.values()) {
+  if (G.rtick % 2 === 0) for (const c of n.conns.values()) {
     const p = c.ent; if (!p) continue; const list = [];
     for (const e of G.entities.values()) {
       if (e.dim !== p.dim || e.remotePlayer || e.removed) continue; if (Math.abs(e.x - p.x) > 96 || Math.abs(e.z - p.z) > 96) continue;
@@ -102,7 +102,7 @@ function hostNetTick() {
     }
     c.send({ t: 'es', d: p.dim, l: list });
   }
-  if (G.tick % 100 === 0) netBroadcast({ t: 'time', v: G.time, r: G.rain });
+  if (G.rtick % 100 === 0) netBroadcast({ t: 'time', v: G.time, r: G.rain });
 }
 // --------------------------------------------------------------------- CLIENTE
 function joinGame(code, lan, name) {
@@ -135,7 +135,8 @@ function clientHandle(m, resolve, reject) {
     case 'hurt': if (G.player) G.player.damage(m.a, m.c || 'mob', null, m.kx, m.ky, m.kz); break;
     case 'give': if (G.player) { const left = giveItem(G.player, m.s); playSound('pop', G.player.x, G.player.y, G.player.z, 0.4); if (left > 0) netSend({ t: 'drop', d: G.player.dim, x: G.player.x, y: G.player.y + 1, z: G.player.z, s: { ...m.s, c: left } }); } break;
     case 'tp': if (G.player) { G.player.x = m.x; G.player.y = m.y; G.player.z = m.z; G.player.vy = 0; G.player.fallDist = 0; } break;
-    case 'time': G.time = m.v; if (m.r !== undefined) G.rain = m.r; break;
+    case 'time': G.time = m.v; if (m.r !== undefined) { if (m.r !== G.rain) G.weatherFast = 80; G.rain = m.r; } break;
+    case 'tick': G.tickFrozen = !!m.f; G.tickRate = m.r || 1; break;
     case 'chat': chatMsg(m.m, m.sys ? '#ff8' : null); break;
     case 'cd': if (UI.pendingKey === m.k) { UI.pendingKey = null; openScreen(m.kind, { c: m.c, key: m.k, block: m.b, title: REG[m.b].disp }); } break;
     case 'fx': if (m.k === 'boom') explosionFX(m.d, m.x, m.y, m.z, m.p); break;
@@ -171,6 +172,6 @@ function updateProxyEntities(dim, list) {
 function clientNetTick() {
   const n = G.net; if (!n || n.role !== 'client' || !G.player) return; const p = G.player;
   netSend({ t: 'p', x: +p.x.toFixed(3), y: +p.y.toFixed(3), z: +p.z.toFixed(3), yw: +p.yaw.toFixed(3), pt: +p.pitch.toFixed(3), dim: p.dim, sn: p.sneaking, h: p.held() ? p.held().id : 0, ar: p.armor.map(a => a ? a.id : 0), hp: p.hp, cr: G.gameMode === 'creative', sp: G.gameMode === 'spectator', dead: p.dead, sw: p.swing, gl: p.gliding });
-  if (G.tick % 100 === 0) netSend({ t: 'st', s: playerState(p) });
+  if (G.rtick % 100 === 0) netSend({ t: 'st', s: playerState(p) });
 }
 function smoothProxies(dt) { for (const e of G.entities.values()) { if (!e.proxy) continue; if (e.tx === undefined) continue; if (e.isBoat && e.tr) { const k2 = Math.min(1, dt * 12); for (let i = 0; i < 9; i++) e.rot[i] += (e.tr[i] - e.rot[i]) * k2; e.prot = e.rot; } const k = Math.min(1, dt * 12); const ox = e.x, oz = e.z; e.x += (e.tx - e.x) * k; e.y += (e.ty - e.y) * k; e.z += (e.tz - e.z) * k; e.px = e.x; e.py = e.y; e.pz = e.z; e.pyaw = e.yaw; if (e.type !== 'player') { const hd = Math.hypot(e.x - ox, e.z - oz); e.walk += hd * 1.5; e.walkAmt = lerp(e.walkAmt, Math.min(1, hd / dt / 3), 0.2); } else { const hd = Math.hypot(e.x - ox, e.z - oz); e.walk += hd; e.walkAmt = lerp(e.walkAmt || 0, Math.min(1, hd / Math.max(dt, 0.001) / 4), 0.2); } } }
