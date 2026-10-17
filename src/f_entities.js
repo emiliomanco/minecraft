@@ -402,9 +402,10 @@ function updatePlayerPhysics(p, dt, input) {
   p.inWater = lf === 1 || lm === 1; p.inLava = lf === 2 || lm === 2; p.eyeInWater = le === 1; p.eyeInLava = le === 2;
   const climb = entityInBlock(w, p, d => d.climb);
   // miel (partículas): pegajosa, frena como una telaraña; leche: al tocarla se anulan los efectos de poción
-  const honey = typeof flHoneyAt === 'function' && !spectator && (flHoneyAt(w, p.x, p.y + 0.1, p.z) || flHoneyAt(w, p.x, p.y + 0.9, p.z));
+  const honey = typeof flHoneyAt === 'function' && !spectator && !p.flying && (flHoneyAt(w, p.x, p.y + 0.05, p.z) || flHoneyAt(w, p.x, p.y + 0.9, p.z));
+  if (honey) { const k = Math.exp(-9 * dt); p.vx *= k; p.vz *= k; if (p.vy < -1) p.vy = -1; } // pegado: frena también lo que ya traía
   const web = entityInBlock(w, p, d => d.slow) || honey;
-  if (typeof flMilkAt === 'function' && !spectator && (flMilkAt(w, p.x, p.y + 0.1, p.z) || flMilkAt(w, p.x, p.y + 0.9, p.z)) && Object.keys(p.effects).length) { p.effects = {}; if (p === G.player) { showActionMsg('La leche anuló los efectos'); updateHUD(); } }
+  if (typeof flMilkAt === 'function' && !spectator && (flMilkAt(w, p.x, p.y + 0.02, p.z) || flMilkAt(w, p.x, p.y + 0.9, p.z)) && Object.keys(p.effects).length) { p.effects = {}; if (p === G.player) { showActionMsg('La leche anuló los efectos'); updateHUD(); } }
   const below = blockAt(w, p.x, p.y - 0.05, p.z); const bd = below > 0 ? REG[below] : null;
   // dirección deseada
   let fx = 0, fz = 0; if (input.f) fz -= 1; if (input.b) fz += 1; if (input.l) fx -= 1; if (input.r) fx += 1;

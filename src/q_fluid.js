@@ -932,7 +932,7 @@ function flLiquidAt(world, x, y, z) {
 // ¿hay miel (o leche) en ese punto? (para frenar a las entidades / anular efectos)
 function flTypeAt(world, x, y, z, key) {
   if (typeof FL === 'undefined' || world !== FL.world || !FL.occ || !FL.occ.size) return false; const c = FL.occ.get(FLK(Math.floor(x), Math.floor(y), Math.floor(z)));
-  return !!c && c[key] >= Math.max(3, FL_MIN * 0.5) && y < c.top + 0.15;
+  return !!c && c[key] >= Math.max(2, FL_MIN * 0.15) && y < c.top + 0.25; // basta un charco fino
 }
 function flHoneyAt(world, x, y, z) { return flTypeAt(world, x, y, z, 'nh'); }
 function flMilkAt(world, x, y, z) { return flTypeAt(world, x, y, z, 'nm'); }
