@@ -39,7 +39,7 @@ function fluidTick(w, x, y, z) {
   const meta = w.getMeta(x, y, z);
   if (liq === 1 && w.dim === 'nether') { w.set(x, y, z, 0); fizz(w, x, y, z); return; }
   if (liq === 2 && lavaReact(w, x, y, z, meta)) return;
-  if (typeof flCanSim === 'function' && flCanSim(w, x, y, z)) return flContTick(w, x, y, z, id, liq, meta); // fluido continuo: el volumen que se mueve pasa a partículas
+  // el agua y la lava normales nunca pasan a partículas (solo el cubo las crea); las partículas sí se funden con ellas al tocarlas
   if (liq === 1 && (meta & LIQ_OCEAN)) return oceanTick(w, x, y, z);
   if (!fluidCfg().finite) return legacyFlow(w, x, y, z, id, liq, meta);
   let a = liqAmt(meta); const delay = fluidDelay(w, liq, false);

@@ -589,7 +589,7 @@ for (const [c, dn] of [['white', 'blanca'], ['orange', 'naranja'], ['yellow', 'a
 defB('tnt', 'Dinamita', { tex: { top: 'tnt_top', bottom: 'tnt_bottom', side: 'tnt_side' }, hard: 0, tnt: true });
 defB('bed', 'Cama', { render: 'shape', shape: 'bed', solid: true, box: [0, 0, 0, 16, 9, 16], tex: { top: 'bed_top', side: 'bed_side', bottom: 'oak_planks' }, hard: 0.2, ui: 'bed' });
 defB('spawner', 'Generador de monstruos', { trans: 1, hard: 5, tool: 'pickaxe', lvl: 1, drop: null });
-defB('sponge', 'Esponja', { hard: 0.6 });
+defB('sponge', 'Bloque de esponja', { hard: 0.6 });
 defB('wet_sponge', 'Esponja mojada', { hard: 0.6 });
 defB('prismarine', 'Prismarina', { hard: 1.5, tool: 'pickaxe', lvl: 1 });
 defB('prismarine_bricks', 'Ladrillos de prismarina', { hard: 1.5, tool: 'pickaxe', lvl: 1 });
@@ -741,7 +741,7 @@ defI('spyglass', 'Catalejo', { stack: 1, spyglass: true }); defI('map', 'Mapa', 
 defI('turtle_helmet', 'Caparazón de tortuga', { stack: 1, armor: { slot: 0, pts: 2, mat: 'turtle', tough: 0 }, dur: 275 });
 defI('trident', 'Tridente', { stack: 1, dur: 250, dmg: 9, trident: true }); defI('crossbow', 'Ballesta', { stack: 1, dur: 465, bow: true, crossbow: true });
 defI('mace', 'Maza', { stack: 1, dur: 500, dmg: 6, mace: true });
-defI('one_hit_obliterator', 'One-Hit Obliterator', { stack: 1, dmg: 1e9, obliterator: true }); // sin receta: solo en el menú creativo defI('heavy_core', 'Núcleo denso');
+defI('heavy_core', 'Núcleo denso');
 defI('experience_bottle', 'Frasco de experiencia', { throwable: 'xpbottle' }); defI('brush', 'Brocha', { stack: 1, dur: 64 }); defI('fishing_rod', 'Caña de pescar', { stack: 1, dur: 64 });
 defI('broom', 'Escoba', { stack: 1, broom: true }); defI('oak_boat', 'Bote', { stack: 1, boatItem: true });
 const TOOLMAT = { wooden: { lvl: 1, speed: 2, dur: 59, dmg: 0, n: 'madera', col: [137, 103, 59] }, stone: { lvl: 2, speed: 4, dur: 131, dmg: 1, n: 'piedra', col: [130, 130, 130] }, iron: { lvl: 3, speed: 6, dur: 250, dmg: 2, n: 'hierro', col: [220, 220, 220] }, golden: { lvl: 1, speed: 12, dur: 32, dmg: 0, n: 'oro', col: [250, 220, 70] }, diamond: { lvl: 4, speed: 8, dur: 1561, dmg: 3, n: 'diamante', col: [80, 230, 220] }, netherite: { lvl: 5, speed: 9, dur: 2031, dmg: 4, n: 'netherita', col: [80, 70, 75] } };
@@ -756,6 +756,9 @@ for (const m in ARMORMAT) ARMORPART.forEach(([p, dn, du], slot) => {
 });
 // (añadir objetos nuevos siempre al final para no cambiar los IDs guardados)
 defI('fire_extinguisher', 'Extintor', { stack: 1, dur: 400, extinguisher: true });
+defI('one_hit_obliterator', 'One-Hit Obliterator', { stack: 1, dmg: 1e9, obliterator: true }); /* sin receta: solo en el menú creativo */
+defI('flamethrower', 'Lanzallamas', { stack: 1, dur: 600, flamethrower: true });
+defI('sponge_item', 'Esponja', { stack: 1, pbfSponge: true }); /* borra partículas de agua y lava del fluido continuo */
 // ---- codificación del meta de líquidos (agua/lava), compartida por simulación (k_fluids), mallado y render:
 //  bits 0-2: volumen en octavos (0 = bloque lleno 8/8, 1..7 = n/8)
 //  bit 3 (8): cayendo (columna vertical / chorro)
@@ -1236,6 +1239,8 @@ function itemTexAuto(p, name) {
     brush: () => { for (let i = 0; i < 7; i++) p.set(3 + i, 12 - i, [150, 110, 60]); p.rect(9, 2, 13, 6, [220, 200, 160]); outline(p); }, oak_boat: () => { for (let x = 1; x < 15; x++) { const d = Math.abs(x - 7.5); const y0 = 8 + Math.max(0, d - 4.5) * 0.9; for (let y = Math.round(y0); y < 13; y++) p.set(x, y, [150, 115, 65].map(v => v + (p.r() - 0.5) * 18 - (y === 12 ? 30 : 0))); } p.rect(6, 6, 7, 11, [110, 80, 45]); outline(p); }, broom: () => { for (let i = 0; i < 9; i++) p.set(12 - i, 1 + i, [125, 90, 50]); for (let y = 9; y < 15; y++) for (let x = 1; x < 7; x++) if (x + (14 - y) * 0.5 < 8 && x - (y - 9) * 0.4 > 0) p.set(x, y, [205, 175, 80].map(v => v + (p.r() - 0.5) * 30)); p.rect(3, 9, 5, 10, [150, 60, 40]); outline(p); }, fishing_rod: () => { for (let i = 0; i < 12; i++) p.set(2 + i, 13 - i, [120, 90, 50]); for (let y = 2; y < 14; y++) p.set(13, y, [230, 230, 230]); },
     beetroot: () => { blob([170, 30, 50], 4.5); p.rect(7, 2, 8, 4, [60, 140, 40]); }, beetroot_seeds: () => { for (let i = 0; i < 6; i++) p.set(4 + ((p.r() * 8) | 0), 6 + ((p.r() * 6) | 0), [150, 110, 60]); }, beetroot_soup: () => { for (let y = 7; y < 13; y++) for (let x = 3; x < 13; x++) if (Math.hypot((x - 7.5) / 5, (y - 7) / 5.5) < 1) p.set(x, y, [140, 100, 60]); p.rect(4, 7, 11, 8, [170, 30, 50]); outline(p); },
     fire_extinguisher: () => { p.rect(5, 4, 10, 14, [200, 30, 30]); p.rect(6, 5, 7, 13, [240, 80, 70]); p.rect(9, 5, 9, 13, [140, 15, 15]); p.rect(5, 8, 10, 9, [230, 230, 230]); p.rect(6, 2, 9, 3, [40, 40, 40]); p.rect(9, 1, 12, 1, [60, 60, 60]); p.rect(3, 2, 5, 2, [40, 40, 40]); p.rect(2, 3, 2, 9, [30, 30, 30]); outline(p); },
+    flamethrower: () => { for (let i = 0; i < 9; i++) { p.set(4 + i, 11 - i, [90, 90, 98]); p.set(5 + i, 11 - i, [140, 140, 150]); } p.rect(2, 9, 6, 14, [190, 70, 30]); p.rect(3, 10, 4, 13, [235, 125, 60]); p.rect(6, 12, 8, 13, [60, 60, 66]); p.set(14, 2, [120, 170, 255]); p.set(13, 1, [255, 190, 80]); p.set(14, 1, [255, 235, 150]); p.set(15, 1, [255, 150, 40]); p.set(15, 0, [255, 120, 30]); outline(p); },
+    sponge_item: () => { for (let y = 4; y < 13; y++) for (let x = 2; x < 14; x++) if (Math.hypot((x - 7.5) / 5.6, (y - 8.5) / 4.4) < 1) p.set(x, y, [228, 208, 75].map(v => v + (p.r() - 0.5) * 22)); for (let k = 0; k < 12; k++) p.set(4 + ((p.r() * 8) | 0), 6 + ((p.r() * 6) | 0), [165, 140, 38]); outline(p); },
     experience_bottle: () => { for (let y = 5; y < 15; y++) for (let x = 4; x < 12; x++) if (Math.hypot(x - 7.5, y - 10) < 4.2) p.set(x, y, [120, 230, 90]); p.rect(7, 2, 8, 5, [200, 220, 240]); outline(p); },
     saddle: () => blob([120, 70, 40], 5), name_tag: () => { p.rect(3, 5, 12, 10, [220, 210, 180]); outline(p); }, netherite_upgrade: () => { p.rect(3, 2, 12, 13, [60, 50, 50]); p.rect(5, 4, 10, 11, [110, 90, 85]); outline(p); },
   };
@@ -3320,7 +3325,7 @@ const R = { gl: null, q: 2, dyn: 1, progs: {}, fbo: {}, w: 1, h: 1, view: M4.cre
 const GLSL_COMMON = `
 precision highp float; precision highp int; precision highp sampler2DArray; precision highp sampler2DShadow;
 uniform vec3 u_sunDir; uniform vec3 u_sunReal; uniform vec3 u_sunCol; uniform vec3 u_amb; uniform vec3 u_camPos;
-uniform float u_time; uniform float u_tide; uniform int u_dim; uniform float u_rain; uniform vec3 u_fogCol; uniform vec2 u_fog; uniform float u_under; uniform float u_bright; uniform float u_expo;
+uniform float u_time; uniform float u_tide; uniform int u_dim; uniform float u_rain; uniform float u_wet; uniform vec3 u_fogCol; uniform vec2 u_fog; uniform float u_under; uniform float u_bright; uniform float u_expo;
 uniform sampler2DShadow u_shadow; uniform mat4 u_shadowVP; uniform float u_shadowOn; uniform float u_shadowTexel;
 uniform sampler2DShadow u_shadow2; uniform mat4 u_shadowVP2; uniform float u_shadowTexel2; uniform float u_shadowFar;
 uniform vec4 u_lp[8]; uniform vec3 u_lc[8]; uniform int u_nl;
@@ -3536,6 +3541,16 @@ void main(){
     vec3 cc=floor(v_world/cs), cf=fract(v_world/cs); vec3 rr=vec3(hash13(cc),hash13(cc+17.17),hash13(cc+41.3));
     if(rr.x<0.06){ vec3 fn=normalize(N+(rr-0.5)*0.8); vec3 Hs=normalize(u_sunDir-V); float g=pow(max(dot(fn,Hs),0.0),800.0)*(1.0-smoothstep(0.1,0.35,length(cf-0.25-0.5*rr.yzx)));
       col+=u_sunCol*direct*g*25.0*(1.0-snowComp)*(1.0-smoothstep(0.08,0.5,fpS)); }
+  }
+  // suelo mojado por la lluvia: lo que ve el cielo se oscurece y brilla (reflejo del cielo y del sol); en lo horizontal
+  // quedan manchas de agua más lisas, como charquitos
+  if(u_wet>0.01 && u_dim==0 && !snowS && (fl&(128u|256u|512u|1024u|4096u|8192u))==0u && alpha>0.5){
+    float wk=u_wet*smoothstep(0.86,0.97,sky); float upF=clamp(N.y,0.0,1.0);
+    float pud=smoothstep(0.62,0.8,vnoise(v_world.xz*0.33)+vnoise(v_world.xz*1.4)*0.25)*upF*smoothstep(0.45,1.0,u_wet);
+    col*=mix(1.0,0.6,wk*(0.5+0.5*upF));
+    vec3 Rw=reflect(V,N); float frw=0.04+0.96*pow(1.0-max(dot(-V,N),0.0),5.0); float gw=wk*(0.12+0.3*upF+0.58*pud);
+    col=mix(col,skyColor(Rw)*0.55*sky,clamp(frw*gw,0.0,1.0));
+    col+=u_sunCol*direct*pow(max(dot(Rw,u_sunDir),0.0),40.0+260.0*pud)*gw*(0.3+1.5*pud);
   }
   if((fl&256u)!=0u && (fl&128u)==0u) col=alb*2.4+col*0.3;
   if((fl&128u)!=0u){
@@ -4164,7 +4179,7 @@ function setCommon(P) {
   const gl = R.gl, u = P.u;
   if (u.u_sunDir) gl.uniform3fv(u.u_sunDir, ENV.sunDir); if (u.u_sunReal) gl.uniform3fv(u.u_sunReal, ENV.sunReal); if (u.u_sunCol) gl.uniform3fv(u.u_sunCol, ENV.sunCol);
   if (u.u_amb) gl.uniform3fv(u.u_amb, ENV.amb); if (u.u_camPos) gl.uniform3fv(u.u_camPos, R.cam); if (u.u_time) gl.uniform1f(u.u_time, R.time); if (u.u_tide) gl.uniform1f(u.u_tide, oceanTide());
-  if (u.u_dim) gl.uniform1i(u.u_dim, R.dimIdx); if (u.u_rain) gl.uniform1f(u.u_rain, G.rainLevel || 0); if (u.u_fogCol) gl.uniform3fv(u.u_fogCol, ENV.fogCol);
+  if (u.u_dim) gl.uniform1i(u.u_dim, R.dimIdx); if (u.u_rain) gl.uniform1f(u.u_rain, G.rainLevel || 0); if (u.u_wet) gl.uniform1f(u.u_wet, G.mode === 'game' ? G.wet || 0 : 0); if (u.u_fogCol) gl.uniform3fv(u.u_fogCol, ENV.fogCol);
   if (u.u_fog) gl.uniform2fv(u.u_fog, ENV.fog); if (u.u_under) gl.uniform1f(u.u_under, R.under ? 1 : 0); if (u.u_bright) gl.uniform1f(u.u_bright, SETTINGS.brightness); if (u.u_expo) gl.uniform1f(u.u_expo, R.expo || 0.3); if (u.u_camSky) gl.uniform1f(u.u_camSky, R.camSky ?? 1);
   if (u.u_shadowOn) gl.uniform1f(u.u_shadowOn, R.shadowActive ? 1 : 0); if (u.u_shadowVP) gl.uniformMatrix4fv(u.u_shadowVP, false, R.shadowVP);
   if (u.u_shadowTexel) gl.uniform1f(u.u_shadowTexel, 1 / (R.shadowSize || 1));
@@ -4574,6 +4589,7 @@ function updateParticles(dt, world) {
     if (p.collide && world) { const b = world.get(Math.floor(nx), Math.floor(ny), Math.floor(nz)); if (b > 0 && REG[b].solid) { if (p.vy < 0) { ny = Math.floor(ny) + 1.001; p.vy *= -0.3; p.vx *= 0.6; p.vz *= 0.6; } else { p.vx *= -0.3; p.vz *= -0.3; nx = p.x; nz = p.z; } } }
     p.x = nx; p.y = ny; p.z = nz; p.size = Math.max(0.01, p.size + p.grow * dt); p.rot += p.vrot * dt;
     if (p.ext && world) extinguishAt(world, p);
+    if (p.flamer && world) flamerAt(world, p, dt);
     const t = p.life / p.max; p.aCur = p.a * (p.fade ? Math.min(1, t * 2.5) * Math.min(1, (1 - t) * 6 + 0.2) : 1);
     if (p.cool) { const k = Math.min(1, (1 - t) * 1.6); p.g = lerp(p.g0, p.cg, k); p.b = lerp(p.b0, p.cb, k); p.r = lerp(p.r0, p.cr, k); p.emis = k > 0.55 ? 0 : 3.2 * (1 - k / 0.55) + 0.6; }
     L[j++] = p;
@@ -5506,6 +5522,7 @@ shaped('gold_ingot', 1, ['NNN', 'NNN', 'NNN'], { N: 'gold_nugget' }); shapeless(
 shaped('iron_ingot', 1, ['NNN', 'NNN', 'NNN'], { N: 'iron_nugget' }); shapeless('iron_nugget', 9, ['iron_ingot']);
 shaped('bucket', 1, ['I I', ' I '], { I: 'iron_ingot' }); shapeless('flint_and_steel', 1, ['iron_ingot', 'flint']);
 shaped('fire_extinguisher', 1, ['INI', 'I I', 'INI'], { I: 'iron_ingot', N: 'iron_nugget' });
+shaped('flamethrower', 1, ['  F', 'IBI', 'II '], { I: 'iron_ingot', B: 'blaze_rod', F: 'flint_and_steel' }); shapeless('sponge_item', 2, ['sponge']);
 shaped('shears', 1, [' I', 'I '], { I: 'iron_ingot' }); shaped('compass', 1, [' I ', 'IRI', ' I '], { I: 'iron_ingot', R: 'redstone' }); shaped('clock', 1, [' G ', 'GRG', ' G '], { G: 'gold_ingot', R: 'redstone' });
 shaped('bow', 1, [' TS', 'T S', ' TS'], { T: 'stick', S: 'string' }); shaped('arrow', 4, ['F', 'S', 'E'], { F: 'flint', S: 'stick', E: 'feather' });
 shaped('crossbow', 1, ['STS', 'TIT', ' S '], { S: 'stick', T: 'string', I: 'iron_ingot' });
@@ -5689,6 +5706,7 @@ function markDirty(w, x, z, urgent) {
 }
 const NETBATCH = [];
 function onBlockSet(w, x, y, z, old, id, meta) {
+  if (old > 0 && id !== old && old !== ID.fire) for (const [ax, ay, az] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) if (w.get(x + ax, y + ay, z + az) === ID.fire) w.scheduleTick(x + ax, y + ay, z + az, 2, 4); // el fuego de al lado comprueba enseguida si se quedó sin apoyo
   if (old > 0 && REG[old].dynLog && !(id > 0 && REG[id].dynLog) && typeof dynOnRemoved === 'function') dynOnRemoved(w, x, y, z, old); // árbol dinámico: lo que queda suelto cae
   if (old === ID.bed && id !== ID.bed) for (const [dx, dz] of DIR4) { // la otra mitad de la cama se va con esta
     if (w.get(x + dx, y, z + dz) !== ID.bed) continue; const m = w.getMeta(x + dx, y, z + dz); const [fx, fz] = DIR4[m & 3]; const s = m & 4 ? -1 : 1;
@@ -5761,12 +5779,18 @@ function gravityTick(w, x, y, z) {
 function fizz(w, x, y, z) { playSound('fizz', x, y, z, 0.5); if (typeof vfxSmokeEmit === 'function') vfxSmokeEmit(x + 0.5, y + 1, z + 0.5, 1.0, 0.6, 2); for (let i = 0; i < 6; i++) smoke(x + Math.random(), y + 1, z + Math.random(), { r: 0.7, g: 0.7, b: 0.7, a: 0.5, size: 0.4, life: 1.2 }); }
 function fireTick(w, x, y, z) {
   if (w.get(x, y, z) !== ID.fire) return; const below = w.get(x, y - 1, z);
-  if (below > 0 && REG[below].infiniteFire) { return; }
+  // un bloque que conduce el calor justo encima: el agua quieta que tenga encima hierve (un octavo cada vez)
+  const cond = typeof heatConductor === 'function' && heatConductor(w.get(x, y + 1, z));
+  if (cond && w.get(x, y + 2, z) === ID.water && !(w.getMeta(x, y + 2, z) & LIQ_OCEAN) && Math.random() < 0.6) flamerBoilStatic(w, { x, y: y + 2, z, part: 27 }, 0);
+  if (below > 0 && REG[below].infiniteFire) { if (cond) w.scheduleTick(x, y, z, 40 + Math.random() * 20 | 0, 4); return; }
   if (G.rainLevel > 0.5 && w.dim === 'overworld' && w.light(x, y, z)[0] >= 15) { w.set(x, y, z, 0); fizz(w, x, y, z); return; }
   // sin combustible cerca, el fuego se consume poco a poco (no se apaga a golpes)
   let fuel = below > 0 && REG[below].flammable;
   if (!fuel) for (const [ax, ay, az] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, -1]]) { const n = w.get(x + ax, y + ay, z + az); if (n > 0 && REG[n].flammable) { fuel = true; break; } }
-  if (!fuel && Math.random() < 0.06) { w.set(x, y, z, 0); return; }
+  // el fuego no flota: sin suelo firme debajo ni nada inflamable al lado se apaga en el acto
+  const solidBelow = below > 0 && REG[below].solid && !REG[below].replace;
+  if (!fuel && !solidBelow) { w.set(x, y, z, 0); return; }
+  if (!fuel && Math.random() < 0.2) { w.set(x, y, z, 0); return; }
   // fuegos juntos se funden en uno mayor: más calor, se propaga más lejos y consume antes; lanza brasas
   let nbF = 0; for (let ax = -1; ax <= 1; ax++) for (let ay = -1; ay <= 1; ay++) for (let az = -1; az <= 1; az++) if ((ax || ay || az) && w.get(x + ax, y + ay, z + az) === ID.fire) nbF++;
   if (typeof emberEmit === 'function' && Math.random() < 0.12 + nbF * 0.04) emberEmit(w, x, y, z, 1 + nbF * 0.1);
@@ -5799,6 +5823,7 @@ function randomTicks(w, cx, cz) {
     const b = c.blocks[x | z << 4 | y << 8]; if (!b) continue; const wx = cx * 16 + x, wz = cz * 16 + z; const d = REG[b];
     if (d.sapling) { if (Math.random() < 0.15 && w.light(wx, y + 1, wz)[0] >= 9) growSapling(w, wx, y, wz, b); }
     else if (d.dynLog) dynGrowTick(w, wx, y, wz, b);
+    else if (b === ID.fire) fireTick(w, wx, y, wz); // por si perdió su tick programado (al recargar el mundo)
     else if (d.crop) { const m = w.getMeta(wx, y, wz); if (m < 7 && Math.random() < 0.35 && w.light(wx, y, wz)[0] + w.light(wx, y, wz)[1] >= 9) w.set(wx, y, wz, b, m + 1); }
     else if (b === ID.grass_block) { const a = w.get(wx, y + 1, wz); if (a > 0 && T_FULL[a]) w.set(wx, y, wz, ID.dirt); else for (let i = 0; i < 2; i++) { const nx = wx + (Math.random() * 3 | 0) - 1, ny = y + (Math.random() * 3 | 0) - 1, nz = wz + (Math.random() * 3 | 0) - 1; if (w.get(nx, ny, nz) === ID.dirt && w.get(nx, ny + 1, nz) === 0 && w.light(nx, ny + 1, nz)[0] >= 9) w.set(nx, ny, nz, ID.grass_block); } }
     else if (d.leaves && !(w.getMeta(wx, y, wz) & 1)) { let found = false; for (let dx = -4; dx <= 4 && !found; dx++) for (let dy = -4; dy <= 4 && !found; dy++) for (let dz = -4; dz <= 4 && !found; dz++) { const o = w.get(wx + dx, y + dy, wz + dz); if (o > 0 && REG[o].log) found = true; } if (!found) { w.set(wx, y, wz, 0); dropBlockItems(w, wx, y, wz, b, null, true); } }
@@ -5956,13 +5981,14 @@ function furnaceTick() {
   }
 }
 // ------------------------------------------------------------ comandos
+const GAMERULES = ['keepInventory', 'doWaterDespawn', 'doDaylightCycle', 'doWeatherCycle'];
 function runCommandBase(cmd) { // los comandos de siempre; runCommand (u_cmds.js) atiende antes /tp, /weather, /tick y /kill
   const a = cmd.trim().slice(1).split(/\s+/); const c = a[0].toLowerCase(); const p = G.player;
   const allowed = G.cheats !== false || (G.net && G.net.role === 'host');
   if (!allowed && c !== 'help' && c !== 'seed') return chatMsg('Los trucos no están activados en este mundo.', '#f88');
   const num = (v, cur) => v === undefined ? cur : v.startsWith('~') ? cur + (+v.slice(1) || 0) : +v;
   switch (c) {
-    case 'help': chatMsg('Comandos: /gamemode, /time, /weather, /tp, /give, /kill, /seed, /summon, /spawnpoint, /difficulty, /locate, /clear, /dimension, /gamerule keepInventory, /effect'); break;
+    case 'help': chatMsg('Comandos: /gamemode, /time, /weather, /tp, /give, /kill, /seed, /summon, /spawnpoint, /difficulty, /locate, /clear, /dimension, /gamerule <regla>, /effect'); break;
     case 'gamemode': case 'gm': { const m = { survival: 'survival', s: 'survival', '0': 'survival', creative: 'creative', c: 'creative', '1': 'creative', spectator: 'spectator', sp: 'spectator', '3': 'spectator', adventure: 'adventure', a: 'adventure', '2': 'adventure' }[a[1]]; if (!m) return chatMsg('Uso: /gamemode <survival|creative|spectator|adventure>', '#f88'); setGameMode(m); chatMsg('Modo de juego cambiado a ' + ({ survival: 'Supervivencia', creative: 'Creativo', spectator: 'Espectador', adventure: 'Aventura' })[m]); break; }
     case 'time': { if (a[1] === 'set') { const v = { day: 1000, noon: 6000, night: 13000, midnight: 18000, sunrise: 23000, sunset: 12000 }[a[2]] ?? +a[2]; G.time = Math.floor(G.time / 24000) * 24000 + (v || 0); } else if (a[1] === 'add') G.time += +a[2] || 0; else return chatMsg('Hora: ' + (G.time % 24000)); chatMsg('Hora establecida a ' + (G.time % 24000)); if (G.net && G.net.role === 'host') netBroadcast({ t: 'time', v: G.time }); break; }
     case 'weather': G.rain = a[1] === 'rain' || a[1] === 'thunder' ? 1 : 0; G.rainTimer = 12000; chatMsg('Clima: ' + (G.rain ? 'lluvia' : 'despejado')); break;
@@ -5976,7 +6002,15 @@ function runCommandBase(cmd) { // los comandos de siempre; runCommand (u_cmds.js
     case 'locate': { const name = (a[2] || a[1] || '').replace('structure', ''); const map = { village: 'village', aldea: 'village', stronghold: 'stronghold', fortaleza: 'stronghold', trial_chambers: 'trial_chambers', ancient_city: 'ancient_city', mansion: 'mansion', monument: 'monument', desert_pyramid: 'desert_pyramid', pyramid: 'desert_pyramid', pillager_outpost: 'pillager_outpost', outpost: 'pillager_outpost', mineshaft: 'mineshaft', shipwreck: 'shipwreck', jungle_temple: 'jungle_temple', fortress: 'nether_fortress', nether_fortress: 'nether_fortress', bastion: 'bastion', bastion_remnant: 'bastion', end_city: 'end_city', ruined_portal: 'ruined_portal', dungeon: 'dungeon' }; const st = map[name]; if (!st) return chatMsg('Estructuras: ' + Object.keys(map).join(', '), '#f88'); const sd = STRUCTS.find(s => s.name === st); if (sd.dim !== p.dim) return chatMsg('Esa estructura no está en esta dimensión.', '#f88'); const r = p.world.gen.structuresNear(st, p.x, p.z); if (!r) return chatMsg('No se encontró cerca.', '#f88'); chatMsg('La estructura más cercana está en X=' + r.x + ' Z=' + r.z + ' (' + Math.round(Math.hypot(r.x - p.x, r.z - p.z)) + ' bloques)', '#8f8'); break; }
     case 'clear': p.inv.fill(null); p.armor.fill(null); updateHUD(); chatMsg('Inventario vaciado'); break;
     case 'dimension': case 'tpdim': { const d = a[1]; if (!G.worlds[d]) return chatMsg('Uso: /dimension <overworld|nether|end>', '#f88'); if (d === 'end') travelPortal(p, 2); else { const w = G.worlds[d]; const x = d === 'nether' ? p.x / 8 : p.x * 8, z = d === 'nether' ? p.z / 8 : p.z * 8; ensureArea(w, x, z, 1); let y = d === 'nether' ? 64 : w.surfaceY(Math.floor(x), Math.floor(z)) + 1; if (d === 'nether') { for (let yy = 40; yy < 110; yy++) if (w.get(Math.floor(x), yy - 1, Math.floor(z)) > 0 && REG[w.get(Math.floor(x), yy - 1, Math.floor(z))].solid && w.get(Math.floor(x), yy, Math.floor(z)) === 0 && w.get(Math.floor(x), yy + 1, Math.floor(z)) === 0) { y = yy; break; } } changeDim(p, d, x, y, z); } break; }
-    case 'gamerule': if ((a[1] || '').toLowerCase() === 'keepinventory') { G.keepInventory = a[2] === 'true'; chatMsg('keepInventory = ' + G.keepInventory); } break;
+    case 'gamerule': { // reglas del mundo (se guardan con él)
+      const k = GAMERULES.find(r => r.toLowerCase() === (a[1] || '').toLowerCase());
+      if (!k) { chatMsg('Reglas: ' + GAMERULES.join(', '), '#f88'); break; }
+      const cur = k === 'doWaterDespawn' || k === 'keepInventory' ? !!G[k] : G[k] !== false;
+      if (a[2] === undefined) { chatMsg('La regla ' + k + ' está en: ' + cur); break; }
+      if (a[2] !== 'true' && a[2] !== 'false') { chatMsg('Valor no válido: usa true o false', '#f88'); break; }
+      G[k] = a[2] === 'true'; chatMsg('La regla ' + k + ' ahora es: ' + G[k]);
+      if (G.net && G.net.role === 'host') netSend({ t: 'rules', keep: G.keepInventory, dc: G.doDaylightCycle !== false, wc: G.doWeatherCycle !== false, wd: !!G.doWaterDespawn });
+      break; }
     case 'effect': { const e = a[2] || a[1]; const map = { speed: 'speed', velocidad: 'speed', regeneration: 'regen', jump_boost: 'jump', haste: 'haste', resistance: 'resistance', night_vision: 'night' }; if (map[e]) { p.effects[map[e]] = 20 * (+a[3] || 60); chatMsg('Efecto aplicado: ' + e); } else chatMsg('Efectos: ' + Object.keys(map).join(', ')); break; }
     default: chatMsg('Comando desconocido. Escribe /help', '#f88');
   }
@@ -6208,7 +6242,7 @@ const CREATIVE_TABS = [['Construcción', i => { const d = REG[i]; return d.isBlo
   ['Colores', i => /wool|terracotta|glass|concrete|carpet/.test(REG[i].name)],
   ['Naturales', i => { const d = REG[i]; return d.isBlock && (/ore|log|leaves|sand|gravel|dirt|grass|nylium|sapling|flower|mushroom|cactus|snow|ice|stone$|netherrack|soul|end_stone|moss|sculk|dripstone|clay|mud|basalt|blackstone|kelp|seagrass|lily|vine|fungus|roots|stem|wart|melon|pumpkin|bush|fern|poppy|dandelion|orchid|cornflower|daisy|amethyst|cane|chorus|petals|debris/.test(d.name)); }],
   ['Funcionales', i => { const d = REG[i]; return d.isBlock && (d.ui || d.light || /portal|spawner|bed|tnt|bars|fence|wall|rail|ladder|slab|scaffold|lever|button|plate|rod|lamp|detector|target|note|slime|honey/.test(d.name)); }],
-  ['Herramientas', i => { const d = REG[i]; return !d.isBlock && (d.tool && d.tool.type !== 'sword' || /bucket|flint_and|extinguisher|shears|compass|clock|spyglass|map|lead|brush|broom|boat|fishing|rocket|saddle|name_tag|bone_meal|eye_of|ender_pearl/.test(d.name)); }],
+  ['Herramientas', i => { const d = REG[i]; return !d.isBlock && (d.tool && d.tool.type !== 'sword' || /bucket|flint_and|extinguisher|flamethrower|sponge_item|shears|compass|clock|spyglass|map|lead|brush|broom|boat|fishing|rocket|saddle|name_tag|bone_meal|eye_of|ender_pearl/.test(d.name)); }],
   ['Combate', i => { const d = REG[i]; return !d.isBlock && (d.armor || (d.tool && d.tool.type === 'sword') || /bow|arrow|shield|trident|mace|totem|elytra|snowball|obliterator/.test(d.name) || (d.tool && d.tool.type === 'axe')); }],
   ['Comida', i => !REG[i].isBlock && !!REG[i].food],
   ['Ingredientes', i => { const d = REG[i]; return !d.isBlock && !d.food && !d.tool && !d.armor && !d.dur && !d.bucket && !/bow|arrow|shield|trident|mace|totem|elytra/.test(d.name); }],
@@ -6460,6 +6494,8 @@ function useItem(hit) {
   if (d.trident) { p.bowT = 0.01; return 'hold'; }
   if (d.spyglass) { p.spy = true; return 'hold'; }
   if (d.extinguisher) { sprayExtinguisher(p); return 'hold'; }
+  if (d.flamethrower) { sprayFlamethrower(p); return 'hold'; }
+  if (d.pbfSponge) { spongeUse(p); return 'hold'; }
   if (d.broom) { broomUse(p); return 'hold'; }
   if (d.throwable) {
     const dir = lookDir(p);
@@ -6706,13 +6742,13 @@ function hostHandle(c, m) {
       const st = n.states[name]; const sp = G.worldSpawn;
       const e = new Entity('player', st ? st.dim : 'overworld', st ? st.x : sp.x, st ? st.y : sp.y, st ? st.z : sp.z); e.remotePlayer = true; e.conn = c; e.name = name; e.state = st; e.armor = []; e.w = 0.6; e.h = 1.8; e.hp = 20;
       G.entities.set(e.id, e); c.ent = e; n.peers = n.conns.size;
-      c.send({ t: 'welcome', id: e.id, name, seed: G.seed, climate: G.climate, dyn: !!G.dynTrees, seedStr: G.seedStr, worldName: G.worldName, gm: G.gameMode, time: G.time, diff: G.difficulty, dk: G.dragonKilled, ei: G.endInit, gw: G.gateway, st: st || null, spawn: sp, hostName: G.player.name, hostId: G.player.id, keep: G.keepInventory });
+      c.send({ t: 'welcome', id: e.id, name, seed: G.seed, climate: G.climate, dyn: !!G.dynTrees, seedStr: G.seedStr, worldName: G.worldName, gm: G.gameMode, time: G.time, diff: G.difficulty, dk: G.dragonKilled, ei: G.endInit, gw: G.gateway, st: st || null, spawn: sp, hostName: G.player.name, hostId: G.player.id, keep: G.keepInventory, rules: { dc: G.doDaylightCycle !== false, wc: G.doWeatherCycle !== false, wd: !!G.doWaterDespawn } });
       const chunks = modifiedChunks(); for (let i = 0; i < chunks.length; i += 8) c.send({ t: 'chunks', list: chunks.slice(i, i + 8) });
       c.send({ t: 'ready' });
       chatMsg(name + ' se unió al juego', '#ff8'); netBroadcast({ t: 'chat', m: name + ' se unió al juego', sys: true }, c);
       break;
     }
-    case 'p': { const e = c.ent; if (!e) return; e.px = e.x; e.py = e.y; e.pz = e.z; e.x = m.x; e.y = m.y; e.z = m.z; e.yaw = m.yw; e.pitch = m.pt; e.dim = m.dim; e.sneaking = m.sn; e.heldItem = m.h; e.armor = (m.ar || []).map(id => id ? { id } : null); e.hp = m.hp; e.creative = m.cr; e.spectator = m.sp; e.dead = m.dead; e.swing = m.sw; const hd = Math.hypot(e.x - e.px, e.z - e.pz); e.walk = (e.walk || 0) + hd; e.walkAmt = Math.min(1, hd * 5); e.gliding = m.gl; break; }
+    case 'p': { const e = c.ent; if (!e) return; if (e.dim !== m.dim && e.nbuf) e.nbuf.length = 0; netSample(e, m.x, m.y, m.z, m.yw, m.pt); e.dim = m.dim; e.sneaking = m.sn; e.heldItem = m.h; e.armor = (m.ar || []).map(id => id ? { id } : null); e.hp = m.hp; e.creative = m.cr; e.spectator = m.sp; e.dead = m.dead; e.swing = m.sw; e.gliding = m.gl; break; }
     case 'sb': { if (!w) return; w.ensure(m.x >> 4, m.z >> 4); w.set(m.x, m.y, m.z, m.id, m.m); break; }
     case 'drop': { const e = dropItem(m.d, m.x, m.y, m.z, m.s, m.vx, m.vy, m.vz, 40); break; }
     case 'proj': { const p = shoot(m.ty, m.d, m.x, m.y, m.z, m.vx, m.vy, m.vz, c.ent, m.ex); break; }
@@ -6723,6 +6759,8 @@ function hostHandle(c, m) {
     case 'st': { if (c.ent) { c.ent.state = m.s; n.states[c.ent.name] = m.s; } break; }
     case 'tnt': { if (!w) return; igniteTNT(w, m.x, m.y, m.z); break; }
     case 'boat': boatNetRecv(c, m); break;
+    case 'flm': { const e = c.ent; if (e && Array.isArray(m.o) && Array.isArray(m.dir)) flamerEmit(G.worlds[e.dim] || G.world, m.o.map(Number), m.dir.map(Number), clamp(+m.dt || 0.05, 0, 0.1), e); break; }
+    case 'spg': { const e = c.ent; if (e && Array.isArray(m.p) && Math.hypot(m.p[0] - e.x, m.p[2] - e.z) < 8) spongeAt(G.worlds[e.dim] || G.world, m.p.map(Number), 1.6); break; }
     case 'brm': { const e = c.ent; if (e && Array.isArray(m.h) && Array.isArray(m.v)) broomPush(e, Math.floor(e.y + 0.01), clamp(+m.dt || 0.05, 0, 0.1), { head: m.h, v: m.v }); break; }
     case 'boom': { if (!w) return; explode(w, m.x, m.y, m.z, m.p, true, null); break; }
     case 'summon': { spawnMob(m.ty, m.d, m.x, m.y, m.z); break; }
@@ -6785,6 +6823,7 @@ function clientHandle(m, resolve, reject) {
     case 'tp': if (G.player) { G.player.x = m.x; G.player.y = m.y; G.player.z = m.z; G.player.vy = 0; G.player.fallDist = 0; } break;
     case 'time': G.time = m.v; if (m.r !== undefined) { if (m.r !== G.rain) G.weatherFast = 80; G.rain = m.r; } break;
     case 'tick': G.tickFrozen = !!m.f; G.tickRate = m.r || 1; break;
+    case 'rules': G.keepInventory = !!m.keep; G.doDaylightCycle = m.dc !== false; G.doWeatherCycle = m.wc !== false; G.doWaterDespawn = !!m.wd; break;
     case 'chat': chatMsg(m.m, m.sys ? '#ff8' : null); break;
     case 'cd': if (UI.pendingKey === m.k) { UI.pendingKey = null; openScreen(m.kind, { c: m.c, key: m.k, block: m.b, title: REG[m.b].disp }); } break;
     case 'fx': if (m.k === 'boom') explosionFX(m.d, m.x, m.y, m.z, m.p); break;
@@ -6798,7 +6837,7 @@ function updateProxyPlayers(list) {
   for (const o of list) {
     if (o.i === G.myNetId) continue; const key = 'pl' + o.i; seen.add(key);
     let e = G.entities.get(key); if (!e) { e = new Entity('player', o.d, o.x, o.y, o.z); e.proxy = true; e.hostId = o.i; e.name = o.n; e.w = 0.6; e.h = 1.8; G.entities.set(key, e); e.id = key; }
-    e.tx = o.x; e.ty = o.y; e.tz = o.z; e.dim = o.d; e.yaw = o.yw; e.pitch = o.pt; e.sneaking = o.sn; e.heldItem = o.h || null; e.armor = (o.ar || []).map(id => id ? { id } : null); e.dead = o.dead; e.spectator = o.sp; e.gliding = o.gl; e.swing = o.sw;
+    if (e.dim !== o.d && e.nbuf) e.nbuf.length = 0; netSample(e, o.x, o.y, o.z, o.yw, o.pt); e.dim = o.d; e.sneaking = o.sn; e.heldItem = o.h || null; e.armor = (o.ar || []).map(id => id ? { id } : null); e.dead = o.dead; e.spectator = o.sp; e.gliding = o.gl; e.swing = o.sw;
   }
   for (const [k, e] of G.entities) if (e.proxy && e.type === 'player' && !seen.has(k)) G.entities.delete(k);
 }
@@ -6810,10 +6849,10 @@ function updateProxyEntities(dim, list) {
       if (MOB[o.ty]) e = new Mob(o.ty, dim, o.x, o.y, o.z); else if (o.ty === 'boat') e = new Boat(dim, o.x, o.y, o.z, 0); else if (o.ty === 'item') e = new ItemEnt(dim, o.x, o.y, o.z, o.s); else { e = new Projectile(o.ty, dim, o.x, o.y, o.z, o.vx || 0, o.vy || 0, o.vz || 0, null); }
       e.proxy = true; e.hostId = o.i; e.id = key; G.entities.set(key, e); e.x = o.x; e.y = o.y; e.z = o.z;
     }
-    e.tx = o.x; e.ty = o.y; e.tz = o.z; e.yaw = o.yw; e.dim = dim;
+    netSample(e, o.x, o.y, o.z, o.yw, o.pt); e.dim = dim;
     if (e instanceof Mob) { e.hp = o.hp; e.hurtTime = o.ht; e.fuse = o.f; e.open = o.op; e.deathTime = o.dt; e.dead = o.dt > 0; if (o.c) e.color = o.c; e.target = o.tg ? G.player : null; e.laser = o.lt ? 1 : 0; e.laserT = o.lt ? (o.lt === G.myNetId ? G.player : G.entities.get('pl' + o.lt)) : null; e.swing = o.sw; }
     else if (e.isBoat) boatNetApply(e, o);
-    else if (e.type === 'item') e.stack = o.s; else if (o.b) e.block = o.b; if (o.fu !== undefined) e.fuse = o.fu; if (o.pt !== undefined) e.pitch = o.pt;
+    else if (e.type === 'item') e.stack = o.s; else if (o.b) e.block = o.b; if (o.fu !== undefined) e.fuse = o.fu;
   }
   for (const [k, e] of G.entities) if (e.proxy && e.type !== 'player' && e.dim === dim && !seen.has(k)) G.entities.delete(k);
 }
@@ -6822,7 +6861,27 @@ function clientNetTick() {
   netSend({ t: 'p', x: +p.x.toFixed(3), y: +p.y.toFixed(3), z: +p.z.toFixed(3), yw: +p.yaw.toFixed(3), pt: +p.pitch.toFixed(3), dim: p.dim, sn: p.sneaking, h: p.held() ? p.held().id : 0, ar: p.armor.map(a => a ? a.id : 0), hp: p.hp, cr: G.gameMode === 'creative', sp: G.gameMode === 'spectator', dead: p.dead, sw: p.swing, gl: p.gliding });
   if (G.rtick % 100 === 0) netSend({ t: 'st', s: playerState(p) });
 }
-function smoothProxies(dt) { for (const e of G.entities.values()) { if (!e.proxy) continue; if (e.tx === undefined) continue; if (e.isBoat && e.tr) { const k2 = Math.min(1, dt * 12); for (let i = 0; i < 9; i++) e.rot[i] += (e.tr[i] - e.rot[i]) * k2; e.prot = e.rot; } const k = Math.min(1, dt * 12); const ox = e.x, oz = e.z; e.x += (e.tx - e.x) * k; e.y += (e.ty - e.y) * k; e.z += (e.tz - e.z) * k; e.px = e.x; e.py = e.y; e.pz = e.z; e.pyaw = e.yaw; if (e.type !== 'player') { const hd = Math.hypot(e.x - ox, e.z - oz); e.walk += hd * 1.5; e.walkAmt = lerp(e.walkAmt, Math.min(1, hd / dt / 3), 0.2); } else { const hd = Math.hypot(e.x - ox, e.z - oz); e.walk += hd; e.walkAmt = lerp(e.walkAmt || 0, Math.min(1, hd / Math.max(dt, 0.001) / 4), 0.2); } } }
+// Interpolación de entidades remotas (jugadores y lo que simula el anfitrión): cada posición recibida se guarda con
+// su hora y se dibuja un poco en el pasado (1,6 veces el intervalo entre paquetes), siempre entre dos muestras reales.
+// Antes se movían de golpe al llegar cada paquete (o se suavizaban con el ritmo de los ticks) y temblaban.
+function netSample(e, x, y, z, yaw, pitch) {
+  const t = performance.now(); const b = e.nbuf || (e.nbuf = []); const last = b[b.length - 1];
+  if (last && Math.abs(x - last[1]) + Math.abs(y - last[2]) + Math.abs(z - last[3]) > 12) b.length = 0; // teletransporte: sin interpolar
+  if (last && b.length) { const gap = clamp(t - last[0], 5, 500); e.nGap = e.nGap ? e.nGap * 0.9 + gap * 0.1 : gap; }
+  if (!b.length) { e.x = x; e.y = y; e.z = z; if (yaw !== undefined) e.yaw = yaw; e.px = x; e.py = y; e.pz = z; e.pyaw = e.yaw; }
+  b.push([t, x, y, z, yaw ?? e.yaw ?? 0, pitch ?? e.pitch ?? 0]); if (b.length > 40) b.shift();
+}
+function netInterp(e, dt) {
+  const b = e.nbuf; if (!b || !b.length) return;
+  let rt = performance.now() - clamp((e.nGap || 50) * 1.6 + 15, 50, 320); if (e.nRt && rt < e.nRt && e.nRt - rt < 400) rt = e.nRt; e.nRt = rt; // nunca hacia atrás
+  while (b.length > 2 && b[1][0] <= rt) b.shift();
+  let s; if (b.length === 1 || rt <= b[0][0]) s = b[0]; else { const a = b[0], c = b[1]; const k = clamp((rt - a[0]) / Math.max(1, c[0] - a[0]), 0, 1);
+    s = [0, lerp(a[1], c[1], k), lerp(a[2], c[2], k), lerp(a[3], c[3], k), lerpAngle(a[4], c[4], k), lerp(a[5], c[5], k)]; }
+  const ox = e.x, oz = e.z; e.x = s[1]; e.y = s[2]; e.z = s[3]; e.yaw = s[4]; e.pitch = s[5]; e.px = e.x; e.py = e.y; e.pz = e.z; e.pyaw = e.yaw;
+  const hd = Math.hypot(e.x - ox, e.z - oz); if (hd > 3) return; const pl = e.type === 'player';
+  e.walk = (e.walk || 0) + hd * (pl ? 1 : 1.5); e.walkAmt = lerp(e.walkAmt || 0, Math.min(1, hd / Math.max(dt, 0.001) / (pl ? 4 : 3)), Math.min(1, dt * 10));
+}
+function smoothProxies(dt) { for (const e of G.entities.values()) { if (!e.proxy && !e.remotePlayer) continue; if (e.isBoat && e.tr) { const k2 = Math.min(1, dt * 12); for (let i = 0; i < 9; i++) e.rot[i] += (e.tr[i] - e.rot[i]) * k2; e.prot = e.rot; } netInterp(e, dt); } }
 
 // ===== j_ragdoll.js
 // ============================================================================
@@ -7212,7 +7271,7 @@ function fluidTick(w, x, y, z) {
   const meta = w.getMeta(x, y, z);
   if (liq === 1 && w.dim === 'nether') { w.set(x, y, z, 0); fizz(w, x, y, z); return; }
   if (liq === 2 && lavaReact(w, x, y, z, meta)) return;
-  if (typeof flCanSim === 'function' && flCanSim(w, x, y, z)) return flContTick(w, x, y, z, id, liq, meta); // fluido continuo: el volumen que se mueve pasa a partículas
+  // el agua y la lava normales nunca pasan a partículas (solo el cubo las crea); las partículas sí se funden con ellas al tocarlas
   if (liq === 1 && (meta & LIQ_OCEAN)) return oceanTick(w, x, y, z);
   if (!fluidCfg().finite) return legacyFlow(w, x, y, z, id, liq, meta);
   let a = liqAmt(meta); const delay = fluidDelay(w, liq, false);
@@ -8324,7 +8383,10 @@ void main(){
   v.y-=9.81*u_dt;
   for(int e=0;e<8;e++){ if(e>=u_nEnt) break; vec4 E=u_ent[e], EV=u_entV[e];
     float t=clamp(x.y-E.y,-EV.w,EV.w); vec3 c=vec3(E.x,E.y+t,E.z); vec3 d=x-c; float dl=length(d);
-    if(dl<E.w){ vec3 n=dl>1e-4?d/dl:vec3(0.0,1.0,0.0); v=mix(v,EV.xyz*1.1+n*(E.w-dl)*10.0,0.6); } }
+    if(dl<E.w){ vec3 n=dl>1e-4?d/dl:vec3(0.0,1.0,0.0);
+      // encima de la cabeza: resbala hacia los lados (el agua no se queda apilada sobre el jugador)
+      if(t>EV.w-0.01){ vec2 h=d.xz; float hl=length(h); h=hl>0.03?h/hl:vec2(cos(float(i)*2.39996),sin(float(i)*2.39996)); n=normalize(n+vec3(h.x,0.0,h.y)*1.6); }
+      v=mix(v,EV.xyz*1.1+n*(E.w-dl)*10.0,0.6); } }
   // ladera: en reposo sobre el suelo, buscar (radio 2 bloques) la celda alcanzable más cercana con el suelo más bajo y
   // correr hacia ella; las vecinas del mismo líquido vienen detrás por la cohesión y la viscosidad (XSPH). Si no hay
   // ninguna más baja, la superficie es plana y se queda quieta.
@@ -8482,7 +8544,7 @@ function flInit() {
   for (let a = -4; a <= 4; a++) for (let b = -4; b <= 4; b++) for (let c = -4; c <= 4; c++) { const r2 = (a * a + b * b + c * c) * s * s; if (r2 < h * h) raw += K6 * Math.pow(h * h - r2, 3); }
   FL.mass = 1 / raw; FL.kp = FL.mass * K6; FL.ks = -FL.mass * 45 / (Math.PI * Math.pow(h, 6));
   FL.wq = FL.kp * Math.pow(h * h - Math.pow(0.2 * h, 2), 3);
-  FL.phase = new Uint8Array(FL.N); FL.spawnFrame = new Int32Array(FL.N); FL.scale = new Uint8Array(FL.N).fill(255); FL.dying = new Map();
+  FL.phase = new Uint8Array(FL.N); FL.spawnFrame = new Int32Array(FL.N); FL.scale = new Uint8Array(FL.N).fill(255); FL.dying = new Map(); FL.rainTag = new Uint8Array(FL.N);
   FL.scaleTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, FL.scaleTex); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1); gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, FL.W, FL.rows, 0, gl.RED, gl.UNSIGNED_BYTE, FL.scale); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST); FL.voxLoaded = new Set(); FL.hi = 0; FL.alive = 0; FL.ptr = 0; FL.spawnQ.length = 0; FL.killQ.length = 0; FL.world = null;
   FL.rb.pbo = gl.createBuffer(); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, FL.rb.pbo); gl.bufferData(gl.PIXEL_PACK_BUFFER, FL.N * 16, gl.STREAM_READ); FL.rb.pbo2 = gl.createBuffer(); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, FL.rb.pbo2); gl.bufferData(gl.PIXEL_PACK_BUFFER, FL.N * 16, gl.STREAM_READ); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
   FL.rb.sync = null; FL.rb.ready = false; FL.rb.pos = new Float32Array(FL.N * 4); FL.rb.vel = new Float32Array(FL.N * 4);
@@ -8551,7 +8613,7 @@ function flSpawn(x, y, z, vx, vy, vz, phase, temp) {
   if (!FL.ok) return -1; const i = flAlloc(); if (i < 0) return -1; FL.phase[i] = phase; FL.spawnFrame[i] = FL.frame + 1; FL.alive++; if (i + 1 > FL.hi) FL.hi = i + 1;
   FL.spawnQ.push(i, x - FL.org[0], y - FL.org[1], z - FL.org[2], phase, vx, vy, vz, temp ?? (phase === 2 ? 1 : 0)); return i;
 }
-function flKill(i) { if (!FL.phase[i]) return; FL.phase[i] = 0; if (FL.scale[i] !== 255) { FL.scale[i] = 255; FL.scaleDirty = true; } FL.alive--; if (i < FL.ptr) FL.ptr = i; FL.killQ.push(i, 0, -1000, 0, 0, 0, 0, 0, 0); }
+function flKill(i) { if (!FL.phase[i]) return; FL.phase[i] = 0; if (FL.rainTag) FL.rainTag[i] = 0; if (FL.scale[i] !== 255) { FL.scale[i] = 255; FL.scaleDirty = true; } FL.alive--; if (i < FL.ptr) FL.ptr = i; FL.killQ.push(i, 0, -1000, 0, 0, 0, 0, 0, 0); }
 // rellena una caja del mundo con partículas en red (separación FL_S) con un poco de desorden; devuelve cuántas
 function flSpawnBox(x0, y0, z0, x1, y1, z1, phase, vx = 0, vy = 0, vz = 0) {
   let n = 0; const s = FL_S;
@@ -8645,9 +8707,9 @@ function flUpdate(dt, w) {
 // cápsulas de las entidades cercanas (empujan el líquido)
 function flEntities(w) {
   const E = FL.ents, V = FL.entV; let n = 0; const o = FL.org;
-  const add = (e, r, hh) => { if (n >= 8) return; const k = n * 4; E[k] = e.x - o[0]; E[k + 1] = e.y + hh - o[1]; E[k + 2] = e.z - o[2]; E[k + 3] = r; V[k] = e.vx || 0; V[k + 1] = e.vy || 0; V[k + 2] = e.vz || 0; V[k + 3] = hh; n++; };
-  const p = G.player; if (p && !p.dead && G.gameMode !== 'spectator') { if (typeof broomColliders === 'function') broomColliders(add); add(p, 0.35, 0.9); }
-  for (const e of G.entities.values()) { if (n >= 8) break; if (e.removed || e.dead || e.dim !== p.dim) continue; if (Math.abs(e.x - p.x) > 24 || Math.abs(e.z - p.z) > 24) continue; if (e instanceof Mob) add(e, Math.max(0.25, (e.w || 0.6) * 0.5), (e.h || 1.8) * 0.5); else if (e.type === 'item') add(e, 0.15, 0.12); }
+  const add = (e, r, hh, cy = hh) => { if (n >= 8) return; const k = n * 4; E[k] = e.x - o[0]; E[k + 1] = e.y + cy - o[1]; E[k + 2] = e.z - o[2]; E[k + 3] = r; V[k] = e.vx || 0; V[k + 1] = e.vy || 0; V[k + 2] = e.vz || 0; V[k + 3] = hh; n++; };
+  const p = G.player; if (p && !p.dead && G.gameMode !== 'spectator') { if (typeof broomColliders === 'function') broomColliders(add); add(p, 0.35, 0.55, 0.9); } // cápsula de 0 a 1,8: no sobresale por encima de la cabeza
+  for (const e of G.entities.values()) { if (n >= 8) break; if (e.removed || e.dead || e.dim !== p.dim) continue; if (Math.abs(e.x - p.x) > 24 || Math.abs(e.z - p.z) > 24) continue; if (e instanceof Mob) { const r = Math.max(0.25, (e.w || 0.6) * 0.5), h = e.h || 1.8; add(e, r, Math.max(0.02, h * 0.5 - r), h * 0.5); } else if (e.type === 'item') add(e, 0.15, 0.12); }
   FL.nEnt = n;
 }
 // lectura asíncrona de POS y VEL (cada ~6 cuadros); FL.rb.pos/vel quedan con la última foto (coordenadas del mundo en flParticles)
@@ -8734,7 +8796,7 @@ void main(){ ivec2 f=ivec2(gl_FragCoord.xy); vec4 c=texelFetch(u_src,f,0); float
 const FS_FLCOMP = `#version 300 es
 precision highp float; precision highp sampler2D;
 ##COMMON##
-uniform sampler2D u_fd, u_ft, u_sceneCopy; uniform mat4 u_proj, u_view; uniform vec2 u_res; uniform float u_ss; out vec4 o;
+uniform sampler2D u_fd, u_ft, u_sceneCopy; uniform mat4 u_proj, u_view; uniform vec2 u_res; uniform float u_ss; uniform float u_camIn; out vec4 o;
 vec3 vor(vec2 p, float tt){ vec2 i=floor(p), f=fract(p); float d1=8.0, d2=8.0, id=0.0;
   for(int y=-1;y<=1;y++) for(int x=-1;x<=1;x++){ vec2 g=vec2(float(x),float(y)); vec2 h=vec2(hash12(i+g),hash12(i+g+17.31)); vec2 r=g+0.5+0.42*sin(tt+6.2831*h)-f; float d=dot(r,r);
     if(d<d1){ d2=d1; d1=d; id=hash12(i+g+3.7); } else if(d<d2) d2=d; }
@@ -8747,7 +8809,7 @@ void main(){
     for(int k=0;k<4;k++){ ivec2 o2=ivec2(k&1,k>>1); float dk=texelFetch(u_fd,clamp(b+o2,ivec2(0),sz-1),0).x; if(dk<=0.0||abs(dk-d)>0.25) continue;
       float w=(o2.x==1?f.x:1.0-f.x)*(o2.y==1?f.y:1.0-f.y)+1e-4; s+=dk*w; ws+=w; } if(ws>0.0) db=s/ws; }
   vec4 Th=texture(u_ft,gl_FragCoord.xy/u_res); float tw=Th.r, tl=Th.g;
-  bool lava=F.y>1.5; if((lava?tl:tw)<0.004) discard;
+  bool lava=F.y>1.5; if((lava?tl:tw)<0.004 && !(u_camIn>0.5 && !lava)) discard;
   // normal: diferencias con el vecino de menor salto en cada eje
   vec3 P=eyeAt(hp,d);
   float dxp=texelFetch(u_fd,min(hp+ivec2(1,0),sz-1),0).x, dxm=texelFetch(u_fd,max(hp-ivec2(1,0),ivec2(0)),0).x;
@@ -8760,7 +8822,12 @@ void main(){
   float NdV=clamp(dot(N,-V),0.0,1.0);
   float sh=u_dim==0?getShadow(wp,N):0.0; vec3 Lsun=u_sunCol*sh;
   vec3 col; float alpha=1.0;
-  if(!lava){
+  if(!lava && u_camIn>0.5){
+    // con la cámara dentro del agua: solo se ve la superficie desde abajo (la profundidad es la más lejana de cada píxel),
+    // con la escena de detrás desviada y reflexión total interna al mirar de lado; la niebla submarina hace el resto
+    vec2 suv=gl_FragCoord.xy/u_res; vec3 behind=texture(u_sceneCopy,clamp(suv+Ne.xy*0.03,0.001,0.999)).rgb;
+    float tir=smoothstep(0.45,0.2,NdV); col=mix(behind,u_fogCol*1.5+u_amb*0.04*u_camSky,tir);
+  } else if(!lava){
     vec2 suv=gl_FragCoord.xy/u_res; vec2 off=Ne.xy*clamp(tw,0.0,1.2)*0.035; // refracción (IOR 1,333): desvía según la normal y el grosor
     vec3 behind=texture(u_sceneCopy,clamp(suv+off,0.001,0.999)).rgb;
     vec3 sA=vec3(0.60,0.16,0.19), sS=vec3(0.014,0.024,0.017), sT=sA+sS;
@@ -8832,9 +8899,10 @@ function flRender() {
   const sphU = P => { gl.useProgram(P.p); gl.uniformMatrix4fv(P.u.u_view, false, R.view); gl.uniformMatrix4fv(P.u.u_proj, false, R.proj); gl.uniform3f(P.u.u_off, off[0], off[1], off[2]); gl.uniform1f(P.u.u_rad, rad);
     flBindTex(P, 'u_pos', 0, FL.pos[FL.cur]); flBindTex(P, 'u_vel', 1, FL.vel[FL.cur]); flBindTex(P, 'u_lam', 2, FL.lam); flBindTex(P, 'u_scl', 9, FL.scaleTex); flBindTex(P, 'u_depthCopy', 3, R.fbo.copy.depth);
     if (P.u.u_near) { gl.uniform1f(P.u.u_near, R.near); gl.uniform1f(P.u.u_far, R.far); } if (P.u.u_res) gl.uniform2f(P.u.u_res, S.w, S.h); };
-  // 1) profundidad
-  gl.bindFramebuffer(gl.FRAMEBUFFER, S.fdA.fb); gl.viewport(0, 0, S.w, S.h); gl.clearColor(0, 0, 0, 0); gl.clearDepth(1); gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LESS); gl.depthMask(true); gl.disable(gl.BLEND);
-  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); sphU(S.sph); if (!(K & 1)) gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, FL.hi);
+  // 1) profundidad (desde dentro del agua, la más lejana: es donde el rayo sale del líquido, no la bolita más cercana)
+  const camIn = typeof flLiquidAt === 'function' && flLiquidAt(G.world, R.cam[0], R.cam[1], R.cam[2]) === 1; FL.camIn = camIn;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, S.fdA.fb); gl.viewport(0, 0, S.w, S.h); gl.clearColor(0, 0, 0, 0); gl.clearDepth(camIn ? 0 : 1); gl.enable(gl.DEPTH_TEST); gl.depthFunc(camIn ? gl.GREATER : gl.LESS); gl.depthMask(true); gl.disable(gl.BLEND);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); sphU(S.sph); if (!(K & 1)) gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, FL.hi); gl.depthFunc(gl.LESS); gl.clearDepth(1);
   // 2) grosor
   gl.bindFramebuffer(gl.FRAMEBUFFER, S.fth.fb); gl.clear(gl.COLOR_BUFFER_BIT); gl.disable(gl.DEPTH_TEST); gl.depthMask(false); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
   sphU(S.thick); if (!(K & 2)) gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, FL.hi); gl.disable(gl.BLEND);
@@ -8843,7 +8911,7 @@ function flRender() {
   if (!(K & 4)) for (let it = 0; it < 3; it++) for (const [dx, dy, src, dst] of [[1, 0, S.fdA, S.fdB], [0, 1, S.fdB, S.fdA]]) { gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fb); flBindTex(P, 'u_src', 0, src.tex); gl.uniform2f(P.u.u_dir, dx, dy); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
   // 4) composición sobre la escena, con prueba de profundidad contra lo ya dibujado (agua quieta incluida)
   gl.bindFramebuffer(gl.FRAMEBUFFER, R.fbo.scene.fb); gl.viewport(0, 0, R.w, R.h); gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LESS); gl.depthMask(true);
-  const C = S.comp; gl.useProgram(C.p); setCommon(C); gl.uniformMatrix4fv(C.u.u_proj, false, R.proj); gl.uniformMatrix4fv(C.u.u_view, false, R.view); gl.uniform2f(C.u.u_res, R.w, R.h); gl.uniform1f(C.u.u_ss, S.ss);
+  const C = S.comp; gl.useProgram(C.p); setCommon(C); gl.uniformMatrix4fv(C.u.u_proj, false, R.proj); gl.uniformMatrix4fv(C.u.u_view, false, R.view); gl.uniform2f(C.u.u_res, R.w, R.h); gl.uniform1f(C.u.u_ss, S.ss); if (C.u.u_camIn) gl.uniform1f(C.u.u_camIn, camIn ? 1 : 0);
   flBindTex(C, 'u_fd', 2, S.fdA.tex); flBindTex(C, 'u_ft', 3, S.fth.tex); flBindTex(C, 'u_sceneCopy', 4, R.fbo.copy.tex);
   if (!(K & 8)) gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   gl.depthFunc(gl.LEQUAL); gl.enable(gl.CULL_FACE); gl.bindVertexArray(null); gl.activeTexture(gl.TEXTURE0);
@@ -8851,10 +8919,10 @@ function flRender() {
 // ============================================================================
 //  Integración con el mundo
 // ============================================================================
-// El líquido quieto (lagos, mar, charcos asentados) sigue guardado en las celdas como volumen y se dibuja como una
-// superficie lisa. Cuando ese volumen puede moverse hacia un hueco (debajo, o al lado si hay caída o si es espeso),
-// se convierte en partículas que fluyen de verdad; las partículas que se calman se vuelven a guardar como volumen
-// nivelado. Las que entran en agua o lava quieta se suman a ella (el mar las absorbe sin límite).
+// El líquido normal (lagos, mar, charcos asentados) sigue guardado en las celdas como volumen, fluye con las reglas
+// de siempre (k_fluids) y nunca se convierte en partículas: solo el cubo las crea. Las partículas que se calman se
+// vuelven a guardar como volumen nivelado, y las que tocan agua o lava normal se suman a ella (el mar las absorbe
+// sin límite). Así no hay idas y vueltas entre los dos estados.
 // El agua puesta con cubo (o derramada) lleva LIQ_PLACED: sobre tierra, pasto, hojas, arena… se va filtrando.
 const LIQ_PLACED = 16;
 let FL_POROUS = null;
@@ -8888,69 +8956,12 @@ function flSpawnCell(w, x, y, z, a, phase, vx, vy, vz) {
   }
   return k;
 }
-// el mar entra en un hueco: un chorro de partículas la primera vez y, al siguiente tick, el hueco ya es mar
-// (las partículas que quedan dentro se las traga). Sin esto el mar soltaba partículas sin fin, porque las
-// partículas nunca vuelven a ser bloques y el hueco seguía vacío.
-FL.oceanPend = new Map();
-function flOceanInto(w, x, y, z, vx, vy, vz) {
-  const k = FLK(x, y, z), t = FL.oceanPend.get(k);
-  if (t !== undefined && G.tick - t < 400) { FL.oceanPend.delete(k); if (cellVol(w, x, y, z, 1) === 0) w.set(x, y, z, ID.water, LIQ_OCEAN); return; }
-  if (FL.oceanPend.size > 4000) FL.oceanPend.clear();
-  FL.oceanPend.set(k, G.tick); flSpawnCell(w, x, y, z, 8, 1, vx, vy, vz); FL.oceanFill.push([G.tick, w, x, y, z]);
-}
 // el hueco ya lleno de partículas no vuelve a pedir agua al mar (las partículas cuentan como líquido): pasado un
 // segundo se convierte en mar igualmente y las partículas que quedan dentro se funden con él
 FL.oceanFill = [];
 function flOceanFillTick() {
   const L = FL.oceanFill; if (!L.length) return;
   while (L.length && G.tick - L[0][0] > 20) { const [, w, x, y, z] = L.shift(); const b = w.get(x, y, z); if (y <= SEA && (b === 0 || (b > 0 && REG[b].liquid === 1 && !(w.getMeta(x, y, z) & LIQ_OCEAN)))) w.set(x, y, z, ID.water, LIQ_OCEAN); }
-}
-// sustituye a fluidTick cuando el fluido continuo está activo en esa celda
-function flContTick(w, x, y, z, id, liq, meta) {
-  const ocean = liq === 1 && (meta & LIQ_OCEAN) !== 0; let a = ocean ? 8 : liqAmt(meta); const placed = (meta & LIQ_PLACED) !== 0;
-  const ph = liq === 2 ? 2 : (placed ? 3 : 1); const lazy = liq === 2 ? 30 : 6;
-  const vb = cellVol(w, x, y - 1, z, liq);
-  // 1) hueco debajo: el líquido cae como fluido
-  if (vb === 0) {
-    if (flFree() < a * 8 + 256) { w.scheduleTick(x, y, z, 20, 0); return; }
-    if (ocean) { if (y - 1 <= SEA) { flOceanInto(w, x, y - 1, z, 0, -0.5, 0); w.scheduleTick(x, y, z, 14, 0); } return; }
-    flSpawnCell(w, x, y, z, a, ph, 0, -0.3, 0); flSetStatic(w, x, y, z, liq, 0); return;
-  }
-  if (vb > 0 && vb < 8) { // dentro del mismo cuerpo: asentar hacia abajo
-    if (ocean) { flSetStatic(w, x, y - 1, z, 1, 8, false); return; }
-    const bp = (w.getMeta(x, y - 1, z) & LIQ_PLACED) !== 0; const mv = Math.min(a, 8 - vb);
-    flSetStatic(w, x, y - 1, z, liq, vb + mv, placed || bp); flSetStatic(w, x, y, z, liq, a - mv, placed); if (a - mv > 0) w.scheduleTick(x, y, z, lazy, 0); return;
-  }
-  if (liq === 1 && vb < 0 && w.get(x, y - 1, z) === ID.lava) { lavaQuench(w, x, y - 1, z, true); return; }
-  // 2) a los lados: hueco con caída, o líquido espeso junto a suelo libre → se derrama como fluido
-  const spill = []; const low = [];
-  for (const [dx, dz] of N4) {
-    const v = cellVol(w, x + dx, y, z + dz, liq);
-    if (v < 0) { if (liq === 1 && w.get(x + dx, y, z + dz) === ID.lava) lavaQuench(w, x + dx, y, z + dz, false); continue; }
-    if (v === 0) { const d = cellVol(w, x + dx, y - 1, z + dz, liq); if ((d >= 0 && d < 8) || a >= (liq === 2 ? 5 : 3)) spill.push([dx, dz]); continue; }
-    if (v <= a - 2) low.push([dx, dz, v]);
-  }
-  if (spill.length) {
-    if (flFree() < a * 8 + 256) { w.scheduleTick(x, y, z, 20, 0); return; }
-    if (ocean) { if (y <= SEA) for (const [dx, dz] of spill) flOceanInto(w, x + dx, y, z + dz, dx * 1.2, 0, dz * 1.2); w.scheduleTick(x, y, z, 14, 0); return; }
-    let sx = 0, sz = 0; for (const [dx, dz] of spill) { sx += dx; sz += dz; } const sp = liq === 2 ? 0.35 : 1.0;
-    flSpawnCell(w, x, y, z, a, ph, sx * sp, 0, sz * sp); flSetStatic(w, x, y, z, liq, 0); return;
-  }
-  // 3) nivelar dentro del cuerpo (pasos pequeños; la superficie lisa lo disimula)
-  if (low.length && !ocean) {
-    let total = a; for (const c of low) total += c[2]; const n = low.length + 1; const base = Math.floor(total / n); let rest = total - base * n;
-    const want = [base, ...low.map(() => base)]; while (rest > 0) { want[(Math.random() * n) | 0]++; rest--; }
-    for (let k = 0; k < low.length; k++) { const [dx, dz, v] = low[k]; if (want[k + 1] !== v) flSetStatic(w, x + dx, y, z + dz, liq, want[k + 1], placed || (w.getMeta(x + dx, y, z + dz) & LIQ_PLACED) !== 0); }
-    if (want[0] !== a) { flSetStatic(w, x, y, z, liq, want[0], placed); w.scheduleTick(x, y, z, lazy, 0); }
-    return;
-  }
-  // 4) agua puesta sobre suelo poroso: se filtra poco a poco
-  if (liq === 1 && placed && !ocean) {
-    const bb = w.get(x, y - 1, z);
-    if (bb > 0 && flPorous(bb)) { flSetStatic(w, x, y, z, 1, a - 1, true); if (a - 1 > 0) w.scheduleTick(x, y, z, 100 + (Math.random() * 60 | 0), 0); return; }
-  }
-  // 5) celda llena junto al mar (y por debajo de su nivel): pasa a ser mar
-  if (liq === 1 && a === 8 && !ocean && y <= SEA) { let oc = 0; for (const [dx, dz] of N4) if (isOcean(w, x + dx, y, z + dz)) oc++; if (oc >= 1 || isOcean(w, x, y + 1, z)) w.set(x, y, z, ID.water, LIQ_OCEAN); }
 }
 // ---------------------------------------------------------------- lo que hacen las partículas (tras cada lectura)
 const FLK = (x, y, z) => ((x + 32768) * 65536 + (z + 32768)) * 512 + (y + 64);
@@ -9061,7 +9072,7 @@ function flDepositComp(w, comp, lava) {
 }
 // charco en calma: el agua sobre suelo poroso (tierra, pasto, hojas, arena…) se filtra poco a poco; la lava se queda
 function flSoak(w, comp, lava, dtR) {
-  if (lava) return;
+  if (lava || !G.doWaterDespawn) return; // /gamerule doWaterDespawn (apagado por defecto)
   for (const c of comp) { if (!c.idx.length) continue; const below = w.get(c.x, c.y - 1, c.z); const here = w.get(c.x, c.y, c.z); const g = (below > 0 && flPorous(below)) || (here > 0 && flPorous(here)); if (!g) continue;
     let n = Math.max(1, Math.round(c.idx.length * dtR * 0.08));
     for (const i of c.idx) { if (n <= 0) break; if (!FL.dying.has(i)) { FL.dying.set(i, (G.wclock ?? performance.now() / 1000) * 1000); n--; } } }
@@ -9087,10 +9098,16 @@ function flSerialize() {
 }
 function flRestore(data) { FL.pending = data; }
 // consultas para la física de las entidades (de la última lectura)
+// ¿celda con líquido de verdad? Pocas partículas sueltas sin nada debajo (gotas sobre la cabeza, salpicaduras) no cuentan
+function flCellWet(world, c) {
+  const n = c.idx.length; if (n < 5) return false; if (n >= FL_PPB * 0.5) return true;
+  const b = world.get(c.x, c.y - 1, c.z); if (b < 0 || (b > 0 && (REG[b].solid || REG[b].liquid))) return true;
+  const d = FL.occ.get(FLK(c.x, c.y - 1, c.z)); return !!d && d.idx.length >= FL_PPB * 0.3;
+}
 function flLiquidAt(world, x, y, z) {
   if (world !== FL.world || !FL.occ.size) return 0; const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z); const c = FL.occ.get(FLK(bx, by, bz));
-  if (c && c.idx.length >= 5 && y < c.top + 0.12) return c.nl > c.nw ? 2 : 1;
-  const u = FL.occ.get(FLK(bx, by + 1, bz)); if (u && u.idx.length >= 5) return u.nl > u.nw ? 2 : 1; // la celda de arriba también tiene: estamos dentro
+  if (c && y < c.top + 0.12 && flCellWet(world, c)) return c.nl > c.nw ? 2 : 1;
+  const u = FL.occ.get(FLK(bx, by + 1, bz)); if (u && c && c.idx.length >= 5 && flCellWet(world, u) && flCellWet(world, c)) return u.nl > u.nw ? 2 : 1; // la celda de arriba también tiene: estamos dentro
   return 0;
 }
 function flSurfIn(world, bx, by, bz) {
@@ -9127,6 +9144,45 @@ function flBucketTake(w, ox, oy, oz, d, maxT) {
   }
   return 0;
 }
+// ---------------------------------------------------------------- charcos de lluvia
+// Con lluvia, en los huecos del suelo que ven el cielo (cerca del jugador) y en algunas manchas del suelo llano van
+// cayendo partículas de agua que forman charcos; cuando deja de llover se evaporan poco a poco (no dependen de
+// /gamerule doWaterDespawn: es agua de lluvia). Solo con el fluido continuo activo.
+const RAINP = { sites: [], siteT: 0, n: 0, countT: 0, acc: 0 };
+function rainSurf(w, x, z, y0) { // bloque sólido más alto bajo el cielo abierto en la columna (o NaN)
+  for (let y = y0 + 16; y > y0 - 14; y--) { const b = w.get(x, y, z); if (b === 0) continue; const d = b > 0 ? REG[b] : null; if (!d || d.liquid || !d.solid || d.leaves || !T_FULL[b]) return NaN; return w.light(x, y + 1, z)[0] >= 15 ? y : NaN; }
+  return NaN;
+}
+function rainPuddleTick(w, dt) {
+  if (!dt || !FL.rainTag || w.dim !== 'overworld' || !flCanSim(w)) return;
+  const p = G.player; const rl = G.rainLevel || 0; const px = Math.floor(p.x), py = Math.floor(p.y), pz = Math.floor(p.z);
+  // cuántas hay (cada 2 s)
+  if ((RAINP.countT -= dt) <= 0) { RAINP.countT = 2; let n = 0; for (let i = 0; i < FL.hi; i++) if (FL.rainTag[i]) n++; RAINP.n = n; }
+  if (rl < 0.15) { // sin lluvia: se evaporan (un 2,5 % por segundo, encogiéndose)
+    if (!RAINP.n) return; RAINP.acc += dt * 0.025 * RAINP.n; let k = Math.floor(RAINP.acc); if (k <= 0) return; RAINP.acc -= k; const now = (G.wclock ?? performance.now() / 1000) * 1000;
+    for (let i = 0; i < FL.hi && k > 0; i++) if (FL.rainTag[i] && FL.phase[i] && !FL.dying.has(i)) { FL.dying.set(i, now); FL.rainTag[i] = 0; RAINP.n--; k--; }
+    return;
+  }
+  // sitios para charcos (cada 2 s): huecos (dos o más vecinos más altos) y manchas fijas del suelo llano
+  if ((RAINP.siteT -= dt) <= 0) { RAINP.siteT = 2; const out = [];
+    for (let t = 0; t < 70 && out.length < 24; t++) {
+      const x = px + ((Math.random() * 29) | 0) - 14, z = pz + ((Math.random() * 29) | 0) - 14; const y = rainSurf(w, x, z, py); if (y !== y) continue;
+      if (!flCanSim(w, x, y + 1, z)) continue; const bio = BIOMES[w.biomeAt(x, z)]; if (!bio || bio.snow || bio.id === BI.desert || bio.id === BI.savanna) continue;
+      let hi = 0, lo = 0; for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const b = w.get(x + dx, y + 1, z + dz); if (b > 0 && REG[b].solid) hi++; else if (rainSurf(w, x + dx, z + dz, py) < y) lo++; }
+      if (lo > 0) continue; // el agua se escurriría
+      if (hi >= 2 || (hashStr(x + ':' + z) % 19) === 0) out.push([x, y + 1, z]);
+    }
+    if (out.length) RAINP.sites = out.concat(RAINP.sites.filter(s => Math.abs(s[0] - px) < 16 && Math.abs(s[2] - pz) < 16)).slice(0, 32);
+  }
+  if (!RAINP.sites.length || RAINP.n > 9000 || flFree() < 20000) return;
+  // gotas que caen en los sitios (hasta unas 150 por charco)
+  RAINP.acc += dt * rl * 260; let k = Math.floor(RAINP.acc); RAINP.acc -= k;
+  while (k-- > 0) {
+    const s = RAINP.sites[(Math.random() * RAINP.sites.length) | 0]; const c = FL.occ.get(FLK(s[0], s[1], s[2])); if (c && c.idx.length > 150) continue;
+    const i = flSpawn(s[0] + 0.12 + Math.random() * 0.76, s[1] + 0.08 + Math.random() * 0.25, s[2] + 0.12 + Math.random() * 0.76, 0, -2, 0, 1); if (i < 0) break; FL.rainTag[i] = 1; RAINP.n++;
+  }
+}
+
 
 // ===== r_snow.js
 // ============================================================================
@@ -9479,6 +9535,157 @@ function broomColliders(add) {
   for (const s of [-0.5, 0, 0.5]) add({ x: BROOM.head[0] + tx * s, y: BROOM.head[1] - 0.15, z: BROOM.head[2] + tz * s, vx: BROOM.v[0], vy: BROOM.v[1], vz: BROOM.v[2] }, 0.36, 0.12);
 }
 
+// ===== x_tools.js
+// ============================================================================
+//  Lanzallamas y esponja
+//  · Lanzallamas: como el extintor, pero el chorro es combustible ardiendo. Prende lo inflamable, a los mobs y la
+//    dinamita; el calor evapora el agua del fluido continuo a la que se apunta un rato. El agua que descansa sobre
+//    un bloque que conduce el calor (hierro, oro, cobre…) con fuego, lava o el chorro justo debajo también hierve.
+//  · Esponja (objeto): con el clic derecho mantenido borra las partículas de agua y lava del fluido continuo
+//    alrededor de donde se apunta. No toca el agua normal ni los océanos.
+// ============================================================================
+const FLAMER = { heat: new Map(), hot: new Map(), scanT: 0, sent: 0 };
+let HEAT_COND = null;
+function heatConductor(b) {
+  if (!HEAT_COND) { HEAT_COND = new Set(); for (const n in ID) { const id = ID[n]; if (!(id > 0) || !REG[id] || !REG[id].isBlock) continue;
+    if (/^(iron_block|gold_block|netherite_block|raw_iron_block|raw_gold_block|cauldron|anvil|iron_trapdoor|iron_bars|lodestone)$/.test(n) || (/copper/.test(n) && !/ore/.test(n))) HEAT_COND.add(id); } }
+  return HEAT_COND.has(b);
+}
+// ¿hay una fuente de calor en esta celda? (fuego, lava, magma, fogata)
+function heatSourceAt(w, x, y, z) { const b = w.get(x, y, z); return b > 0 && (b === ID.fire || b === ID.soul_fire || b === ID.lava || b === ID.magma_block || b === ID.campfire || b === ID.soul_campfire); }
+// llamado cada cuadro mientras se mantiene el clic derecho con el lanzallamas
+function sprayFlamethrower(p) {
+  const now = performance.now(); const dt = Math.min(0.1, (now - (p._flameT || now - 16)) / 1000); p._flameT = now;
+  const dir = lookDir(p); const rx = Math.cos(p.yaw), rz = -Math.sin(p.yaw);
+  const o = [p.x + dir[0] * 0.7 + rx * 0.25, p.eye - 0.3 + dir[1] * 0.7, p.z + dir[2] * 0.7 + rz * 0.25];
+  flamerEmit(p.world, o, dir, dt, p);
+  // en multijugador el anfitrión simula los efectos: se le manda el chorro (unas 20 veces por segundo)
+  if (G.net && G.net.role === 'client' && now - FLAMER.sent > 50) { FLAMER.sent = now; netSend({ t: 'flm', o: o.map(v => +v.toFixed(2)), dir: dir.map(v => +v.toFixed(3)), dt: 0.05 }); }
+  p._flameAcc = (p._flameAcc || 0) + dt; if (p._flameAcc > 0.25) { p._flameAcc = 0; if (G.gameMode !== 'creative') { damageItem(p.inv, p.sel, 1); updateHUD(); } }
+}
+function flamerEmit(w, o, dir, dt, owner) {
+  // bajo el agua no arde: solo vapor
+  if (liquidAt(w, o[0], o[1], o[2]) === 1) { if (Math.random() < dt * 10) smoke(o[0], o[1], o[2], { r: 0.9, g: 0.9, b: 0.95, a: 0.3, life: 1 }); return; }
+  const n = Math.max(1, Math.round(dt * [30, 45, 65][SETTINGS.particles ?? 2]));
+  for (let i = 0; i < n; i++) {
+    const sp = 12 + Math.random() * 4, j = 0.07, t0 = Math.random() * dt; // repartidas a lo largo del cuadro: chorro continuo
+    const vx = (dir[0] + (Math.random() - 0.5) * j * 2) * sp, vy = (dir[1] + (Math.random() - 0.5) * j * 2) * sp, vz = (dir[2] + (Math.random() - 0.5) * j * 2) * sp;
+    const q = P_({ x: o[0] + vx * t0, y: o[1] + vy * t0, z: o[2] + vz * t0, vx, vy, vz, life: 0.55 + Math.random() * 0.35, size: 0.16 + Math.random() * 0.1, grow: 2.4 + Math.random(),
+      r: 1, g: 0.95, b: 0.7, a: 0.95, add: true, emis: 5, drag: 2.6, grav: -2.2, collide: true, layer: TEX['flame_' + ((Math.random() * 3) | 0)], rot: Math.random() * 6, vrot: (Math.random() - 0.5) * 6 });
+    if (q) { q.flamer = true; q.dim = w.dim; q.owner = owner; }
+  }
+  if (Math.random() < dt * 5) playSound('ignite', o[0], o[1], o[2], 0.22);
+  if (typeof vfxSmokeEmit === 'function' && Math.random() < dt * 3) vfxSmokeEmit(o[0] + dir[0] * 4, o[1] + dir[1] * 4 + 0.6, o[2] + dir[2] * 4, 0.5, 0.8, 0);
+}
+// cada partícula del chorro, cada cuadro (desde updateParticles)
+function flamerAt(w, q, dt) {
+  const t = 1 - q.life / q.max; // 0 al salir de la boquilla, 1 al apagarse: de blanco amarillento a naranja oscuro
+  q.g = 0.95 - t * 0.6; q.b = Math.max(0.04, 0.7 - t * 1.4); q.emis = 5 * (1 - t * 0.8);
+  if (G.net && G.net.role === 'client') return; // los efectos los simula el anfitrión
+  const bx = Math.floor(q.x), by = Math.floor(q.y), bz = Math.floor(q.z); const b = w.get(bx, by, bz); const d = b > 0 ? REG[b] : null;
+  // agua quieta: la llama se apaga y la calienta (el océano no se acaba)
+  if (d && d.liquid) { if (b === ID.water && !(w.getMeta(bx, by, bz) & LIQ_OCEAN)) flamerHeat(bx, by, bz, true, 0.05); q.life = 0; return; }
+  // agua del fluido continuo
+  if (typeof FL !== 'undefined' && FL.occ && FL.world === w) { const c = FL.occ.get(FLK(bx, by, bz)); if (c && c.idx.length >= 3) { if (c.nw >= c.nl) flamerHeat(bx, by, bz, false, 0.05); q.life = 0; return; } }
+  // plantas y cosas inflamables que no son sólidas (pasto, flores…): arden
+  if (d && d.flammable && !d.solid && Math.random() < 0.1) { setBlockNet(w, bx, by, bz, ID.fire); return; }
+  // bloque que toca: el vecino sólido de la cara a la que está pegada (tras chocar, la partícula ya rebotó)
+  const fx = q.x - bx, fy = q.y - by, fz = q.z - bz; const cand = [];
+  if (fy < 0.3) cand.push([bx, by - 1, bz]); else if (fy > 0.7) cand.push([bx, by + 1, bz]);
+  if (fx < 0.3) cand.push([bx - 1, by, bz]); else if (fx > 0.7) cand.push([bx + 1, by, bz]);
+  if (fz < 0.3) cand.push([bx, by, bz - 1]); else if (fz > 0.7) cand.push([bx, by, bz + 1]);
+  for (const [hx, hy, hz] of cand) { const hb = w.get(hx, hy, hz); const hd = hb > 0 ? REG[hb] : null; if (!hd || !hd.solid) continue;
+    if (hb === ID.tnt) { if (Math.random() < 0.05) { setBlockNet(w, hx, hy, hz, 0); igniteTNT(w, hx, hy, hz); } }
+    else if (heatConductor(hb)) FLAMER.hot.set(FLK(hx, hy, hz), performance.now() + 1500);
+    const air = b === 0 || (d && d.replace && !d.liquid);
+    if (air && (hd.flammable ? Math.random() < 0.08 : hy < by && Math.random() < 0.006)) setBlockNet(w, bx, by, bz, ID.fire); /* lo que no arde solo coge un fuego breve encima */
+    break; }
+  // entidades alcanzadas: se prenden y se queman
+  if (Math.random() < 0.5) for (const e of G.entities.values()) {
+    if (e === q.owner || e.removed || e.dead || e.dim !== q.dim || e.isBoat || e.type === 'item' || e instanceof Projectile) continue;
+    const hw = (e.w || 0.6) / 2 + 0.2; if (Math.abs(e.x - q.x) > hw || Math.abs(e.z - q.z) > hw || q.y < e.y - 0.2 || q.y > e.y + (e.h || 1.8) + 0.2) continue;
+    if (e.def && e.def.fireImmune) continue;
+    e.fire = Math.max(e.fire || 0, 120); if (!(e.invul > 0)) hurtEntity(e, 2, q.owner || null, 0, 0, 0, 'fire');
+  }
+  const P = G.player; if (P && q.owner !== P && !P.dead && P.dim === q.dim && G.gameMode === 'survival' && Math.abs(P.x - q.x) < 0.5 && Math.abs(P.z - q.z) < 0.5 && q.y > P.y - 0.2 && q.y < P.y + 2) { P.fire = Math.max(P.fire || 0, 120); }
+}
+// calor acumulado en una celda con agua (s: agua quieta en bloque; si no, partículas del fluido continuo)
+function flamerHeat(x, y, z, s, a) {
+  const k = (s ? 's' : 'p') + x + ',' + y + ',' + z; let h = FLAMER.heat.get(k);
+  if (!h) { h = { x, y, z, s, h: 0, acc: 0, part: 0 }; FLAMER.heat.set(k, h); } h.h = Math.min(6, h.h + a);
+}
+// cada cuadro (tiempo del mundo: con /tick freeze no hierve nada)
+function flamerTick(w, dt) {
+  if (!dt || (G.net && G.net.role === 'client')) return; const now = performance.now();
+  // agua (partículas) sobre un conductor con una fuente de calor justo debajo, o calentado por el chorro
+  if ((FLAMER.scanT -= dt) <= 0) { FLAMER.scanT = 0.25;
+    if (typeof FL !== 'undefined' && FL.occ && FL.world === w) for (const c of FL.occ.values()) {
+      if (c.nw < 3) continue; const cb = w.get(c.x, c.y - 1, c.z); if (!heatConductor(cb)) continue;
+      if (heatSourceAt(w, c.x, c.y - 2, c.z) || (FLAMER.hot.get(FLK(c.x, c.y - 1, c.z)) || 0) > now) flamerHeat(c.x, c.y, c.z, false, 0.25 * 0.9);
+    }
+    for (const [k, t] of FLAMER.hot) if (t < now) FLAMER.hot.delete(k);
+  }
+  // el calor se va perdiendo; pasado un umbral el agua hierve y se evapora (más deprisa cuanto más caliente)
+  for (const [k, h] of FLAMER.heat) {
+    h.h -= dt * 0.5; if (h.h <= 0) { FLAMER.heat.delete(k); continue; }
+    if (h.h < 2.5) continue;
+    h.acc += dt * (h.h - 2) * 14; const n = Math.floor(h.acc); if (n <= 0) continue; h.acc -= n;
+    if (!(h.s ? flamerBoilStatic(w, h, n) : flamerBoil(w, h, n))) FLAMER.heat.delete(k);
+  }
+}
+function steamPuff(w, x, y, z, k) {
+  if (Math.random() < 0.5) smoke(x + Math.random(), y, z + Math.random(), { r: 0.92, g: 0.93, b: 0.95, a: 0.35, vy: 1.4 + Math.random(), life: 1.4, grow: 1.4 });
+  if (typeof vfxSmokeEmit === 'function' && Math.random() < 0.3) vfxSmokeEmit(x + 0.5, y + 0.3, z + 0.5, 0.2 * k, 0.9, 2);
+  if (Math.random() < 0.06) playSound('fizz', x + 0.5, y, z + 0.5, 0.35);
+}
+// evapora n partículas de agua de la celda (o de la de debajo si esta ya se vació); false si no queda agua
+function flamerBoil(w, h, n) {
+  if (typeof FL === 'undefined' || !FL.occ) return false;
+  let c = FL.occ.get(FLK(h.x, h.y, h.z)); if (!c || !c.idx.length) c = FL.occ.get(FLK(h.x, h.y - 1, h.z)); if (!c || !c.idx.length) return false;
+  let k = 0; for (let j = c.idx.length - 1; j >= 0 && k < n; j--) { const i = c.idx[j]; const ph = FL.phase[i]; if (ph && ph !== 2) { flKill(i); c.idx.splice(j, 1); c.nw = Math.max(0, c.nw - 1); k++; } }
+  if (k) steamPuff(w, c.x, Math.max(c.y, c.top), c.z, k);
+  return k > 0;
+}
+// agua quieta en bloque: cada 27 "partículas" (un octavo de bloque) baja un nivel
+function flamerBoilStatic(w, h, n) {
+  const b = w.get(h.x, h.y, h.z); if (b !== ID.water) return false; const m = w.getMeta(h.x, h.y, h.z); if (m & LIQ_OCEAN) return false;
+  h.part += n; steamPuff(w, h.x, h.y + 0.9, h.z, n);
+  while (h.part >= 27) { h.part -= 27; const a = liqAmt(w.getMeta(h.x, h.y, h.z)) - 1;
+    if (a <= 0) { setBlockNet(w, h.x, h.y, h.z, 0); return false; }
+    setBlockNet(w, h.x, h.y, h.z, ID.water, liqMeta(a, false, false) | (m & 16)); }
+  return true;
+}
+// ------------------------------------------------------------ esponja
+function spongeUse(p) {
+  if (typeof FL === 'undefined') return; const now = performance.now();
+  const w = p.world, dir = lookDir(p); let pt = null;
+  // punto: la primera celda con partículas en la mirada (hasta 5 bloques) o, si no hay, delante del bloque que se mira
+  for (let t = 0.4; t < 5; t += 0.2) {
+    const x = p.x + dir[0] * t, y = p.eye + dir[1] * t, z = p.z + dir[2] * t; const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z);
+    const c = FL.occ && FL.occ.get(FLK(bx, by, bz)); if (c && c.idx.length) { pt = [x, y, z]; break; }
+    const b = w.get(bx, by, bz); if (b > 0 && REG[b].solid) { pt = [x - dir[0] * 0.4, y - dir[1] * 0.4, z - dir[2] * 0.4]; break; }
+  }
+  if (!pt) pt = [p.x + dir[0] * 2, p.eye + dir[1] * 2, p.z + dir[2] * 2];
+  p.swing = Math.max(p.swing || 0, 0.01);
+  if (G.net && G.net.role === 'client') { if (now - (FLAMER.sentS || 0) > 80) { FLAMER.sentS = now; netSend({ t: 'spg', p: pt.map(v => +v.toFixed(2)) }); } return; }
+  const n = spongeAt(w, pt, 1.6);
+  if (n && Math.random() < 0.3) playSound('splash', pt[0], pt[1], pt[2], 0.25);
+}
+// borra las partículas del fluido continuo a menos de r del punto; devuelve cuántas
+function spongeAt(w, pt, r) {
+  if (typeof FL === 'undefined' || !FL.ok || FL.world !== w || !FL.rb.ready) return 0;
+  const P = FL.rb.pos, o = FL.rb.orgNow; const R2 = r * r; const ri = Math.ceil(r); let n = 0;
+  const cx = Math.floor(pt[0]), cy = Math.floor(pt[1]), cz = Math.floor(pt[2]);
+  for (let dy = -ri; dy <= ri; dy++) for (let dz = -ri; dz <= ri; dz++) for (let dx = -ri; dx <= ri; dx++) {
+    const c = FL.occ.get(FLK(cx + dx, cy + dy, cz + dz)); if (!c || !c.idx.length) continue;
+    for (let j = c.idx.length - 1; j >= 0; j--) { const i = c.idx[j]; if (!FL.phase[i]) { c.idx.splice(j, 1); continue; } const k = i * 4;
+      const ex = P[k] + o[0] - pt[0], ey = P[k + 1] + o[1] - pt[1], ez = P[k + 2] + o[2] - pt[2];
+      if (ex * ex + ey * ey + ez * ez < R2) { flKill(i); c.idx.splice(j, 1); n++; } }
+  }
+  if (n) for (let i = 0; i < Math.min(6, n / 20); i++) P_({ x: pt[0] + (Math.random() - 0.5) * r, y: pt[1] + (Math.random() - 0.5) * r, z: pt[2] + (Math.random() - 0.5) * r, vy: 0.5, life: 0.5, size: 0.08, r: 0.6, g: 0.75, b: 1, a: 0.6, grav: 4, layer: TEX.drip });
+  return n;
+}
+
 // ===== v_boat.js
 // ============================================================================
 //  Botes: cuerpo rígido que flota por puntos del casco (empuje de Arquímedes en cada uno),
@@ -9669,12 +9876,13 @@ const CMD_SPEC = {
   locate: [['structure'], cmdStructs],
   clear: [],
   dimension: [['overworld', 'nether', 'end']],
-  gamerule: [['keepInventory'], ['true', 'false']],
+  gamerule: [['keepInventory', 'doWaterDespawn', 'doDaylightCycle', 'doWeatherCycle'], ['true', 'false']],
   effect: [['give'], CMD_EFFECTS, ['30', '60', '300']],
+  liquids: [['delete', 'sphere', 'cube'], a => a[1] === 'delete' ? ['all', 'water', 'lava'] : ['water', 'lava'], a => a[1] === 'sphere' ? ['<radio>', '2', '3', '4'] : a[1] === 'cube' ? ['<lado>', '2', '4', '6'] : []],
   tick: [['freeze', 'unfreeze', 'rate', 'step', 'query', '0.25', '0.5', '2', '4'], a => a[1] === 'rate' ? ['0.1', '0.5', '1', '2', '4', '10'] : a[1] === 'step' ? ['1', '20', '100'] : []]
 };
 CMD_SPEC.teleport = CMD_SPEC.tp;
-const CMD_HELP = { help: 'lista de comandos', gamemode: '<modo>', time: 'set|add|query', weather: 'clear|rain|thunder [segundos]', tp: '<x y z> | <jugador> | <quién> <x y z|destino>', give: '<objeto> [cantidad]', kill: '[@s|@e|@e[type=mob]|mob]', seed: '', summon: '<mob> [x y z]', spawnpoint: '', difficulty: '<dificultad>', locate: 'structure <nombre>', clear: '', dimension: '<dimensión>', gamerule: 'keepInventory <true|false>', effect: 'give <efecto> [segundos]', tick: 'freeze | unfreeze | <velocidad> | rate <x> | step [ticks] | query' };
+const CMD_HELP = { help: 'lista de comandos', liquids: 'delete all|water|lava · sphere|cube water|lava <radio|lado>', gamemode: '<modo>', time: 'set|add|query', weather: 'clear|rain|thunder [segundos]', tp: '<x y z> | <jugador> | <quién> <x y z|destino>', give: '<objeto> [cantidad]', kill: '[@s|@e|@e[type=mob]|mob]', seed: '', summon: '<mob> [x y z]', spawnpoint: '', difficulty: '<dificultad>', locate: 'structure <nombre>', clear: '', dimension: '<dimensión>', gamerule: 'keepInventory <true|false>', effect: 'give <efecto> [segundos]', tick: 'freeze | unfreeze | <velocidad> | rate <x> | step [ticks] | query' };
 // ---- ejecución
 function runCommand(cmd) {
   const a = cmd.trim().slice(1).split(/\s+/); const c = (a[0] || '').toLowerCase(); const p = G.player;
@@ -9721,6 +9929,33 @@ function runCommand(cmd) {
       else { const v = +(k === 'rate' ? a[2] : k); if (!(v > 0)) return chatMsg('Uso: /tick ' + CMD_HELP.tick, '#f88'); G.tickRate = clamp(v, 0.05, 20); G.tickFrozen = false; chatMsg('Velocidad del mundo: x' + G.tickRate + ' (' + Math.round(20 * G.tickRate * 10) / 10 + ' ticks/s)'); }
       if (G.net && G.net.role === 'host') netBroadcast({ t: 'tick', f: G.tickFrozen, r: G.tickRate });
       return;
+    }
+    case 'liquids': { // solo partículas del fluido continuo: el agua y la lava normales (y los océanos) no se tocan
+      if (G.net && G.net.role === 'client') return chatMsg('Solo el anfitrión puede usar /liquids (él simula el fluido)', '#f88');
+      if (typeof FL === 'undefined' || !flCanSim(p.world)) return chatMsg('El fluido continuo no está activo (calidad alta y líquidos continuos en las opciones)', '#f88');
+      const k = (a[1] || '').toLowerCase(), kind = (a[2] || '').toLowerCase(); const name = { water: 'agua', lava: 'lava', all: 'agua y lava' };
+      if (k === 'delete') {
+        if (!name[kind]) return chatMsg('Uso: /liquids delete all|water|lava', '#f88');
+        let n = 0; for (let i = 0; i < FL.hi; i++) { const ph = FL.phase[i]; if (!ph || (kind === 'water' && ph === 2) || (kind === 'lava' && ph !== 2)) continue; flKill(i); n++; }
+        for (const [key, c] of FL.occ) { c.idx = c.idx.filter(i => FL.phase[i]); if (!c.idx.length) FL.occ.delete(key); }
+        return chatMsg(n + ' partículas de ' + name[kind] + ' eliminadas');
+      }
+      if (k === 'sphere' || k === 'cube') {
+        const liq = kind === 'water' ? 1 : kind === 'lava' ? 2 : 0; let s = +a[3];
+        if (!liq || !(s > 0)) return chatMsg('Uso: /liquids ' + k + ' water|lava <' + (k === 'sphere' ? 'radio' : 'lado') + '>', '#f88');
+        s = Math.min(s, k === 'sphere' ? 8 : 16); const half = k === 'sphere' ? s : s / 2;
+        // delante del jugador, sin tocarlo
+        const dir = lookDir(p); const dd = half + 1.5; const cx = p.x + dir[0] * dd, cy = p.eye + dir[1] * dd, cz = p.z + dir[2] * dd; const w = p.world; const S = FL_S;
+        let n = 0, full = false;
+        for (let y = cy - half + S / 2; y < cy + half && !full; y += S) for (let z = cz - half + S / 2; z < cz + half && !full; z += S) for (let x = cx - half + S / 2; x < cx + half; x += S) {
+          if (k === 'sphere' && (x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2 > s * s) continue;
+          const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z); const b = w.get(bx, by, bz); if (b < 0 || (b > 0 && (REG[b].solid || REG[b].liquid))) continue;
+          if (!flCanSim(w, bx, by, bz)) continue;
+          const j = () => (Math.random() - 0.5) * 0.03; if (flSpawn(x + j(), y + j(), z + j(), 0, 0, 0, liq === 1 ? 3 : 2) < 0) { full = true; break; } n++;
+        }
+        return chatMsg((k === 'sphere' ? 'Esfera' : 'Cubo') + ' de ' + name[kind] + ': ' + n + ' partículas' + (full ? ' (no caben más: límite del fluido)' : ''), full ? '#fc8' : null);
+      }
+      return chatMsg('Uso: /liquids ' + CMD_HELP.liquids, '#f88');
     }
     case 'kill': {
       const t = (a[1] || '@s').toLowerCase();
@@ -10033,7 +10268,7 @@ function serializeWorld() {
   const players = Object.assign({}, G.playerStates || {}); players.__local = playerState(G.player); players.__local.name = G.player.name;
   if (G.net && G.net.role === 'host') for (const c of G.net.conns.values()) if (c.ent && c.ent.state) players[c.ent.name] = c.ent.state;
   const ents = []; for (const e of G.entities.values()) { if (e.proxy || e.remotePlayer || e.removed || e.dead) continue; if (e instanceof Mob && (e.persist || !e.def.hostile)) ents.push({ k: 'mob', ty: e.type, d: e.dim, x: e.x, y: e.y, z: e.z, hp: e.hp, c: e.color, p: e.persist, n: e.name }); else if (e.type === 'item') ents.push({ k: 'item', d: e.dim, x: e.x, y: e.y, z: e.z, s: e.stack }); else if (e.isBoat) ents.push({ k: 'boat', d: e.dim, x: e.x, y: e.y, z: e.z, r: e.rot }); }
-  return { format: 'minecraft2-world', version: 3, name: G.worldName, seed: G.seed, seedStr: G.seedStr, gameMode: G.defaultMode || G.gameMode, curMode: G.gameMode, difficulty: G.difficulty, cheats: G.cheats, time: G.time, rain: G.rain, rainTimer: G.rainTimer, worldSpawn: G.worldSpawn, dragonKilled: G.dragonKilled, endInit: G.endInit, gateway: G.gateway, keepInventory: G.keepInventory, containers: G.containers, spawned: [...G.spawned], dims, players, entities: ents, created: G.created || Date.now(), lastPlayed: Date.now(), structures: G.structures !== false, climate: G.climate || 1, dynTrees: !!G.dynTrees, fluid: typeof flSerialize === 'function' ? flSerialize() : null };
+  return { format: 'minecraft2-world', version: 3, name: G.worldName, seed: G.seed, seedStr: G.seedStr, gameMode: G.defaultMode || G.gameMode, curMode: G.gameMode, difficulty: G.difficulty, cheats: G.cheats, time: G.time, rain: G.rain, rainTimer: G.rainTimer, worldSpawn: G.worldSpawn, dragonKilled: G.dragonKilled, endInit: G.endInit, gateway: G.gateway, keepInventory: G.keepInventory, doWaterDespawn: !!G.doWaterDespawn, doDaylightCycle: G.doDaylightCycle !== false, doWeatherCycle: G.doWeatherCycle !== false, containers: G.containers, spawned: [...G.spawned], dims, players, entities: ents, created: G.created || Date.now(), lastPlayed: Date.now(), structures: G.structures !== false, climate: G.climate || 1, dynTrees: !!G.dynTrees, fluid: typeof flSerialize === 'function' ? flSerialize() : null };
 }
 function worldIcon() { try { const c = document.createElement('canvas'); c.width = 64; c.height = 64; c.getContext('2d').drawImage($('gl'), ($('gl').width - $('gl').height) / 2, 0, $('gl').height, $('gl').height, 0, 0, 64, 64); return c.toDataURL('image/jpeg', 0.7); } catch (e) { return null; } }
 async function saveWorld(silent) {
@@ -10050,7 +10285,7 @@ function findSpawn(w) {
   return { x: 0.5, z: 0.5 };
 }
 function resetGameState() {
-  G.entities = new Map(); G.particles = []; G.containers = {}; G.spawned = new Set(); G.tick = 0; G.rtick = 0; G.tickFrozen = false; G.tickRate = 1; G.dragonKilled = false; G.endInit = false; G.gateway = null; G.creditsShown = false; G.playerStates = {}; G.rain = 0; G.rainLevel = 0; G.rainTimer = 12000 + Math.random() * 24000;
+  G.entities = new Map(); G.particles = []; G.containers = {}; G.spawned = new Set(); G.tick = 0; G.rtick = 0; G.tickFrozen = false; G.tickRate = 1; G.dragonKilled = false; G.endInit = false; G.gateway = null; G.creditsShown = false; G.playerStates = {}; G.rain = 0; G.rainLevel = 0; G.wet = 0; G.rainTimer = 12000 + Math.random() * 24000;
   TICK_TIMERS.length = 0; NETBATCH.length = 0; R.plights = []; UI.open = null; G.paused = false; G.wardenWarn = 0;
 }
 function migrateWorld(data) { // v2 -> v3: los objetos pasaron de id 256+ a 1000+
@@ -10064,7 +10299,7 @@ function migrateWorld(data) { // v2 -> v3: los objetos pasaron de id 256+ a 1000
 }
 function startWorld(data, isNew, netWelcome) {
   data = migrateWorld(data); resetGameState(); audioInit();
-  G.worldName = data.name; G.seed = data.seed >>> 0; G.seedStr = data.seedStr; G.difficulty = data.difficulty ?? 2; G.cheats = data.cheats !== false; G.time = data.time ?? 1000; G.keepInventory = !!data.keepInventory; if (typeof flRestore === 'function') flRestore(data.fluid || null);
+  G.worldName = data.name; G.seed = data.seed >>> 0; G.seedStr = data.seedStr; G.difficulty = data.difficulty ?? 2; G.cheats = data.cheats !== false; G.time = data.time ?? 1000; G.keepInventory = !!data.keepInventory; G.doWaterDespawn = !!data.doWaterDespawn; G.doDaylightCycle = data.doDaylightCycle !== false; G.doWeatherCycle = data.doWeatherCycle !== false; if (typeof flRestore === 'function') flRestore(data.fluid || null);
   G.defaultMode = data.gameMode || 'survival'; G.gameMode = data.curMode || data.gameMode || 'survival'; G.created = data.created || Date.now(); G.structures = data.structures !== false;
   G.climate = data.climate ?? (isNew ? 3 : 1); // biomas por clima en mundos nuevos; los antiguos siguen con los clásicos
   G.worlds = { overworld: new World('overworld', G.seed, G.climate), nether: new World('nether', G.seed, G.climate), end: new World('end', G.seed, G.climate) };
@@ -10250,7 +10485,7 @@ function gameTick() {
 function worldTick() {
   const p = G.player; const client = G.net && G.net.role === 'client';
   G.tick++;
-  if (!client) { G.time++; if (--G.rainTimer <= 0) { G.rain = G.rain ? 0 : 1; G.thunder = G.rain && Math.random() < 0.3; G.rainTimer = G.rain ? 6000 + Math.random() * 6000 : 18000 + Math.random() * 30000; } }
+  if (!client) { if (G.doDaylightCycle !== false) G.time++; if (G.doWeatherCycle !== false && --G.rainTimer <= 0) { G.rain = G.rain ? 0 : 1; G.thunder = G.rain && Math.random() < 0.3; G.rainTimer = G.rain ? 6000 + Math.random() * 6000 : 18000 + Math.random() * 30000; } }
   G.rainLevel = lerp(G.rainLevel || 0, G.rain ? 1 : 0, G.weatherFast > 0 ? 0.05 : 0.004); if (G.weatherFast > 0) G.weatherFast--;
   // entidades
   if (typeof processPathQueue === 'function') processPathQueue();
@@ -10307,6 +10542,8 @@ function gameFrame(dt) {
   // ondas del agua (estelas, salpicaduras, chorros): fuentes y un paso de simulación en GPU antes de dibujar
   if (typeof ripUpdate === 'function') { if (!pausedSP) ripSources(w, dt); ripUpdate(wdt); }
   if (typeof flUpdate === 'function') flUpdate(wdt, w); // fluido continuo (partículas en GPU)
+  if (typeof flamerTick === 'function') flamerTick(w, wdt);
+  if (typeof rainPuddleTick === 'function') rainPuddleTick(w, wdt); // charcos de lluvia (partículas) // calor del lanzallamas y de los conductores: evapora el agua
   renderWorld(w, eye, yaw, pitch, {
     fov: G.fovCur, under, roll, bob, biome: w.biomeAt(Math.floor(p.x), Math.floor(p.z)),
     drawEntities: () => { drawAllEntities(p.dim, alphaW, perspective > 0 && G.gameMode !== 'spectator'); },
@@ -10356,7 +10593,11 @@ function emitterFX(w, dt) {
   G._fires = fires; G._flames = flames; G._fireCells = cells; G._lavas = lavas;
 }
 function weatherFX(w, dt) {
-  const p = G.player; const rl = G.rainLevel || 0; if (AU.rain) AU.rain.gain.value = w.dim === 'overworld' ? rl * 0.12 * (SETTINGS.audio.weather ?? 1) : 0;
+  const p = G.player; const rl = G.rainLevel || 0;
+  // suelo mojado: se moja en ~30 s de lluvia y tarda unos minutos en secarse (solo donde llueve: ni nieve ni desierto)
+  { const bio = BIOMES[w.biomeAt(Math.floor(p.x), Math.floor(p.z))]; const rains = w.dim === 'overworld' && bio && !bio.snow && bio.id !== BI.desert && bio.id !== BI.savanna;
+    const tg = rains ? rl : 0; G.wet = G.wet || 0; G.wet += (tg - G.wet) * Math.min(1, dt * (tg > G.wet ? 0.07 : 0.006)); }
+  if (AU.rain) AU.rain.gain.value = w.dim === 'overworld' ? rl * 0.12 * (SETTINGS.audio.weather ?? 1) : 0;
   if (w.dim === 'overworld' && rl > 0.05) {
     const n = Math.floor(rl * [40, 120, 260][SETTINGS.particles ?? 2] * dt * 10);
     for (let i = 0; i < n; i++) {
@@ -10641,7 +10882,7 @@ function setupMenus() {
   $('cGo').onclick = () => { const [seed, seedStr] = seedFromString($('cSeed').value); G.worldId = 'w' + Date.now(); G.iconURL = null; startWorld({ name: $('cName').value.trim() || 'Nuevo mundo', seed, seedStr, gameMode: CREATE.mode, difficulty: CREATE.diff, cheats: CREATE.cheats, structures: CREATE.structs, dynTrees: CREATE.dyn }, true); G.pendingHost = G.hostAfterLoad; G.hostAfterLoad = false; };
   // multijugador
   $('mBack').onclick = () => goMenu(); $('mHost').onclick = () => { G.hostAfterLoad = true; showScreen('sWorlds'); refreshWorlds(); };
-  const join = async lan => { const name = $('mName').value.trim() || SETTINGS.name; SETTINGS.name = name; saveSettings(); const code = $('mCode').value.trim(); if (code.length < 4) { $('mErr').textContent = 'Escribe el código del mundo.'; return; } $('mErr').textContent = 'Conectando...'; try { const wl = await joinGame(code, lan, name); G.worldId = null; startWorld({ name: wl.worldName, seed: wl.seed, climate: wl.climate || 1, dynTrees: !!wl.dyn, seedStr: wl.seedStr, gameMode: wl.gm, difficulty: wl.diff, time: wl.time, dragonKilled: wl.dk, endInit: wl.ei, gateway: wl.gw, worldSpawn: wl.spawn, keepInventory: wl.keep }, false, wl); } catch (e) { stopNet(); $('mErr').textContent = 'Error: ' + e.message; } };
+  const join = async lan => { const name = $('mName').value.trim() || SETTINGS.name; SETTINGS.name = name; saveSettings(); const code = $('mCode').value.trim(); if (code.length < 4) { $('mErr').textContent = 'Escribe el código del mundo.'; return; } $('mErr').textContent = 'Conectando...'; try { const wl = await joinGame(code, lan, name); G.worldId = null; startWorld({ name: wl.worldName, seed: wl.seed, climate: wl.climate || 1, dynTrees: !!wl.dyn, seedStr: wl.seedStr, gameMode: wl.gm, difficulty: wl.diff, time: wl.time, dragonKilled: wl.dk, endInit: wl.ei, gateway: wl.gw, worldSpawn: wl.spawn, keepInventory: wl.keep, doDaylightCycle: wl.rules ? wl.rules.dc : true, doWeatherCycle: wl.rules ? wl.rules.wc : true, doWaterDespawn: wl.rules ? wl.rules.wd : false }, false, wl); } catch (e) { stopNet(); $('mErr').textContent = 'Error: ' + e.message; } };
   $('mJoin').onclick = () => join(false); $('mJoinLan').onclick = () => join(true);
   $('mCode').addEventListener('keydown', e => e.stopPropagation()); $('mName').addEventListener('keydown', e => e.stopPropagation());
   // opciones

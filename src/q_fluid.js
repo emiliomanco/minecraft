@@ -80,7 +80,10 @@ void main(){
   v.y-=9.81*u_dt;
   for(int e=0;e<8;e++){ if(e>=u_nEnt) break; vec4 E=u_ent[e], EV=u_entV[e];
     float t=clamp(x.y-E.y,-EV.w,EV.w); vec3 c=vec3(E.x,E.y+t,E.z); vec3 d=x-c; float dl=length(d);
-    if(dl<E.w){ vec3 n=dl>1e-4?d/dl:vec3(0.0,1.0,0.0); v=mix(v,EV.xyz*1.1+n*(E.w-dl)*10.0,0.6); } }
+    if(dl<E.w){ vec3 n=dl>1e-4?d/dl:vec3(0.0,1.0,0.0);
+      // encima de la cabeza: resbala hacia los lados (el agua no se queda apilada sobre el jugador)
+      if(t>EV.w-0.01){ vec2 h=d.xz; float hl=length(h); h=hl>0.03?h/hl:vec2(cos(float(i)*2.39996),sin(float(i)*2.39996)); n=normalize(n+vec3(h.x,0.0,h.y)*1.6); }
+      v=mix(v,EV.xyz*1.1+n*(E.w-dl)*10.0,0.6); } }
   // ladera: en reposo sobre el suelo, buscar (radio 2 bloques) la celda alcanzable más cercana con el suelo más bajo y
   // correr hacia ella; las vecinas del mismo líquido vienen detrás por la cohesión y la viscosidad (XSPH). Si no hay
   // ninguna más baja, la superficie es plana y se queda quieta.
@@ -238,7 +241,7 @@ function flInit() {
   for (let a = -4; a <= 4; a++) for (let b = -4; b <= 4; b++) for (let c = -4; c <= 4; c++) { const r2 = (a * a + b * b + c * c) * s * s; if (r2 < h * h) raw += K6 * Math.pow(h * h - r2, 3); }
   FL.mass = 1 / raw; FL.kp = FL.mass * K6; FL.ks = -FL.mass * 45 / (Math.PI * Math.pow(h, 6));
   FL.wq = FL.kp * Math.pow(h * h - Math.pow(0.2 * h, 2), 3);
-  FL.phase = new Uint8Array(FL.N); FL.spawnFrame = new Int32Array(FL.N); FL.scale = new Uint8Array(FL.N).fill(255); FL.dying = new Map();
+  FL.phase = new Uint8Array(FL.N); FL.spawnFrame = new Int32Array(FL.N); FL.scale = new Uint8Array(FL.N).fill(255); FL.dying = new Map(); FL.rainTag = new Uint8Array(FL.N);
   FL.scaleTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, FL.scaleTex); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1); gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, FL.W, FL.rows, 0, gl.RED, gl.UNSIGNED_BYTE, FL.scale); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST); FL.voxLoaded = new Set(); FL.hi = 0; FL.alive = 0; FL.ptr = 0; FL.spawnQ.length = 0; FL.killQ.length = 0; FL.world = null;
   FL.rb.pbo = gl.createBuffer(); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, FL.rb.pbo); gl.bufferData(gl.PIXEL_PACK_BUFFER, FL.N * 16, gl.STREAM_READ); FL.rb.pbo2 = gl.createBuffer(); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, FL.rb.pbo2); gl.bufferData(gl.PIXEL_PACK_BUFFER, FL.N * 16, gl.STREAM_READ); gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
   FL.rb.sync = null; FL.rb.ready = false; FL.rb.pos = new Float32Array(FL.N * 4); FL.rb.vel = new Float32Array(FL.N * 4);
@@ -307,7 +310,7 @@ function flSpawn(x, y, z, vx, vy, vz, phase, temp) {
   if (!FL.ok) return -1; const i = flAlloc(); if (i < 0) return -1; FL.phase[i] = phase; FL.spawnFrame[i] = FL.frame + 1; FL.alive++; if (i + 1 > FL.hi) FL.hi = i + 1;
   FL.spawnQ.push(i, x - FL.org[0], y - FL.org[1], z - FL.org[2], phase, vx, vy, vz, temp ?? (phase === 2 ? 1 : 0)); return i;
 }
-function flKill(i) { if (!FL.phase[i]) return; FL.phase[i] = 0; if (FL.scale[i] !== 255) { FL.scale[i] = 255; FL.scaleDirty = true; } FL.alive--; if (i < FL.ptr) FL.ptr = i; FL.killQ.push(i, 0, -1000, 0, 0, 0, 0, 0, 0); }
+function flKill(i) { if (!FL.phase[i]) return; FL.phase[i] = 0; if (FL.rainTag) FL.rainTag[i] = 0; if (FL.scale[i] !== 255) { FL.scale[i] = 255; FL.scaleDirty = true; } FL.alive--; if (i < FL.ptr) FL.ptr = i; FL.killQ.push(i, 0, -1000, 0, 0, 0, 0, 0, 0); }
 // rellena una caja del mundo con partículas en red (separación FL_S) con un poco de desorden; devuelve cuántas
 function flSpawnBox(x0, y0, z0, x1, y1, z1, phase, vx = 0, vy = 0, vz = 0) {
   let n = 0; const s = FL_S;
@@ -401,9 +404,9 @@ function flUpdate(dt, w) {
 // cápsulas de las entidades cercanas (empujan el líquido)
 function flEntities(w) {
   const E = FL.ents, V = FL.entV; let n = 0; const o = FL.org;
-  const add = (e, r, hh) => { if (n >= 8) return; const k = n * 4; E[k] = e.x - o[0]; E[k + 1] = e.y + hh - o[1]; E[k + 2] = e.z - o[2]; E[k + 3] = r; V[k] = e.vx || 0; V[k + 1] = e.vy || 0; V[k + 2] = e.vz || 0; V[k + 3] = hh; n++; };
-  const p = G.player; if (p && !p.dead && G.gameMode !== 'spectator') { if (typeof broomColliders === 'function') broomColliders(add); add(p, 0.35, 0.9); }
-  for (const e of G.entities.values()) { if (n >= 8) break; if (e.removed || e.dead || e.dim !== p.dim) continue; if (Math.abs(e.x - p.x) > 24 || Math.abs(e.z - p.z) > 24) continue; if (e instanceof Mob) add(e, Math.max(0.25, (e.w || 0.6) * 0.5), (e.h || 1.8) * 0.5); else if (e.type === 'item') add(e, 0.15, 0.12); }
+  const add = (e, r, hh, cy = hh) => { if (n >= 8) return; const k = n * 4; E[k] = e.x - o[0]; E[k + 1] = e.y + cy - o[1]; E[k + 2] = e.z - o[2]; E[k + 3] = r; V[k] = e.vx || 0; V[k + 1] = e.vy || 0; V[k + 2] = e.vz || 0; V[k + 3] = hh; n++; };
+  const p = G.player; if (p && !p.dead && G.gameMode !== 'spectator') { if (typeof broomColliders === 'function') broomColliders(add); add(p, 0.35, 0.55, 0.9); } // cápsula de 0 a 1,8: no sobresale por encima de la cabeza
+  for (const e of G.entities.values()) { if (n >= 8) break; if (e.removed || e.dead || e.dim !== p.dim) continue; if (Math.abs(e.x - p.x) > 24 || Math.abs(e.z - p.z) > 24) continue; if (e instanceof Mob) { const r = Math.max(0.25, (e.w || 0.6) * 0.5), h = e.h || 1.8; add(e, r, Math.max(0.02, h * 0.5 - r), h * 0.5); } else if (e.type === 'item') add(e, 0.15, 0.12); }
   FL.nEnt = n;
 }
 // lectura asíncrona de POS y VEL (cada ~6 cuadros); FL.rb.pos/vel quedan con la última foto (coordenadas del mundo en flParticles)
@@ -490,7 +493,7 @@ void main(){ ivec2 f=ivec2(gl_FragCoord.xy); vec4 c=texelFetch(u_src,f,0); float
 const FS_FLCOMP = `#version 300 es
 precision highp float; precision highp sampler2D;
 ##COMMON##
-uniform sampler2D u_fd, u_ft, u_sceneCopy; uniform mat4 u_proj, u_view; uniform vec2 u_res; uniform float u_ss; out vec4 o;
+uniform sampler2D u_fd, u_ft, u_sceneCopy; uniform mat4 u_proj, u_view; uniform vec2 u_res; uniform float u_ss; uniform float u_camIn; out vec4 o;
 vec3 vor(vec2 p, float tt){ vec2 i=floor(p), f=fract(p); float d1=8.0, d2=8.0, id=0.0;
   for(int y=-1;y<=1;y++) for(int x=-1;x<=1;x++){ vec2 g=vec2(float(x),float(y)); vec2 h=vec2(hash12(i+g),hash12(i+g+17.31)); vec2 r=g+0.5+0.42*sin(tt+6.2831*h)-f; float d=dot(r,r);
     if(d<d1){ d2=d1; d1=d; id=hash12(i+g+3.7); } else if(d<d2) d2=d; }
@@ -503,7 +506,7 @@ void main(){
     for(int k=0;k<4;k++){ ivec2 o2=ivec2(k&1,k>>1); float dk=texelFetch(u_fd,clamp(b+o2,ivec2(0),sz-1),0).x; if(dk<=0.0||abs(dk-d)>0.25) continue;
       float w=(o2.x==1?f.x:1.0-f.x)*(o2.y==1?f.y:1.0-f.y)+1e-4; s+=dk*w; ws+=w; } if(ws>0.0) db=s/ws; }
   vec4 Th=texture(u_ft,gl_FragCoord.xy/u_res); float tw=Th.r, tl=Th.g;
-  bool lava=F.y>1.5; if((lava?tl:tw)<0.004) discard;
+  bool lava=F.y>1.5; if((lava?tl:tw)<0.004 && !(u_camIn>0.5 && !lava)) discard;
   // normal: diferencias con el vecino de menor salto en cada eje
   vec3 P=eyeAt(hp,d);
   float dxp=texelFetch(u_fd,min(hp+ivec2(1,0),sz-1),0).x, dxm=texelFetch(u_fd,max(hp-ivec2(1,0),ivec2(0)),0).x;
@@ -516,7 +519,12 @@ void main(){
   float NdV=clamp(dot(N,-V),0.0,1.0);
   float sh=u_dim==0?getShadow(wp,N):0.0; vec3 Lsun=u_sunCol*sh;
   vec3 col; float alpha=1.0;
-  if(!lava){
+  if(!lava && u_camIn>0.5){
+    // con la cámara dentro del agua: solo se ve la superficie desde abajo (la profundidad es la más lejana de cada píxel),
+    // con la escena de detrás desviada y reflexión total interna al mirar de lado; la niebla submarina hace el resto
+    vec2 suv=gl_FragCoord.xy/u_res; vec3 behind=texture(u_sceneCopy,clamp(suv+Ne.xy*0.03,0.001,0.999)).rgb;
+    float tir=smoothstep(0.45,0.2,NdV); col=mix(behind,u_fogCol*1.5+u_amb*0.04*u_camSky,tir);
+  } else if(!lava){
     vec2 suv=gl_FragCoord.xy/u_res; vec2 off=Ne.xy*clamp(tw,0.0,1.2)*0.035; // refracción (IOR 1,333): desvía según la normal y el grosor
     vec3 behind=texture(u_sceneCopy,clamp(suv+off,0.001,0.999)).rgb;
     vec3 sA=vec3(0.60,0.16,0.19), sS=vec3(0.014,0.024,0.017), sT=sA+sS;
@@ -588,9 +596,10 @@ function flRender() {
   const sphU = P => { gl.useProgram(P.p); gl.uniformMatrix4fv(P.u.u_view, false, R.view); gl.uniformMatrix4fv(P.u.u_proj, false, R.proj); gl.uniform3f(P.u.u_off, off[0], off[1], off[2]); gl.uniform1f(P.u.u_rad, rad);
     flBindTex(P, 'u_pos', 0, FL.pos[FL.cur]); flBindTex(P, 'u_vel', 1, FL.vel[FL.cur]); flBindTex(P, 'u_lam', 2, FL.lam); flBindTex(P, 'u_scl', 9, FL.scaleTex); flBindTex(P, 'u_depthCopy', 3, R.fbo.copy.depth);
     if (P.u.u_near) { gl.uniform1f(P.u.u_near, R.near); gl.uniform1f(P.u.u_far, R.far); } if (P.u.u_res) gl.uniform2f(P.u.u_res, S.w, S.h); };
-  // 1) profundidad
-  gl.bindFramebuffer(gl.FRAMEBUFFER, S.fdA.fb); gl.viewport(0, 0, S.w, S.h); gl.clearColor(0, 0, 0, 0); gl.clearDepth(1); gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LESS); gl.depthMask(true); gl.disable(gl.BLEND);
-  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); sphU(S.sph); if (!(K & 1)) gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, FL.hi);
+  // 1) profundidad (desde dentro del agua, la más lejana: es donde el rayo sale del líquido, no la bolita más cercana)
+  const camIn = typeof flLiquidAt === 'function' && flLiquidAt(G.world, R.cam[0], R.cam[1], R.cam[2]) === 1; FL.camIn = camIn;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, S.fdA.fb); gl.viewport(0, 0, S.w, S.h); gl.clearColor(0, 0, 0, 0); gl.clearDepth(camIn ? 0 : 1); gl.enable(gl.DEPTH_TEST); gl.depthFunc(camIn ? gl.GREATER : gl.LESS); gl.depthMask(true); gl.disable(gl.BLEND);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); sphU(S.sph); if (!(K & 1)) gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, FL.hi); gl.depthFunc(gl.LESS); gl.clearDepth(1);
   // 2) grosor
   gl.bindFramebuffer(gl.FRAMEBUFFER, S.fth.fb); gl.clear(gl.COLOR_BUFFER_BIT); gl.disable(gl.DEPTH_TEST); gl.depthMask(false); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
   sphU(S.thick); if (!(K & 2)) gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, FL.hi); gl.disable(gl.BLEND);
@@ -599,7 +608,7 @@ function flRender() {
   if (!(K & 4)) for (let it = 0; it < 3; it++) for (const [dx, dy, src, dst] of [[1, 0, S.fdA, S.fdB], [0, 1, S.fdB, S.fdA]]) { gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fb); flBindTex(P, 'u_src', 0, src.tex); gl.uniform2f(P.u.u_dir, dx, dy); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
   // 4) composición sobre la escena, con prueba de profundidad contra lo ya dibujado (agua quieta incluida)
   gl.bindFramebuffer(gl.FRAMEBUFFER, R.fbo.scene.fb); gl.viewport(0, 0, R.w, R.h); gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LESS); gl.depthMask(true);
-  const C = S.comp; gl.useProgram(C.p); setCommon(C); gl.uniformMatrix4fv(C.u.u_proj, false, R.proj); gl.uniformMatrix4fv(C.u.u_view, false, R.view); gl.uniform2f(C.u.u_res, R.w, R.h); gl.uniform1f(C.u.u_ss, S.ss);
+  const C = S.comp; gl.useProgram(C.p); setCommon(C); gl.uniformMatrix4fv(C.u.u_proj, false, R.proj); gl.uniformMatrix4fv(C.u.u_view, false, R.view); gl.uniform2f(C.u.u_res, R.w, R.h); gl.uniform1f(C.u.u_ss, S.ss); if (C.u.u_camIn) gl.uniform1f(C.u.u_camIn, camIn ? 1 : 0);
   flBindTex(C, 'u_fd', 2, S.fdA.tex); flBindTex(C, 'u_ft', 3, S.fth.tex); flBindTex(C, 'u_sceneCopy', 4, R.fbo.copy.tex);
   if (!(K & 8)) gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   gl.depthFunc(gl.LEQUAL); gl.enable(gl.CULL_FACE); gl.bindVertexArray(null); gl.activeTexture(gl.TEXTURE0);
@@ -607,10 +616,10 @@ function flRender() {
 // ============================================================================
 //  Integración con el mundo
 // ============================================================================
-// El líquido quieto (lagos, mar, charcos asentados) sigue guardado en las celdas como volumen y se dibuja como una
-// superficie lisa. Cuando ese volumen puede moverse hacia un hueco (debajo, o al lado si hay caída o si es espeso),
-// se convierte en partículas que fluyen de verdad; las partículas que se calman se vuelven a guardar como volumen
-// nivelado. Las que entran en agua o lava quieta se suman a ella (el mar las absorbe sin límite).
+// El líquido normal (lagos, mar, charcos asentados) sigue guardado en las celdas como volumen, fluye con las reglas
+// de siempre (k_fluids) y nunca se convierte en partículas: solo el cubo las crea. Las partículas que se calman se
+// vuelven a guardar como volumen nivelado, y las que tocan agua o lava normal se suman a ella (el mar las absorbe
+// sin límite). Así no hay idas y vueltas entre los dos estados.
 // El agua puesta con cubo (o derramada) lleva LIQ_PLACED: sobre tierra, pasto, hojas, arena… se va filtrando.
 const LIQ_PLACED = 16;
 let FL_POROUS = null;
@@ -644,69 +653,12 @@ function flSpawnCell(w, x, y, z, a, phase, vx, vy, vz) {
   }
   return k;
 }
-// el mar entra en un hueco: un chorro de partículas la primera vez y, al siguiente tick, el hueco ya es mar
-// (las partículas que quedan dentro se las traga). Sin esto el mar soltaba partículas sin fin, porque las
-// partículas nunca vuelven a ser bloques y el hueco seguía vacío.
-FL.oceanPend = new Map();
-function flOceanInto(w, x, y, z, vx, vy, vz) {
-  const k = FLK(x, y, z), t = FL.oceanPend.get(k);
-  if (t !== undefined && G.tick - t < 400) { FL.oceanPend.delete(k); if (cellVol(w, x, y, z, 1) === 0) w.set(x, y, z, ID.water, LIQ_OCEAN); return; }
-  if (FL.oceanPend.size > 4000) FL.oceanPend.clear();
-  FL.oceanPend.set(k, G.tick); flSpawnCell(w, x, y, z, 8, 1, vx, vy, vz); FL.oceanFill.push([G.tick, w, x, y, z]);
-}
 // el hueco ya lleno de partículas no vuelve a pedir agua al mar (las partículas cuentan como líquido): pasado un
 // segundo se convierte en mar igualmente y las partículas que quedan dentro se funden con él
 FL.oceanFill = [];
 function flOceanFillTick() {
   const L = FL.oceanFill; if (!L.length) return;
   while (L.length && G.tick - L[0][0] > 20) { const [, w, x, y, z] = L.shift(); const b = w.get(x, y, z); if (y <= SEA && (b === 0 || (b > 0 && REG[b].liquid === 1 && !(w.getMeta(x, y, z) & LIQ_OCEAN)))) w.set(x, y, z, ID.water, LIQ_OCEAN); }
-}
-// sustituye a fluidTick cuando el fluido continuo está activo en esa celda
-function flContTick(w, x, y, z, id, liq, meta) {
-  const ocean = liq === 1 && (meta & LIQ_OCEAN) !== 0; let a = ocean ? 8 : liqAmt(meta); const placed = (meta & LIQ_PLACED) !== 0;
-  const ph = liq === 2 ? 2 : (placed ? 3 : 1); const lazy = liq === 2 ? 30 : 6;
-  const vb = cellVol(w, x, y - 1, z, liq);
-  // 1) hueco debajo: el líquido cae como fluido
-  if (vb === 0) {
-    if (flFree() < a * 8 + 256) { w.scheduleTick(x, y, z, 20, 0); return; }
-    if (ocean) { if (y - 1 <= SEA) { flOceanInto(w, x, y - 1, z, 0, -0.5, 0); w.scheduleTick(x, y, z, 14, 0); } return; }
-    flSpawnCell(w, x, y, z, a, ph, 0, -0.3, 0); flSetStatic(w, x, y, z, liq, 0); return;
-  }
-  if (vb > 0 && vb < 8) { // dentro del mismo cuerpo: asentar hacia abajo
-    if (ocean) { flSetStatic(w, x, y - 1, z, 1, 8, false); return; }
-    const bp = (w.getMeta(x, y - 1, z) & LIQ_PLACED) !== 0; const mv = Math.min(a, 8 - vb);
-    flSetStatic(w, x, y - 1, z, liq, vb + mv, placed || bp); flSetStatic(w, x, y, z, liq, a - mv, placed); if (a - mv > 0) w.scheduleTick(x, y, z, lazy, 0); return;
-  }
-  if (liq === 1 && vb < 0 && w.get(x, y - 1, z) === ID.lava) { lavaQuench(w, x, y - 1, z, true); return; }
-  // 2) a los lados: hueco con caída, o líquido espeso junto a suelo libre → se derrama como fluido
-  const spill = []; const low = [];
-  for (const [dx, dz] of N4) {
-    const v = cellVol(w, x + dx, y, z + dz, liq);
-    if (v < 0) { if (liq === 1 && w.get(x + dx, y, z + dz) === ID.lava) lavaQuench(w, x + dx, y, z + dz, false); continue; }
-    if (v === 0) { const d = cellVol(w, x + dx, y - 1, z + dz, liq); if ((d >= 0 && d < 8) || a >= (liq === 2 ? 5 : 3)) spill.push([dx, dz]); continue; }
-    if (v <= a - 2) low.push([dx, dz, v]);
-  }
-  if (spill.length) {
-    if (flFree() < a * 8 + 256) { w.scheduleTick(x, y, z, 20, 0); return; }
-    if (ocean) { if (y <= SEA) for (const [dx, dz] of spill) flOceanInto(w, x + dx, y, z + dz, dx * 1.2, 0, dz * 1.2); w.scheduleTick(x, y, z, 14, 0); return; }
-    let sx = 0, sz = 0; for (const [dx, dz] of spill) { sx += dx; sz += dz; } const sp = liq === 2 ? 0.35 : 1.0;
-    flSpawnCell(w, x, y, z, a, ph, sx * sp, 0, sz * sp); flSetStatic(w, x, y, z, liq, 0); return;
-  }
-  // 3) nivelar dentro del cuerpo (pasos pequeños; la superficie lisa lo disimula)
-  if (low.length && !ocean) {
-    let total = a; for (const c of low) total += c[2]; const n = low.length + 1; const base = Math.floor(total / n); let rest = total - base * n;
-    const want = [base, ...low.map(() => base)]; while (rest > 0) { want[(Math.random() * n) | 0]++; rest--; }
-    for (let k = 0; k < low.length; k++) { const [dx, dz, v] = low[k]; if (want[k + 1] !== v) flSetStatic(w, x + dx, y, z + dz, liq, want[k + 1], placed || (w.getMeta(x + dx, y, z + dz) & LIQ_PLACED) !== 0); }
-    if (want[0] !== a) { flSetStatic(w, x, y, z, liq, want[0], placed); w.scheduleTick(x, y, z, lazy, 0); }
-    return;
-  }
-  // 4) agua puesta sobre suelo poroso: se filtra poco a poco
-  if (liq === 1 && placed && !ocean) {
-    const bb = w.get(x, y - 1, z);
-    if (bb > 0 && flPorous(bb)) { flSetStatic(w, x, y, z, 1, a - 1, true); if (a - 1 > 0) w.scheduleTick(x, y, z, 100 + (Math.random() * 60 | 0), 0); return; }
-  }
-  // 5) celda llena junto al mar (y por debajo de su nivel): pasa a ser mar
-  if (liq === 1 && a === 8 && !ocean && y <= SEA) { let oc = 0; for (const [dx, dz] of N4) if (isOcean(w, x + dx, y, z + dz)) oc++; if (oc >= 1 || isOcean(w, x, y + 1, z)) w.set(x, y, z, ID.water, LIQ_OCEAN); }
 }
 // ---------------------------------------------------------------- lo que hacen las partículas (tras cada lectura)
 const FLK = (x, y, z) => ((x + 32768) * 65536 + (z + 32768)) * 512 + (y + 64);
@@ -817,7 +769,7 @@ function flDepositComp(w, comp, lava) {
 }
 // charco en calma: el agua sobre suelo poroso (tierra, pasto, hojas, arena…) se filtra poco a poco; la lava se queda
 function flSoak(w, comp, lava, dtR) {
-  if (lava) return;
+  if (lava || !G.doWaterDespawn) return; // /gamerule doWaterDespawn (apagado por defecto)
   for (const c of comp) { if (!c.idx.length) continue; const below = w.get(c.x, c.y - 1, c.z); const here = w.get(c.x, c.y, c.z); const g = (below > 0 && flPorous(below)) || (here > 0 && flPorous(here)); if (!g) continue;
     let n = Math.max(1, Math.round(c.idx.length * dtR * 0.08));
     for (const i of c.idx) { if (n <= 0) break; if (!FL.dying.has(i)) { FL.dying.set(i, (G.wclock ?? performance.now() / 1000) * 1000); n--; } } }
@@ -843,10 +795,16 @@ function flSerialize() {
 }
 function flRestore(data) { FL.pending = data; }
 // consultas para la física de las entidades (de la última lectura)
+// ¿celda con líquido de verdad? Pocas partículas sueltas sin nada debajo (gotas sobre la cabeza, salpicaduras) no cuentan
+function flCellWet(world, c) {
+  const n = c.idx.length; if (n < 5) return false; if (n >= FL_PPB * 0.5) return true;
+  const b = world.get(c.x, c.y - 1, c.z); if (b < 0 || (b > 0 && (REG[b].solid || REG[b].liquid))) return true;
+  const d = FL.occ.get(FLK(c.x, c.y - 1, c.z)); return !!d && d.idx.length >= FL_PPB * 0.3;
+}
 function flLiquidAt(world, x, y, z) {
   if (world !== FL.world || !FL.occ.size) return 0; const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z); const c = FL.occ.get(FLK(bx, by, bz));
-  if (c && c.idx.length >= 5 && y < c.top + 0.12) return c.nl > c.nw ? 2 : 1;
-  const u = FL.occ.get(FLK(bx, by + 1, bz)); if (u && u.idx.length >= 5) return u.nl > u.nw ? 2 : 1; // la celda de arriba también tiene: estamos dentro
+  if (c && y < c.top + 0.12 && flCellWet(world, c)) return c.nl > c.nw ? 2 : 1;
+  const u = FL.occ.get(FLK(bx, by + 1, bz)); if (u && c && c.idx.length >= 5 && flCellWet(world, u) && flCellWet(world, c)) return u.nl > u.nw ? 2 : 1; // la celda de arriba también tiene: estamos dentro
   return 0;
 }
 function flSurfIn(world, bx, by, bz) {
@@ -883,3 +841,42 @@ function flBucketTake(w, ox, oy, oz, d, maxT) {
   }
   return 0;
 }
+// ---------------------------------------------------------------- charcos de lluvia
+// Con lluvia, en los huecos del suelo que ven el cielo (cerca del jugador) y en algunas manchas del suelo llano van
+// cayendo partículas de agua que forman charcos; cuando deja de llover se evaporan poco a poco (no dependen de
+// /gamerule doWaterDespawn: es agua de lluvia). Solo con el fluido continuo activo.
+const RAINP = { sites: [], siteT: 0, n: 0, countT: 0, acc: 0 };
+function rainSurf(w, x, z, y0) { // bloque sólido más alto bajo el cielo abierto en la columna (o NaN)
+  for (let y = y0 + 16; y > y0 - 14; y--) { const b = w.get(x, y, z); if (b === 0) continue; const d = b > 0 ? REG[b] : null; if (!d || d.liquid || !d.solid || d.leaves || !T_FULL[b]) return NaN; return w.light(x, y + 1, z)[0] >= 15 ? y : NaN; }
+  return NaN;
+}
+function rainPuddleTick(w, dt) {
+  if (!dt || !FL.rainTag || w.dim !== 'overworld' || !flCanSim(w)) return;
+  const p = G.player; const rl = G.rainLevel || 0; const px = Math.floor(p.x), py = Math.floor(p.y), pz = Math.floor(p.z);
+  // cuántas hay (cada 2 s)
+  if ((RAINP.countT -= dt) <= 0) { RAINP.countT = 2; let n = 0; for (let i = 0; i < FL.hi; i++) if (FL.rainTag[i]) n++; RAINP.n = n; }
+  if (rl < 0.15) { // sin lluvia: se evaporan (un 2,5 % por segundo, encogiéndose)
+    if (!RAINP.n) return; RAINP.acc += dt * 0.025 * RAINP.n; let k = Math.floor(RAINP.acc); if (k <= 0) return; RAINP.acc -= k; const now = (G.wclock ?? performance.now() / 1000) * 1000;
+    for (let i = 0; i < FL.hi && k > 0; i++) if (FL.rainTag[i] && FL.phase[i] && !FL.dying.has(i)) { FL.dying.set(i, now); FL.rainTag[i] = 0; RAINP.n--; k--; }
+    return;
+  }
+  // sitios para charcos (cada 2 s): huecos (dos o más vecinos más altos) y manchas fijas del suelo llano
+  if ((RAINP.siteT -= dt) <= 0) { RAINP.siteT = 2; const out = [];
+    for (let t = 0; t < 70 && out.length < 24; t++) {
+      const x = px + ((Math.random() * 29) | 0) - 14, z = pz + ((Math.random() * 29) | 0) - 14; const y = rainSurf(w, x, z, py); if (y !== y) continue;
+      if (!flCanSim(w, x, y + 1, z)) continue; const bio = BIOMES[w.biomeAt(x, z)]; if (!bio || bio.snow || bio.id === BI.desert || bio.id === BI.savanna) continue;
+      let hi = 0, lo = 0; for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const b = w.get(x + dx, y + 1, z + dz); if (b > 0 && REG[b].solid) hi++; else if (rainSurf(w, x + dx, z + dz, py) < y) lo++; }
+      if (lo > 0) continue; // el agua se escurriría
+      if (hi >= 2 || (hashStr(x + ':' + z) % 19) === 0) out.push([x, y + 1, z]);
+    }
+    if (out.length) RAINP.sites = out.concat(RAINP.sites.filter(s => Math.abs(s[0] - px) < 16 && Math.abs(s[2] - pz) < 16)).slice(0, 32);
+  }
+  if (!RAINP.sites.length || RAINP.n > 9000 || flFree() < 20000) return;
+  // gotas que caen en los sitios (hasta unas 150 por charco)
+  RAINP.acc += dt * rl * 260; let k = Math.floor(RAINP.acc); RAINP.acc -= k;
+  while (k-- > 0) {
+    const s = RAINP.sites[(Math.random() * RAINP.sites.length) | 0]; const c = FL.occ.get(FLK(s[0], s[1], s[2])); if (c && c.idx.length > 150) continue;
+    const i = flSpawn(s[0] + 0.12 + Math.random() * 0.76, s[1] + 0.08 + Math.random() * 0.25, s[2] + 0.12 + Math.random() * 0.76, 0, -2, 0, 1); if (i < 0) break; FL.rainTag[i] = 1; RAINP.n++;
+  }
+}
+

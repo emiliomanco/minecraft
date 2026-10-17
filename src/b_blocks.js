@@ -158,7 +158,7 @@ for (const [c, dn] of [['white', 'blanca'], ['orange', 'naranja'], ['yellow', 'a
 defB('tnt', 'Dinamita', { tex: { top: 'tnt_top', bottom: 'tnt_bottom', side: 'tnt_side' }, hard: 0, tnt: true });
 defB('bed', 'Cama', { render: 'shape', shape: 'bed', solid: true, box: [0, 0, 0, 16, 9, 16], tex: { top: 'bed_top', side: 'bed_side', bottom: 'oak_planks' }, hard: 0.2, ui: 'bed' });
 defB('spawner', 'Generador de monstruos', { trans: 1, hard: 5, tool: 'pickaxe', lvl: 1, drop: null });
-defB('sponge', 'Esponja', { hard: 0.6 });
+defB('sponge', 'Bloque de esponja', { hard: 0.6 });
 defB('wet_sponge', 'Esponja mojada', { hard: 0.6 });
 defB('prismarine', 'Prismarina', { hard: 1.5, tool: 'pickaxe', lvl: 1 });
 defB('prismarine_bricks', 'Ladrillos de prismarina', { hard: 1.5, tool: 'pickaxe', lvl: 1 });
@@ -310,7 +310,7 @@ defI('spyglass', 'Catalejo', { stack: 1, spyglass: true }); defI('map', 'Mapa', 
 defI('turtle_helmet', 'Caparazón de tortuga', { stack: 1, armor: { slot: 0, pts: 2, mat: 'turtle', tough: 0 }, dur: 275 });
 defI('trident', 'Tridente', { stack: 1, dur: 250, dmg: 9, trident: true }); defI('crossbow', 'Ballesta', { stack: 1, dur: 465, bow: true, crossbow: true });
 defI('mace', 'Maza', { stack: 1, dur: 500, dmg: 6, mace: true });
-defI('one_hit_obliterator', 'One-Hit Obliterator', { stack: 1, dmg: 1e9, obliterator: true }); // sin receta: solo en el menú creativo defI('heavy_core', 'Núcleo denso');
+defI('heavy_core', 'Núcleo denso');
 defI('experience_bottle', 'Frasco de experiencia', { throwable: 'xpbottle' }); defI('brush', 'Brocha', { stack: 1, dur: 64 }); defI('fishing_rod', 'Caña de pescar', { stack: 1, dur: 64 });
 defI('broom', 'Escoba', { stack: 1, broom: true }); defI('oak_boat', 'Bote', { stack: 1, boatItem: true });
 const TOOLMAT = { wooden: { lvl: 1, speed: 2, dur: 59, dmg: 0, n: 'madera', col: [137, 103, 59] }, stone: { lvl: 2, speed: 4, dur: 131, dmg: 1, n: 'piedra', col: [130, 130, 130] }, iron: { lvl: 3, speed: 6, dur: 250, dmg: 2, n: 'hierro', col: [220, 220, 220] }, golden: { lvl: 1, speed: 12, dur: 32, dmg: 0, n: 'oro', col: [250, 220, 70] }, diamond: { lvl: 4, speed: 8, dur: 1561, dmg: 3, n: 'diamante', col: [80, 230, 220] }, netherite: { lvl: 5, speed: 9, dur: 2031, dmg: 4, n: 'netherita', col: [80, 70, 75] } };
@@ -325,6 +325,9 @@ for (const m in ARMORMAT) ARMORPART.forEach(([p, dn, du], slot) => {
 });
 // (añadir objetos nuevos siempre al final para no cambiar los IDs guardados)
 defI('fire_extinguisher', 'Extintor', { stack: 1, dur: 400, extinguisher: true });
+defI('one_hit_obliterator', 'One-Hit Obliterator', { stack: 1, dmg: 1e9, obliterator: true }); /* sin receta: solo en el menú creativo */
+defI('flamethrower', 'Lanzallamas', { stack: 1, dur: 600, flamethrower: true });
+defI('sponge_item', 'Esponja', { stack: 1, pbfSponge: true }); /* borra partículas de agua y lava del fluido continuo */
 // ---- codificación del meta de líquidos (agua/lava), compartida por simulación (k_fluids), mallado y render:
 //  bits 0-2: volumen en octavos (0 = bloque lleno 8/8, 1..7 = n/8)
 //  bit 3 (8): cayendo (columna vertical / chorro)
@@ -805,6 +808,8 @@ function itemTexAuto(p, name) {
     brush: () => { for (let i = 0; i < 7; i++) p.set(3 + i, 12 - i, [150, 110, 60]); p.rect(9, 2, 13, 6, [220, 200, 160]); outline(p); }, oak_boat: () => { for (let x = 1; x < 15; x++) { const d = Math.abs(x - 7.5); const y0 = 8 + Math.max(0, d - 4.5) * 0.9; for (let y = Math.round(y0); y < 13; y++) p.set(x, y, [150, 115, 65].map(v => v + (p.r() - 0.5) * 18 - (y === 12 ? 30 : 0))); } p.rect(6, 6, 7, 11, [110, 80, 45]); outline(p); }, broom: () => { for (let i = 0; i < 9; i++) p.set(12 - i, 1 + i, [125, 90, 50]); for (let y = 9; y < 15; y++) for (let x = 1; x < 7; x++) if (x + (14 - y) * 0.5 < 8 && x - (y - 9) * 0.4 > 0) p.set(x, y, [205, 175, 80].map(v => v + (p.r() - 0.5) * 30)); p.rect(3, 9, 5, 10, [150, 60, 40]); outline(p); }, fishing_rod: () => { for (let i = 0; i < 12; i++) p.set(2 + i, 13 - i, [120, 90, 50]); for (let y = 2; y < 14; y++) p.set(13, y, [230, 230, 230]); },
     beetroot: () => { blob([170, 30, 50], 4.5); p.rect(7, 2, 8, 4, [60, 140, 40]); }, beetroot_seeds: () => { for (let i = 0; i < 6; i++) p.set(4 + ((p.r() * 8) | 0), 6 + ((p.r() * 6) | 0), [150, 110, 60]); }, beetroot_soup: () => { for (let y = 7; y < 13; y++) for (let x = 3; x < 13; x++) if (Math.hypot((x - 7.5) / 5, (y - 7) / 5.5) < 1) p.set(x, y, [140, 100, 60]); p.rect(4, 7, 11, 8, [170, 30, 50]); outline(p); },
     fire_extinguisher: () => { p.rect(5, 4, 10, 14, [200, 30, 30]); p.rect(6, 5, 7, 13, [240, 80, 70]); p.rect(9, 5, 9, 13, [140, 15, 15]); p.rect(5, 8, 10, 9, [230, 230, 230]); p.rect(6, 2, 9, 3, [40, 40, 40]); p.rect(9, 1, 12, 1, [60, 60, 60]); p.rect(3, 2, 5, 2, [40, 40, 40]); p.rect(2, 3, 2, 9, [30, 30, 30]); outline(p); },
+    flamethrower: () => { for (let i = 0; i < 9; i++) { p.set(4 + i, 11 - i, [90, 90, 98]); p.set(5 + i, 11 - i, [140, 140, 150]); } p.rect(2, 9, 6, 14, [190, 70, 30]); p.rect(3, 10, 4, 13, [235, 125, 60]); p.rect(6, 12, 8, 13, [60, 60, 66]); p.set(14, 2, [120, 170, 255]); p.set(13, 1, [255, 190, 80]); p.set(14, 1, [255, 235, 150]); p.set(15, 1, [255, 150, 40]); p.set(15, 0, [255, 120, 30]); outline(p); },
+    sponge_item: () => { for (let y = 4; y < 13; y++) for (let x = 2; x < 14; x++) if (Math.hypot((x - 7.5) / 5.6, (y - 8.5) / 4.4) < 1) p.set(x, y, [228, 208, 75].map(v => v + (p.r() - 0.5) * 22)); for (let k = 0; k < 12; k++) p.set(4 + ((p.r() * 8) | 0), 6 + ((p.r() * 6) | 0), [165, 140, 38]); outline(p); },
     experience_bottle: () => { for (let y = 5; y < 15; y++) for (let x = 4; x < 12; x++) if (Math.hypot(x - 7.5, y - 10) < 4.2) p.set(x, y, [120, 230, 90]); p.rect(7, 2, 8, 5, [200, 220, 240]); outline(p); },
     saddle: () => blob([120, 70, 40], 5), name_tag: () => { p.rect(3, 5, 12, 10, [220, 210, 180]); outline(p); }, netherite_upgrade: () => { p.rect(3, 2, 12, 13, [60, 50, 50]); p.rect(5, 4, 10, 11, [110, 90, 85]); outline(p); },
   };
