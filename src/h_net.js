@@ -58,7 +58,7 @@ function hostHandle(c, m) {
       const st = n.states[name]; const sp = G.worldSpawn;
       const e = new Entity('player', st ? st.dim : 'overworld', st ? st.x : sp.x, st ? st.y : sp.y, st ? st.z : sp.z); e.remotePlayer = true; e.conn = c; e.name = name; e.state = st; e.armor = []; e.w = 0.6; e.h = 1.8; e.hp = 20;
       G.entities.set(e.id, e); c.ent = e; n.peers = n.conns.size;
-      c.send({ t: 'welcome', id: e.id, name, seed: G.seed, climate: G.climate, seedStr: G.seedStr, worldName: G.worldName, gm: G.gameMode, time: G.time, diff: G.difficulty, dk: G.dragonKilled, ei: G.endInit, gw: G.gateway, st: st || null, spawn: sp, hostName: G.player.name, hostId: G.player.id, keep: G.keepInventory });
+      c.send({ t: 'welcome', id: e.id, name, seed: G.seed, climate: G.climate, dyn: !!G.dynTrees, seedStr: G.seedStr, worldName: G.worldName, gm: G.gameMode, time: G.time, diff: G.difficulty, dk: G.dragonKilled, ei: G.endInit, gw: G.gateway, st: st || null, spawn: sp, hostName: G.player.name, hostId: G.player.id, keep: G.keepInventory });
       const chunks = modifiedChunks(); for (let i = 0; i < chunks.length; i += 8) c.send({ t: 'chunks', list: chunks.slice(i, i + 8) });
       c.send({ t: 'ready' });
       chatMsg(name + ' se unió al juego', '#ff8'); netBroadcast({ t: 'chat', m: name + ' se unió al juego', sys: true }, c);

@@ -472,7 +472,8 @@ class Generator {
     const r = rngFor(this.seed, tcx, tcz, 2); const x0 = tcx * 16, z0 = tcz * 16;
     const mid = this.col(x0 + 8, z0 + 8); const b = mid.biome;
     const dens = { [BI.forest]: 9, [BI.birch_forest]: 8, [BI.dark_forest]: 12, [BI.taiga]: 8, [BI.snowy_taiga]: 6, [BI.jungle]: 14, [BI.savanna]: 1.2, [BI.plains]: 0.25, [BI.sunflower_plains]: 0.2, [BI.mangrove_swamp]: 5, [BI.mountains]: 1.5, [BI.snowy_plains]: 0.15 }[b] || 0;
-    let n = Math.floor(dens) + (r() < dens % 1 ? 1 : 0);
+    const dd = this.dynTrees ? dens * 0.6 : dens; // los árboles dinámicos son más grandes: menos por chunk
+    let n = Math.floor(dd) + (r() < dd % 1 ? 1 : 0);
     const S = new SB(ch, this);
     const clear = this.clearZones(x0 + 8, z0 + 8);
     for (let i = 0; i < n; i++) {
@@ -483,6 +484,7 @@ class Generator {
       if (c.h < SEA || c.river || c.lake) continue;
       if (c.biome !== b && dens < 1) continue;
       const y = c.h + 1; const snow = BIOMES[c.biome].snow;
+      if (this.dynTrees && !(c.biome === BI.dark_forest && rr >= 0.7 && rr < 0.8) && !(c.biome === BI.jungle && rr >= 0.55)) { dynTreePlace(S, tx, y, tz, dynSpeciesFor(c.biome, rr), 3, this.seed); continue; }
       switch (c.biome) {
         case BI.forest: rr < 0.25 ? treeBirch(S, tx, y, tz, tr) : rr < 0.3 ? treeBigOak(S, tx, y, tz, tr) : treeOak(S, tx, y, tz, tr); break;
         case BI.birch_forest: rr < 0.85 ? treeBirch(S, tx, y, tz, tr, rr < 0.2) : treeOak(S, tx, y, tz, tr); break;
@@ -671,6 +673,118 @@ class SB {
 }
 
 // ---------------------------------------------------------------- árboles
+// ---------------------------------------------------------------- ÁRBOLES DINÁMICOS
+// Un árbol dinámico es un esqueleto de ramas (bloques dyn_*_log con grosor 0..7 en meta & 7) y copas de hojas en las
+// puntas. La raíz (la rama más baja) guarda la fase de crecimiento en meta >> 3 & 3 y si es un tocón talado (meta & 32).
+// La forma sale de la posición (misma semilla en cada fase), así cada fase contiene más o menos a la anterior.
+const DYN_W = [2, 3, 4, 6, 8, 10, 12, 16]; // ancho en píxeles para cada grosor
+function dynTreePlan(sp, x, y, z, stage, seed) {
+  const r = mulberry32((seed ^ Math.imul(x, 73856093) ^ Math.imul(z, 19349663) ^ 0x7ee5) >>> 0);
+  const logs = new Map(), leaves = new Map(); const K = (a, b, c) => a + ',' + b + ',' + c;
+  const s = [0.32, 0.55, 0.8, 1][stage];
+  const addLog = (a, b, c, t) => { t = clamp(Math.round(t), 0, 7); const k = K(a, b, c); const o = logs.get(k); if (!o || o[3] < t) logs.set(k, [a, b, c, t]); };
+  const leaf = (a, b, c) => { const k = K(a, b, c); if (!logs.has(k)) leaves.set(k, [a, b, c]); };
+  const blob = (cx, cy, cz, rx, ry) => { rx = Math.max(1, rx); ry = Math.max(1, ry); for (let dy = -ry; dy <= ry; dy++) for (let dz = -rx; dz <= rx; dz++) for (let dx = -rx; dx <= rx; dx++) { const d = (dx * dx + dz * dz) / (rx * rx + 0.5) + (dy * dy) / (ry * ry + 0.5); if (d <= 1 && !(d > 0.7 && r() < 0.35)) leaf(cx + dx, cy + dy, cz + dz); } };
+  const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  // rama: avanza en (dx,dz), sube un bloque cada `rise` pasos y a veces se desvía a un lado; deja la punta para la copa
+  const branch = (bx, by, bz, d, len, t0, rise, droop) => {
+    let cx = bx, cy = by, cz = bz; const [dx, dz] = d;
+    for (let i = 1; i <= len; i++) {
+      const t = t0 * (1 - (i - 1) / len);
+      if (rise > 0 && i % rise === 0) { cy++; addLog(cx, cy, cz, t); }
+      if (droop && i === len && r() < 0.5) { cy--; addLog(cx, cy, cz, t); }
+      cx += dx; cz += dz; addLog(cx, cy, cz, t);
+      if (r() < 0.22 && i < len) { const sx = dz, sz = dx; const sg = r() < 0.5 ? 1 : -1; cx += sx * sg; cz += sz * sg; addLog(cx, cy, cz, t); }
+    }
+    return [cx, cy, cz];
+  };
+  const trunk = (H, T0, taper) => { for (let i = 0; i < H; i++) addLog(x, y + i, z, T0 * (1 - taper * i / H)); };
+  const tT = (H, T0, taper, yy) => T0 * (1 - taper * (yy - y) / H);
+  let leafId = sp;
+  switch (sp) {
+    case 'oak': case 'cherry': case 'dark_oak': {
+      const big = sp === 'dark_oak'; const H = Math.max(2, Math.round((big ? 6 : 5) * s + r() * 2 * s) + 1), T0 = Math.round((big ? 7 : 6) * s + 0.4);
+      trunk(H, T0, 0.6); const nb = Math.round((big ? 5 : sp === 'cherry' ? 4 : 3) * s + r() * 2 * s); let last = -1;
+      for (let i = 0; i < nb; i++) {
+        const hy = y + Math.floor(H * (0.45 + 0.5 * r())); let di = (r() * 4) | 0; if (di === last) di = (di + 1 + ((r() * 3) | 0)) % 4; last = di;
+        const len = Math.max(1, Math.round((2 + r() * (big ? 3 : 2.5)) * s + (sp === 'cherry' ? 1 : 0)));
+        const tip = branch(x, hy, z, DIRS[di], len, Math.max(0, tT(H, T0, 0.6, hy) - 2), sp === 'cherry' ? 3 : 2, false);
+        blob(tip[0], tip[1] + 1, tip[2], Math.round((big ? 3 : 2.4) * s + 0.5), Math.round((big ? 2 : 1.6) * s + 0.4));
+      }
+      blob(x, y + H, z, Math.round((big ? 3.4 : 2.8) * s + 0.5), Math.round(2 * s + 0.5));
+      break;
+    }
+    case 'birch': {
+      const H = Math.max(3, Math.round((7 + r() * 3) * s) + 1), T0 = Math.round(4 * s + 0.3); trunk(H, T0, 0.5);
+      const nb = Math.round(4 * s + r() * 2 * s);
+      for (let i = 0; i < nb; i++) { const hy = y + Math.floor(H * (0.5 + 0.45 * r())); const tip = branch(x, hy, z, DIRS[(r() * 4) | 0], 1 + ((r() * 2 * s) | 0), 0.6, 1, false); blob(tip[0], tip[1] + 1, tip[2], Math.round(1.6 * s + 0.4), 1); }
+      for (let yy = y + Math.floor(H * 0.45); yy <= y + H + 1; yy++) { const k = (yy - y) / (H + 1); const rr = Math.max(1, Math.round((k > 0.85 ? 1.2 : 2.3) * s + 0.3)); blob(x, yy, z, rr, 0); }
+      break;
+    }
+    case 'spruce': {
+      const H = Math.max(3, Math.round((9 + r() * 4) * s) + 2), T0 = Math.round(5 * s + 0.3); trunk(H, T0, 0.75);
+      for (let yy = y + 2; yy < y + H; yy++) {
+        const k = (yy - y - 2) / Math.max(1, H - 2); const rr = Math.max(1, Math.round((1 - k) * 3.4 * s + 0.6));
+        if (((yy - y) & 1) === 0 || rr <= 1) { blob(x, yy, z, rr, 0); if (rr >= 2) for (const d of DIRS) if (r() < 0.7) branch(x, yy, z, d, rr - 1, 0.5, 0, true); }
+        else blob(x, yy, z, Math.max(1, rr - 1), 0);
+      }
+      leaf(x, y + H, z); leaf(x, y + H + 1, z);
+      break;
+    }
+    case 'jungle': {
+      const H = Math.max(4, Math.round((12 + r() * 6) * s) + 2), T0 = Math.round(7 * s + 0.3); trunk(H, T0, 0.55);
+      const nb = Math.max(1, Math.round(3 * s));
+      for (let i = 0; i < nb; i++) { const hy = y + Math.floor(H * (0.7 + 0.25 * r())); const tip = branch(x, hy, z, DIRS[(i + ((r() * 4) | 0)) % 4], Math.round((3 + r() * 2) * s) + 1, Math.max(0, tT(H, T0, 0.55, hy) - 2), 2, false); blob(tip[0], tip[1] + 1, tip[2], Math.round(3 * s + 0.4), Math.round(1.6 * s + 0.4)); }
+      blob(x, y + H, z, Math.round(3.4 * s + 0.5), Math.round(2 * s + 0.4));
+      break;
+    }
+    case 'acacia': {
+      const h1 = Math.max(1, Math.round(3 * s) + 1), T0 = Math.round(5 * s + 0.3); for (let i = 0; i < h1; i++) addLog(x, y + i, z, T0 * (1 - 0.3 * i / h1));
+      const limbs = [DIRS[(r() * 4) | 0]]; if (s > 0.5) { let d2 = DIRS[(r() * 4) | 0]; if (d2 === limbs[0]) d2 = [-d2[0], -d2[1]]; limbs.push(d2); }
+      for (const [dx, dz] of limbs) {
+        let cx = x, cy = y + h1 - 1, cz = z; const n = Math.max(1, Math.round((2.5 + r()) * s)); let t = Math.max(0, T0 - 2);
+        for (let i = 0; i < n; i++) { cy++; addLog(cx, cy, cz, t); cx += dx; cz += dz; addLog(cx, cy, cz, t); t = Math.max(0, t - 1); }
+        cy++; addLog(cx, cy, cz, Math.max(0, t - 1)); const R = Math.round(3 * s + 0.5); blob(cx, cy + 1, cz, R, 0); blob(cx, cy + 2, cz, Math.max(1, R - 1), 0);
+      }
+      break;
+    }
+  }
+  return { logs, leaves, leafId: leafId + '_leaves', logId: 'dyn_' + sp + '_log' };
+}
+// coloca (o hace crecer) el árbol: las ramas solo ocupan aire, plantas, hojas o ramas del mismo árbol; las hojas solo aire
+function dynTreePlace(S, x, y, z, sp, stage, seed, stumpKeep) {
+  const P = dynTreePlan(sp, x, y, z, stage, seed); const logId = ID[P.logId], leafId = ID[P.leafId]; if (!logId) return;
+  // cada árbol es un cuerpo aparte: una rama no puede tocar ramas de otro árbol ni apoyarse en el suelo (solo la raíz);
+  // se coloca solo lo que sigue unido a la raíz recorriendo el esqueleto desde ella
+  const live = !!S.getMeta; const K = (a, b, c) => a + ',' + b + ',' + c; const N6 = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+  const ground = b => b > 0 && REG[b] && REG[b].solid && !REG[b].leaves && !REG[b].dynLog && !REG[b].replace;
+  const ok = (a, b, c, root) => {
+    const cur = S.get(a, b, c); if (cur < 0) return false; const cd = cur > 0 ? REG[cur] : null;
+    if (cur !== 0 && cur !== ID.water && !(cd && (cd.replace || cd.leaves || cur === logId))) return false;
+    if (!root && !P.logs.has(K(a, b - 1, c)) && ground(S.get(a, b - 1, c))) return false;
+    for (const [dx, dy, dz] of N6) { const k = K(a + dx, b + dy, c + dz); if (P.logs.has(k)) continue; const nb = S.get(a + dx, b + dy, c + dz); if (nb > 0 && REG[nb].dynLog && !(live && nb === logId)) return false; }
+    return true;
+  };
+  const rk = K(x, y, z); if (!P.logs.has(rk) || !ok(x, y, z, true)) return;
+  const seen = new Set([rk]), q = [P.logs.get(rk)];
+  while (q.length) {
+    const [a, b, c, t] = q.pop(); let tt = t; if (live && S.get(a, b, c) === logId) tt = Math.max(t, S.getMeta(a, b, c) & 7);
+    const root = a === x && b === y && c === z; S.set(a, b, c, logId, tt | (root ? (stage & 3) << 3 : 0));
+    for (const [dx, dy, dz] of N6) { const k = K(a + dx, b + dy, c + dz); if (seen.has(k) || !P.logs.has(k)) continue; seen.add(k); const L = P.logs.get(k); if (ok(L[0], L[1], L[2], false)) q.push(L); }
+  }
+  for (const [a, b, c] of P.leaves.values()) S.setIfAir(a, b, c, leafId);
+}
+function dynSpeciesFor(biome, rr) {
+  switch (biome) {
+    case BI.forest: return rr < 0.25 ? 'birch' : 'oak';
+    case BI.birch_forest: return rr < 0.85 ? 'birch' : 'oak';
+    case BI.dark_forest: return rr < 0.75 ? 'dark_oak' : 'oak';
+    case BI.taiga: case BI.snowy_taiga: case BI.snowy_plains: case BI.mountains: return 'spruce';
+    case BI.jungle: return 'jungle';
+    case BI.savanna: return 'acacia';
+    default: return BI.cherry_grove !== undefined && biome === BI.cherry_grove ? 'cherry' : 'oak';
+  }
+}
 function leafBlob(S, cx, cy, cz, rad, id, r, round = true) {
   for (let dy = -rad; dy <= rad; dy++) for (let dx = -rad; dx <= rad; dx++) for (let dz = -rad; dz <= rad; dz++) {
     const d = dx * dx + dy * dy * 1.6 + dz * dz; if (d > rad * rad + 0.5) continue; if (round && d > rad * rad - 1 && r() < 0.35) continue;

@@ -207,6 +207,7 @@ img.glint{filter:drop-shadow(0 0 2px #b46bff) saturate(1.3);animation:glint 2s i
   <div class="label">Semilla para el generador (vacío = aleatoria)</div><input class="tf" id="cSeed" maxlength="40">
   <div class="row" style="margin-top:12px"><button class="btn small" id="cMode">Modo: Supervivencia</button><button class="btn small" id="cDiff">Dificultad: Normal</button></div>
   <div class="row"><button class="btn small" id="cCheats">Trucos: SÍ</button><button class="btn small" id="cStruct">Estructuras: SÍ</button></div>
+  <div class="row"><button class="btn small" id="cDyn" title="Árboles realistas: ramas con grosor, el árbol cae entero al talarlo, tarda 4 veces más en romperse, deja un tocón que rebrota y crece por fases.">Árboles dinámicos: SÍ</button></div>
   <div class="row" style="margin-top:14px"><button class="btn small" id="cGo">Crear nuevo mundo</button><button class="btn small" id="cBack">Cancelar</button></div>
 </div>
 
@@ -643,6 +644,9 @@ defB('cherry_log', 'Tronco de cerezo', { tex: { top: 'cherry_log_top', side: 'ch
 defB('cherry_planks', 'Tablones de cerezo', { hard: 2, tool: 'axe', flammable: true, planks: true });
 defB('cherry_leaves', 'Hojas de cerezo', { trans: 1, hard: 0.2, att: 1, wave: 1, drop: null, flammable: true, leaves: 'cherry' });
 defB('cherry_sapling', 'Brote de cerezo', Object.assign({}, PL, { drop: 'cherry_sapling', sapling: 'cherry' }));
+// árboles dinámicos: ramas con grosor (meta & 7) que se unen con sus vecinas; el árbol es un solo cuerpo y tarda 4 veces más que un tronco
+const DYN_SPECIES = ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'cherry'];
+for (const w of DYN_SPECIES) defB('dyn_' + w + '_log', 'Rama de ' + REG[ID[w + '_log']].disp.replace('Tronco de ', ''), { render: 'shape', shape: 'dynlog', solid: true, opaque: false, tex: { top: w + '_log_top', side: w + '_log' }, hard: 8, tool: 'axe', flammable: true, log: true, dynLog: w, drop: w + '_log' });
 defB('pink_petals', 'Pétalos rosas', { render: 'box', box: [0, 0, 0, 16, 1, 16], trans: 1, solid: false, hard: 0, replace: true });
 defB('blast_furnace', 'Alto horno', { tex: { top: 'blast_furnace_top', side: 'blast_furnace_side', front: 'blast_furnace_front' }, hard: 3.5, tool: 'pickaxe', lvl: 1, ui: 'furnace', orient: true, smeltKind: 'ore' });
 defB('smoker', 'Ahumador', { tex: { top: 'smoker_top', side: 'smoker_side', front: 'smoker_front' }, hard: 3.5, tool: 'axe', ui: 'furnace', orient: true, smeltKind: 'food' });
@@ -1759,7 +1763,8 @@ class Generator {
     const r = rngFor(this.seed, tcx, tcz, 2); const x0 = tcx * 16, z0 = tcz * 16;
     const mid = this.col(x0 + 8, z0 + 8); const b = mid.biome;
     const dens = { [BI.forest]: 9, [BI.birch_forest]: 8, [BI.dark_forest]: 12, [BI.taiga]: 8, [BI.snowy_taiga]: 6, [BI.jungle]: 14, [BI.savanna]: 1.2, [BI.plains]: 0.25, [BI.sunflower_plains]: 0.2, [BI.mangrove_swamp]: 5, [BI.mountains]: 1.5, [BI.snowy_plains]: 0.15 }[b] || 0;
-    let n = Math.floor(dens) + (r() < dens % 1 ? 1 : 0);
+    const dd = this.dynTrees ? dens * 0.6 : dens; // los árboles dinámicos son más grandes: menos por chunk
+    let n = Math.floor(dd) + (r() < dd % 1 ? 1 : 0);
     const S = new SB(ch, this);
     const clear = this.clearZones(x0 + 8, z0 + 8);
     for (let i = 0; i < n; i++) {
@@ -1770,6 +1775,7 @@ class Generator {
       if (c.h < SEA || c.river || c.lake) continue;
       if (c.biome !== b && dens < 1) continue;
       const y = c.h + 1; const snow = BIOMES[c.biome].snow;
+      if (this.dynTrees && !(c.biome === BI.dark_forest && rr >= 0.7 && rr < 0.8) && !(c.biome === BI.jungle && rr >= 0.55)) { dynTreePlace(S, tx, y, tz, dynSpeciesFor(c.biome, rr), 3, this.seed); continue; }
       switch (c.biome) {
         case BI.forest: rr < 0.25 ? treeBirch(S, tx, y, tz, tr) : rr < 0.3 ? treeBigOak(S, tx, y, tz, tr) : treeOak(S, tx, y, tz, tr); break;
         case BI.birch_forest: rr < 0.85 ? treeBirch(S, tx, y, tz, tr, rr < 0.2) : treeOak(S, tx, y, tz, tr); break;
@@ -1958,6 +1964,118 @@ class SB {
 }
 
 // ---------------------------------------------------------------- árboles
+// ---------------------------------------------------------------- ÁRBOLES DINÁMICOS
+// Un árbol dinámico es un esqueleto de ramas (bloques dyn_*_log con grosor 0..7 en meta & 7) y copas de hojas en las
+// puntas. La raíz (la rama más baja) guarda la fase de crecimiento en meta >> 3 & 3 y si es un tocón talado (meta & 32).
+// La forma sale de la posición (misma semilla en cada fase), así cada fase contiene más o menos a la anterior.
+const DYN_W = [2, 3, 4, 6, 8, 10, 12, 16]; // ancho en píxeles para cada grosor
+function dynTreePlan(sp, x, y, z, stage, seed) {
+  const r = mulberry32((seed ^ Math.imul(x, 73856093) ^ Math.imul(z, 19349663) ^ 0x7ee5) >>> 0);
+  const logs = new Map(), leaves = new Map(); const K = (a, b, c) => a + ',' + b + ',' + c;
+  const s = [0.32, 0.55, 0.8, 1][stage];
+  const addLog = (a, b, c, t) => { t = clamp(Math.round(t), 0, 7); const k = K(a, b, c); const o = logs.get(k); if (!o || o[3] < t) logs.set(k, [a, b, c, t]); };
+  const leaf = (a, b, c) => { const k = K(a, b, c); if (!logs.has(k)) leaves.set(k, [a, b, c]); };
+  const blob = (cx, cy, cz, rx, ry) => { rx = Math.max(1, rx); ry = Math.max(1, ry); for (let dy = -ry; dy <= ry; dy++) for (let dz = -rx; dz <= rx; dz++) for (let dx = -rx; dx <= rx; dx++) { const d = (dx * dx + dz * dz) / (rx * rx + 0.5) + (dy * dy) / (ry * ry + 0.5); if (d <= 1 && !(d > 0.7 && r() < 0.35)) leaf(cx + dx, cy + dy, cz + dz); } };
+  const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  // rama: avanza en (dx,dz), sube un bloque cada `rise` pasos y a veces se desvía a un lado; deja la punta para la copa
+  const branch = (bx, by, bz, d, len, t0, rise, droop) => {
+    let cx = bx, cy = by, cz = bz; const [dx, dz] = d;
+    for (let i = 1; i <= len; i++) {
+      const t = t0 * (1 - (i - 1) / len);
+      if (rise > 0 && i % rise === 0) { cy++; addLog(cx, cy, cz, t); }
+      if (droop && i === len && r() < 0.5) { cy--; addLog(cx, cy, cz, t); }
+      cx += dx; cz += dz; addLog(cx, cy, cz, t);
+      if (r() < 0.22 && i < len) { const sx = dz, sz = dx; const sg = r() < 0.5 ? 1 : -1; cx += sx * sg; cz += sz * sg; addLog(cx, cy, cz, t); }
+    }
+    return [cx, cy, cz];
+  };
+  const trunk = (H, T0, taper) => { for (let i = 0; i < H; i++) addLog(x, y + i, z, T0 * (1 - taper * i / H)); };
+  const tT = (H, T0, taper, yy) => T0 * (1 - taper * (yy - y) / H);
+  let leafId = sp;
+  switch (sp) {
+    case 'oak': case 'cherry': case 'dark_oak': {
+      const big = sp === 'dark_oak'; const H = Math.max(2, Math.round((big ? 6 : 5) * s + r() * 2 * s) + 1), T0 = Math.round((big ? 7 : 6) * s + 0.4);
+      trunk(H, T0, 0.6); const nb = Math.round((big ? 5 : sp === 'cherry' ? 4 : 3) * s + r() * 2 * s); let last = -1;
+      for (let i = 0; i < nb; i++) {
+        const hy = y + Math.floor(H * (0.45 + 0.5 * r())); let di = (r() * 4) | 0; if (di === last) di = (di + 1 + ((r() * 3) | 0)) % 4; last = di;
+        const len = Math.max(1, Math.round((2 + r() * (big ? 3 : 2.5)) * s + (sp === 'cherry' ? 1 : 0)));
+        const tip = branch(x, hy, z, DIRS[di], len, Math.max(0, tT(H, T0, 0.6, hy) - 2), sp === 'cherry' ? 3 : 2, false);
+        blob(tip[0], tip[1] + 1, tip[2], Math.round((big ? 3 : 2.4) * s + 0.5), Math.round((big ? 2 : 1.6) * s + 0.4));
+      }
+      blob(x, y + H, z, Math.round((big ? 3.4 : 2.8) * s + 0.5), Math.round(2 * s + 0.5));
+      break;
+    }
+    case 'birch': {
+      const H = Math.max(3, Math.round((7 + r() * 3) * s) + 1), T0 = Math.round(4 * s + 0.3); trunk(H, T0, 0.5);
+      const nb = Math.round(4 * s + r() * 2 * s);
+      for (let i = 0; i < nb; i++) { const hy = y + Math.floor(H * (0.5 + 0.45 * r())); const tip = branch(x, hy, z, DIRS[(r() * 4) | 0], 1 + ((r() * 2 * s) | 0), 0.6, 1, false); blob(tip[0], tip[1] + 1, tip[2], Math.round(1.6 * s + 0.4), 1); }
+      for (let yy = y + Math.floor(H * 0.45); yy <= y + H + 1; yy++) { const k = (yy - y) / (H + 1); const rr = Math.max(1, Math.round((k > 0.85 ? 1.2 : 2.3) * s + 0.3)); blob(x, yy, z, rr, 0); }
+      break;
+    }
+    case 'spruce': {
+      const H = Math.max(3, Math.round((9 + r() * 4) * s) + 2), T0 = Math.round(5 * s + 0.3); trunk(H, T0, 0.75);
+      for (let yy = y + 2; yy < y + H; yy++) {
+        const k = (yy - y - 2) / Math.max(1, H - 2); const rr = Math.max(1, Math.round((1 - k) * 3.4 * s + 0.6));
+        if (((yy - y) & 1) === 0 || rr <= 1) { blob(x, yy, z, rr, 0); if (rr >= 2) for (const d of DIRS) if (r() < 0.7) branch(x, yy, z, d, rr - 1, 0.5, 0, true); }
+        else blob(x, yy, z, Math.max(1, rr - 1), 0);
+      }
+      leaf(x, y + H, z); leaf(x, y + H + 1, z);
+      break;
+    }
+    case 'jungle': {
+      const H = Math.max(4, Math.round((12 + r() * 6) * s) + 2), T0 = Math.round(7 * s + 0.3); trunk(H, T0, 0.55);
+      const nb = Math.max(1, Math.round(3 * s));
+      for (let i = 0; i < nb; i++) { const hy = y + Math.floor(H * (0.7 + 0.25 * r())); const tip = branch(x, hy, z, DIRS[(i + ((r() * 4) | 0)) % 4], Math.round((3 + r() * 2) * s) + 1, Math.max(0, tT(H, T0, 0.55, hy) - 2), 2, false); blob(tip[0], tip[1] + 1, tip[2], Math.round(3 * s + 0.4), Math.round(1.6 * s + 0.4)); }
+      blob(x, y + H, z, Math.round(3.4 * s + 0.5), Math.round(2 * s + 0.4));
+      break;
+    }
+    case 'acacia': {
+      const h1 = Math.max(1, Math.round(3 * s) + 1), T0 = Math.round(5 * s + 0.3); for (let i = 0; i < h1; i++) addLog(x, y + i, z, T0 * (1 - 0.3 * i / h1));
+      const limbs = [DIRS[(r() * 4) | 0]]; if (s > 0.5) { let d2 = DIRS[(r() * 4) | 0]; if (d2 === limbs[0]) d2 = [-d2[0], -d2[1]]; limbs.push(d2); }
+      for (const [dx, dz] of limbs) {
+        let cx = x, cy = y + h1 - 1, cz = z; const n = Math.max(1, Math.round((2.5 + r()) * s)); let t = Math.max(0, T0 - 2);
+        for (let i = 0; i < n; i++) { cy++; addLog(cx, cy, cz, t); cx += dx; cz += dz; addLog(cx, cy, cz, t); t = Math.max(0, t - 1); }
+        cy++; addLog(cx, cy, cz, Math.max(0, t - 1)); const R = Math.round(3 * s + 0.5); blob(cx, cy + 1, cz, R, 0); blob(cx, cy + 2, cz, Math.max(1, R - 1), 0);
+      }
+      break;
+    }
+  }
+  return { logs, leaves, leafId: leafId + '_leaves', logId: 'dyn_' + sp + '_log' };
+}
+// coloca (o hace crecer) el árbol: las ramas solo ocupan aire, plantas, hojas o ramas del mismo árbol; las hojas solo aire
+function dynTreePlace(S, x, y, z, sp, stage, seed, stumpKeep) {
+  const P = dynTreePlan(sp, x, y, z, stage, seed); const logId = ID[P.logId], leafId = ID[P.leafId]; if (!logId) return;
+  // cada árbol es un cuerpo aparte: una rama no puede tocar ramas de otro árbol ni apoyarse en el suelo (solo la raíz);
+  // se coloca solo lo que sigue unido a la raíz recorriendo el esqueleto desde ella
+  const live = !!S.getMeta; const K = (a, b, c) => a + ',' + b + ',' + c; const N6 = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+  const ground = b => b > 0 && REG[b] && REG[b].solid && !REG[b].leaves && !REG[b].dynLog && !REG[b].replace;
+  const ok = (a, b, c, root) => {
+    const cur = S.get(a, b, c); if (cur < 0) return false; const cd = cur > 0 ? REG[cur] : null;
+    if (cur !== 0 && cur !== ID.water && !(cd && (cd.replace || cd.leaves || cur === logId))) return false;
+    if (!root && !P.logs.has(K(a, b - 1, c)) && ground(S.get(a, b - 1, c))) return false;
+    for (const [dx, dy, dz] of N6) { const k = K(a + dx, b + dy, c + dz); if (P.logs.has(k)) continue; const nb = S.get(a + dx, b + dy, c + dz); if (nb > 0 && REG[nb].dynLog && !(live && nb === logId)) return false; }
+    return true;
+  };
+  const rk = K(x, y, z); if (!P.logs.has(rk) || !ok(x, y, z, true)) return;
+  const seen = new Set([rk]), q = [P.logs.get(rk)];
+  while (q.length) {
+    const [a, b, c, t] = q.pop(); let tt = t; if (live && S.get(a, b, c) === logId) tt = Math.max(t, S.getMeta(a, b, c) & 7);
+    const root = a === x && b === y && c === z; S.set(a, b, c, logId, tt | (root ? (stage & 3) << 3 : 0));
+    for (const [dx, dy, dz] of N6) { const k = K(a + dx, b + dy, c + dz); if (seen.has(k) || !P.logs.has(k)) continue; seen.add(k); const L = P.logs.get(k); if (ok(L[0], L[1], L[2], false)) q.push(L); }
+  }
+  for (const [a, b, c] of P.leaves.values()) S.setIfAir(a, b, c, leafId);
+}
+function dynSpeciesFor(biome, rr) {
+  switch (biome) {
+    case BI.forest: return rr < 0.25 ? 'birch' : 'oak';
+    case BI.birch_forest: return rr < 0.85 ? 'birch' : 'oak';
+    case BI.dark_forest: return rr < 0.75 ? 'dark_oak' : 'oak';
+    case BI.taiga: case BI.snowy_taiga: case BI.snowy_plains: case BI.mountains: return 'spruce';
+    case BI.jungle: return 'jungle';
+    case BI.savanna: return 'acacia';
+    default: return BI.cherry_grove !== undefined && biome === BI.cherry_grove ? 'cherry' : 'oak';
+  }
+}
 function leafBlob(S, cx, cy, cz, rad, id, r, round = true) {
   for (let dy = -rad; dy <= rad; dy++) for (let dx = -rad; dx <= rad; dx++) for (let dz = -rad; dz <= rad; dz++) {
     const d = dx * dx + dy * dy * 1.6 + dz * dz; if (d > rad * rad + 0.5) continue; if (round && d > rad * rad - 1 && r() < 0.35) continue;
@@ -2669,6 +2787,18 @@ function connects(d, nb) {
   return false;
 }
 // devuelve cajas en 1/16. nb(dx,dz) -> id del vecino en el mismo nivel
+// rama de árbol dinámico: columna o cubo central con su grosor y brazos hacia cada rama vecina (con el menor de los dos grosores)
+function dynLogBoxes(meta, ri) {
+  const w = DYN_W[meta & 7], a = 8 - w / 2, b = 8 + w / 2; const out = [];
+  const conn = o => { const nd = REG[regB[o]]; return nd && nd.dynLog ? DYN_W[regM[o] & 7] : 0; };
+  const up = conn(ri + LRR), dn = conn(ri - LRR); const bl = REG[regB[ri - LRR]]; const ground = !dn && bl && bl.solid && !bl.dynLog && !bl.leaves && !bl.replace;
+  out.push([a, dn || ground ? 0 : a, a, b, up ? 16 : b, b]);
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const nw = conn(ri + dx + dz * LR); if (!nw) continue; const ww = Math.min(w, nw), c0 = 8 - ww / 2, c1 = 8 + ww / 2;
+    out.push([dx > 0 ? b : dx < 0 ? 0 : c0, c0, dz > 0 ? b : dz < 0 ? 0 : c0, dx > 0 ? 16 : dx < 0 ? a : c1, c1, dz > 0 ? 16 : dz < 0 ? a : c1]);
+  }
+  return out;
+}
 function shapeBoxes(d, meta, nb, forCollision) {
   const f = meta & 3; const out = [];
   switch (d.shape) {
@@ -2683,6 +2813,7 @@ function shapeBoxes(d, meta, nb, forCollision) {
       if ((meta & 4) && !forCollision) { const P = [[2, 9, 1, 14, 11, 6], [10, 9, 2, 15, 11, 14], [2, 9, 10, 14, 11, 15], [1, 9, 2, 6, 11, 14]][f].slice(); P.push('white_wool'); out.push(P); }
       break;
     }
+    case 'dynlog': { const w = Math.max(DYN_W[meta & 7], 6), a = 8 - w / 2; out.push([a, 0, a, 16 - a, 16, 16 - a]); break; } // colisión/selección: la columna (mín. 6 px)
     case 'door': { const open = meta & 4; const side = (f + 2) % 4; out.push(PANEL[open ? (side + 1) % 4 : side]); break; }
     case 'trapdoor': { if (meta & 4) out.push(PANEL[(f + 2) % 4]); else out.push(meta & 8 ? [0, 13, 0, 16, 16, 16] : [0, 0, 0, 16, 3, 16]); break; }
     case 'gate': { const ax = f & 1; if (meta & 4) { out.push(ax ? [0, 0, 6, 2, 16, 10] : [6, 0, 0, 10, 16, 2]); out.push(ax ? [14, 0, 6, 16, 16, 10] : [6, 0, 14, 10, 16, 16]); } else out.push(ax ? [7, 0, 0, 9, 16, 16] : [0, 0, 7, 16, 16, 9]); break; }
@@ -2773,7 +2904,7 @@ function meshRegion(world, ch) {
     } else if (d.render === 'box') {
       emitBox(d, x, y, z, ri, meta, ch);
     } else if (d.render === 'shape') {
-      const boxes = shapeBoxes(d, meta, (dx, dz) => regB[ri + dx + dz * LR]); const lay = d.shape === 'door' && (meta & 8) ? d.layerTop : undefined;
+      const boxes = d.shape === 'dynlog' ? dynLogBoxes(meta, ri) : shapeBoxes(d, meta, (dx, dz) => regB[ri + dx + dz * LR]); const lay = d.shape === 'door' && (meta & 8) ? d.layerTop : undefined;
       for (const b of boxes) { if (b.length > 6) emitBox(d, x, y, z, ri, meta, ch, b.slice(0, 6), TEX[b[6]]); else emitBox(d, x, y, z, ri, meta, ch, b, lay); }
     } else if (d.render === 'liquid') {
       emitLiquidCell(d.liquid === 1 ? MB_W : O, d.liquid, x, y, z, ri, ch, bxw, bzw);
@@ -3101,7 +3232,7 @@ const WORKER_MAIN = function () {
     try {
       if (m.t === 'gen') {
         let w = worlds[m.wid];
-        if (!w) { w = worlds[m.wid] = new World(m.dim, m.seed, m.climate); if (m.noStruct) w.gen.genStructures = () => { }; }
+        if (!w) { w = worlds[m.wid] = new World(m.dim, m.seed, m.climate); if (m.noStruct) w.gen.genStructures = () => { }; if (m.dyn) w.gen.dynTrees = true; }
         const c = new Chunk(w, m.cx, m.cz); w.gen.generate(c);
         self.postMessage({ t: 'gen', id: m.id, wid: m.wid, cx: m.cx, cz: m.cz, blocks: c.blocks, meta: c.meta, biomes: c.biomes, tint: c.tint, loot: c.loot, spawners: c.spawners, spawns: c.spawns, top: c.top }, [c.blocks.buffer, c.meta.buffer, c.biomes.buffer, c.tint.buffer]);
       } else if (m.t === 'mesh') {
@@ -3133,7 +3264,7 @@ function wkBusy() { let n = 0; for (const w of WK.list) n += w.busy; return n; }
 function requestGen(w, cx, cz) {
   if (!WK.ok) { w.ensure(cx, cz); return; }
   const k = ckey(cx, cz); if (!w.genPending) w.genPending = new Set(); if (w.genPending.has(k) || w.chunks.has(k)) return;
-  w.genPending.add(k); wpost({ t: 'gen', wid: worldId(w), dim: w.dim, seed: w.seed, climate: w.climate, cx, cz, noStruct: !!w.noStruct });
+  w.genPending.add(k); wpost({ t: 'gen', wid: worldId(w), dim: w.dim, seed: w.seed, climate: w.climate, dyn: !!w.gen.dynTrees, cx, cz, noStruct: !!w.noStruct });
 }
 function requestMesh(w, c) {
   buildRegion(w, c);
@@ -5303,6 +5434,7 @@ function drawAllEntities(dim, alpha, selfView) {
   }
   if (typeof drawRagdolls === 'function') drawRagdolls(dim, !selfView);
   if (typeof drawDebris === 'function') drawDebris(dim);
+  if (typeof drawFallingTrees === 'function') drawFallingTrees(dim);
   if (selfView && G.player) drawEntity(Object.assign(Object.create(Object.getPrototypeOf(G.player)), G.player, { px: G.player.px, heldItem: G.player.held(), pitch: G.player.pitch }), 1, t);
 }
 // rayos (guardián, curación del dragón)
@@ -5538,6 +5670,7 @@ function markDirty(w, x, z, urgent) {
 }
 const NETBATCH = [];
 function onBlockSet(w, x, y, z, old, id, meta) {
+  if (old > 0 && REG[old].dynLog && !(id > 0 && REG[id].dynLog) && typeof dynOnRemoved === 'function') dynOnRemoved(w, x, y, z, old); // árbol dinámico: lo que queda suelto cae
   if (old === ID.bed && id !== ID.bed) for (const [dx, dz] of DIR4) { // la otra mitad de la cama se va con esta
     if (w.get(x + dx, y, z + dz) !== ID.bed) continue; const m = w.getMeta(x + dx, y, z + dz); const [fx, fz] = DIR4[m & 3]; const s = m & 4 ? -1 : 1;
     if (x + dx + fx * s === x && z + dz + fz * s === z) w.set(x + dx, y, z + dz, 0);
@@ -5635,7 +5768,8 @@ function worldBuilder(w) {
   return { set: (x, y, z, id, m) => w.set(x, y, z, id, m || 0), get: (x, y, z) => w.get(x, y, z), setIfAir: (x, y, z, id, m) => { const b = w.get(x, y, z); if (b === 0 || (b > 0 && REG[b].replace)) w.set(x, y, z, id, m || 0); }, setIfSolid: (x, y, z, id) => { const b = w.get(x, y, z); if (b > 0 && REG[b].solid) w.set(x, y, z, id); } };
 }
 function growSapling(w, x, y, z, b) {
-  const kind = REG[b].sapling; const S = worldBuilder(w); const r = Math.random; w.set(x, y, z, 0);
+  const kind = REG[b].sapling; if (typeof dynOn === 'function' && dynOn(w) && dynGrowFromSapling(w, x, y, z, kind)) return; // árbol dinámico: brote → árbol joven
+  const S = worldBuilder(w); const r = Math.random; w.set(x, y, z, 0);
   ({ oak: treeOak, birch: treeBirch, spruce: (S, x, y, z, r) => treeSpruce(S, x, y, z, r, false), jungle: treeJungle, acacia: treeAcacia, dark_oak: treeDarkOak, mangrove: treeMangrove, cherry: treeCherry })[kind](S, x, y, z, r);
 }
 function treeCherry(S, x, y, z, r) { const h = 5 + (r() * 2 | 0); for (let i = 0; i < h; i++) S.set(x, y + i, z, ID.cherry_log); leafBlob(S, x, y + h, z, 3, ID.cherry_leaves, r); }
@@ -5645,6 +5779,7 @@ function randomTicks(w, cx, cz) {
     const x = Math.random() * 16 | 0, z = Math.random() * 16 | 0, y = (s << 4) + (Math.random() * 16 | 0); if (y >= H) continue;
     const b = c.blocks[x | z << 4 | y << 8]; if (!b) continue; const wx = cx * 16 + x, wz = cz * 16 + z; const d = REG[b];
     if (d.sapling) { if (Math.random() < 0.15 && w.light(wx, y + 1, wz)[0] >= 9) growSapling(w, wx, y, wz, b); }
+    else if (d.dynLog) dynGrowTick(w, wx, y, wz, b);
     else if (d.crop) { const m = w.getMeta(wx, y, wz); if (m < 7 && Math.random() < 0.35 && w.light(wx, y, wz)[0] + w.light(wx, y, wz)[1] >= 9) w.set(wx, y, wz, b, m + 1); }
     else if (b === ID.grass_block) { const a = w.get(wx, y + 1, wz); if (a > 0 && T_FULL[a]) w.set(wx, y, wz, ID.dirt); else for (let i = 0; i < 2; i++) { const nx = wx + (Math.random() * 3 | 0) - 1, ny = y + (Math.random() * 3 | 0) - 1, nz = wz + (Math.random() * 3 | 0) - 1; if (w.get(nx, ny, nz) === ID.dirt && w.get(nx, ny + 1, nz) === 0 && w.light(nx, ny + 1, nz)[0] >= 9) w.set(nx, ny, nz, ID.grass_block); } }
     else if (d.leaves && !(w.getMeta(wx, y, wz) & 1)) { let found = false; for (let dx = -4; dx <= 4 && !found; dx++) for (let dy = -4; dy <= 4 && !found; dy++) for (let dz = -4; dz <= 4 && !found; dz++) { const o = w.get(wx + dx, y + dy, wz + dz); if (o > 0 && REG[o].log) found = true; } if (!found) { w.set(wx, y, wz, 0); dropBlockItems(w, wx, y, wz, b, null, true); } }
@@ -6532,7 +6667,7 @@ function hostHandle(c, m) {
       const st = n.states[name]; const sp = G.worldSpawn;
       const e = new Entity('player', st ? st.dim : 'overworld', st ? st.x : sp.x, st ? st.y : sp.y, st ? st.z : sp.z); e.remotePlayer = true; e.conn = c; e.name = name; e.state = st; e.armor = []; e.w = 0.6; e.h = 1.8; e.hp = 20;
       G.entities.set(e.id, e); c.ent = e; n.peers = n.conns.size;
-      c.send({ t: 'welcome', id: e.id, name, seed: G.seed, climate: G.climate, seedStr: G.seedStr, worldName: G.worldName, gm: G.gameMode, time: G.time, diff: G.difficulty, dk: G.dragonKilled, ei: G.endInit, gw: G.gateway, st: st || null, spawn: sp, hostName: G.player.name, hostId: G.player.id, keep: G.keepInventory });
+      c.send({ t: 'welcome', id: e.id, name, seed: G.seed, climate: G.climate, dyn: !!G.dynTrees, seedStr: G.seedStr, worldName: G.worldName, gm: G.gameMode, time: G.time, diff: G.difficulty, dk: G.dragonKilled, ei: G.endInit, gw: G.gateway, st: st || null, spawn: sp, hostName: G.player.name, hostId: G.player.id, keep: G.keepInventory });
       const chunks = modifiedChunks(); for (let i = 0; i < chunks.length; i += 8) c.send({ t: 'chunks', list: chunks.slice(i, i + 8) });
       c.send({ t: 'ready' });
       chatMsg(name + ' se unió al juego', '#ff8'); netBroadcast({ t: 'chat', m: name + ' se unió al juego', sys: true }, c);
@@ -9572,6 +9707,161 @@ function cmdUIKey(e) {
   else if (e.key === 'ArrowUp' && CMDUI.list.length) { e.preventDefault(); CMDUI.sel = (CMDUI.sel - 1 + CMDUI.list.length) % CMDUI.list.length; cmdUIUpdate(); }
 }
 
+// ===== w_trees.js
+// ============================================================================
+//  Árboles dinámicos (opción del mundo): el árbol es un solo cuerpo. Al romper una rama, todo lo
+//  que queda sin unión con la raíz cae de lado (girando sobre el corte) hasta el suelo o hasta chocar
+//  con algo, y en ese momento se convierte en madera, palos, brotes (y manzanas). Si se taló por
+//  encima de la raíz queda un tocón que con el tiempo vuelve a brotar; los árboles crecen por fases
+//  (brote → joven → mediano → adulto).
+// ============================================================================
+const DYNT = { falling: [], busy: false, queue: [] };
+function dynOn(w) { return !!(w && w.gen && w.gen.dynTrees); }
+const dynIsLog = b => b > 0 && REG[b] && REG[b].dynLog;
+// suelo firme para una raíz (las hojas, plantas y ramas no lo son)
+const dynGround = b => b > 0 && REG[b] && REG[b].solid && !REG[b].leaves && !REG[b].dynLog && !REG[b].replace;
+// raíz de una rama: la rama más baja de la columna (lo de debajo no es rama)
+function dynRootOf(w, x, y, z) { let yy = y; while (yy > 0 && dynIsLog(w.get(x, yy - 1, z))) yy--; return yy; }
+// mundo como "S" del generador (con getMeta para no adelgazar ramas al crecer)
+function dynWorldS(w) {
+  return {
+    get: (x, y, z) => w.get(x, y, z), getMeta: (x, y, z) => w.getMeta(x, y, z),
+    set: (x, y, z, id, m) => setBlockNet(w, x, y, z, id, m || 0),
+    setIfAir: (x, y, z, id, m) => { const b = w.get(x, y, z); if (b === 0 || (b > 0 && REG[b].replace && !REG[b].liquid)) setBlockNet(w, x, y, z, id, m || 0); }
+  };
+}
+// ---- crecimiento: el brote pasa a árbol joven; luego cada fase con los ticks aleatorios
+function dynGrowFromSapling(w, x, y, z, sp) {
+  if (!ID['dyn_' + sp + '_log']) return false;
+  DYNT.busy = true; try { setBlockNet(w, x, y, z, 0); dynTreePlace(dynWorldS(w), x, y, z, sp, 1, w.seed); } finally { DYNT.busy = false; }
+  return true;
+}
+function dynGrowTick(w, x, y, z, b) {
+  if (dynIsLog(w.get(x, y - 1, z))) return; // solo la raíz decide
+  if (!dynGround(w.get(x, y - 1, z))) return;
+  const m = w.getMeta(x, y, z), stage = (m >> 3) & 3, stump = m & 32, sp = REG[b].dynLog;
+  if (w.light(x, y + 1, z)[0] < 8 && !stump) return;
+  if (stump) { // el tocón rebrota: quita lo que quedó del tronco viejo y nace un árbol joven
+    if (Math.random() > 0.35) return;
+    DYNT.busy = true; try {
+      let yy = y + 1; while (yy < w.H && w.get(x, yy, z) === b) { setBlockNet(w, x, yy, z, 0); yy++; }
+      setBlockNet(w, x, y, z, b, (m & 7)); dynTreePlace(dynWorldS(w), x, y, z, sp, 1, w.seed ^ (G.tick | 0));
+      setBlockNet(w, x, y, z, b, Math.max(m & 7, w.getMeta(x, y, z) & 7) | (1 << 3));
+    } finally { DYNT.busy = false; }
+    return;
+  }
+  if (stage >= 3 || Math.random() > 0.5) return;
+  DYNT.busy = true; try { dynTreePlace(dynWorldS(w), x, y, z, sp, stage + 1, w.seed); setBlockNet(w, x, y, z, b, (w.getMeta(x, y, z) & 7) | ((stage + 1) << 3)); } finally { DYNT.busy = false; }
+}
+// ---- tala: al quitar una rama (a mano, explosión...) se mira qué queda sin unión con la raíz
+function dynOnRemoved(w, x, y, z, old) {
+  if (DYNT.busy || !dynOn(w) || (G.net && G.net.role === 'client')) return;
+  DYNT.queue.push([w, x, y, z, old]);
+}
+function dynProcessQueue() {
+  while (DYNT.queue.length) { const [w, x, y, z, old] = DYNT.queue.shift(); try { dynFell(w, x, y, z, old); } catch (e) { console.error(e); } }
+}
+function dynFell(w, x, y, z, old) {
+  const K = (a, b, c) => a + ',' + b + ',' + c; const N6 = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+  // ramas unidas a la rota (radio 18, máx. 1500)
+  const comp = new Map(); const st = [];
+  for (const [dx, dy, dz] of N6) { const a = x + dx, b = y + dy, c = z + dz; if (dynIsLog(w.get(a, b, c))) { comp.set(K(a, b, c), [a, b, c]); st.push([a, b, c]); } }
+  while (st.length && comp.size < 1500) { const [a, b, c] = st.pop(); for (const [dx, dy, dz] of N6) { const p = a + dx, q = b + dy, r = c + dz; const k = K(p, q, r); if (comp.has(k) || Math.abs(p - x) > 18 || Math.abs(r - z) > 18 || Math.abs(q - y) > 40) continue; if (dynIsLog(w.get(p, q, r))) { comp.set(k, [p, q, r]); st.push([p, q, r]); } } }
+  if (!comp.size) return;
+  // lo que sigue unido a una raíz (rama apoyada en suelo firme) se queda
+  const kept = new Set(); const st2 = [];
+  for (const [k, [a, b, c]] of comp) { if (dynGround(w.get(a, b - 1, c))) { kept.add(k); st2.push([a, b, c]); } }
+  while (st2.length) { const [a, b, c] = st2.pop(); for (const [dx, dy, dz] of N6) { const k = K(a + dx, b + dy, c + dz); if (comp.has(k) && !kept.has(k)) { kept.add(k); st2.push([a + dx, b + dy, c + dz]); } } }
+  const fall = []; for (const [k, v] of comp) if (!kept.has(k)) fall.push(v);
+  if (!fall.length) return;
+  // tocón: si el corte fue en el tronco, encima de la raíz que se queda
+  let stumped = false; const rb = w.get(x, y - 1, z); if (dynIsLog(rb) && kept.has(K(x, y - 1, z))) { stumped = true; const ry = dynRootOf(w, x, y - 1, z); const rm = w.getMeta(x, ry, z); DYNT.busy = true; setBlockNet(w, x, ry, z, w.get(x, ry, z), (rm & 7) | 32); DYNT.busy = false; }
+  // hojas de las ramas que caen (y no de las que quedan)
+  const fallSet = new Set(fall.map(v => K(v[0], v[1], v[2]))); const leaves = new Map(); const lq = [];
+  for (const [a, b, c] of fall) for (const [dx, dy, dz] of N6) lq.push([a + dx, b + dy, c + dz, 1]);
+  const nearKept = (a, b, c) => { for (let dy = -2; dy <= 2; dy++) for (let dz = -2; dz <= 2; dz++) for (let dx = -2; dx <= 2; dx++) { const k = K(a + dx, b + dy, c + dz); if (kept.has(k)) return true; } return false; };
+  while (lq.length && leaves.size < 2500) {
+    const [a, b, c, d] = lq.pop(); const k = K(a, b, c); if (leaves.has(k) || fallSet.has(k)) continue; const id = w.get(a, b, c);
+    if (!(id > 0 && REG[id].leaves) || (w.getMeta(a, b, c) & 1)) continue; if (kept.size && !stumped && nearKept(a, b, c)) continue; // tronco talado: caen todas; rama cortada: las de lo que queda se quedan
+    leaves.set(k, [a, b, c, id]); if (d < 6) for (const [dx, dy, dz] of N6) lq.push([a + dx, b + dy, c + dz, d + 1]);
+  }
+  // el cuerpo que cae: bloques relativos al punto de giro (encima del corte), girando hacia donde no está el jugador
+  const p = G.player; let fx = x + 0.5 - (p ? p.x : x), fz = z + 0.5 - (p ? p.z : z); const fl = Math.hypot(fx, fz) || 1; fx /= fl; fz /= fl;
+  const trunkCut = fall.some(v => v[0] === x && v[2] === z && v[1] === y + 1);
+  const blocks = [];
+  for (const [a, b, c] of fall) { const id = w.get(a, b, c); blocks.push({ x: a, y: b, z: c, id, m: w.getMeta(a, b, c) }); }
+  for (const [a, b, c, id] of leaves.values()) blocks.push({ x: a, y: b, z: c, id, m: 0 });
+  DYNT.busy = true; try { for (const B of blocks) setBlockNet(w, B.x, B.y, B.z, 0); } finally { DYNT.busy = false; }
+  const piv = [x + 0.5 + fx * 0.5, y + (trunkCut ? 1 : 0.5), z + 0.5 + fz * 0.5];
+  for (const B of blocks) { B.rx = B.x - piv[0]; B.ry = B.y - piv[1]; B.rz = B.z - piv[2]; }
+  DYNT.falling.push({ w, dim: w.dim, blocks, piv, ax: [fz, 0, -fx], th: 0, om: 0.25, drop: trunkCut ? 0 : 1, vy: 0, dy: 0, t: 0 });
+  playSound('break', x, y, z, 1, ID.oak_log);
+}
+// rotación de Rodrigues (columnas)
+function dynRot(ax, th) {
+  const [x, y, z] = ax, c = Math.cos(th), s = Math.sin(th), t = 1 - c;
+  return [t * x * x + c, t * x * y + s * z, t * x * z - s * y, t * x * y - s * z, t * y * y + c, t * y * z + s * x, t * x * z + s * y, t * y * z - s * x, t * z * z + c];
+}
+function dynPos(F, R, B, ox, oy, oz) { const vx = B.rx + ox, vy = B.ry + oy, vz = B.rz + oz; return [F.piv[0] + R[0] * vx + R[3] * vy + R[6] * vz, F.piv[1] + F.dy + R[1] * vx + R[4] * vy + R[7] * vz, F.piv[2] + R[2] * vx + R[5] * vy + R[8] * vz]; }
+function dynBlocked(F, R) {
+  const w = F.w; let i = 0;
+  for (const B of F.blocks) {
+    const leafy = REG[B.id] && REG[B.id].leaves; if (leafy && (i++ % 3)) continue;
+    if (B.rx * B.rx + B.ry * B.ry + B.rz * B.rz < 2.5) continue; // junto al corte (el tocón)
+    const p = dynPos(F, R, B, 0.5, 0.5, 0.5); const bx = Math.floor(p[0]), by = Math.floor(p[1]), bz = Math.floor(p[2]); const b = w.get(bx, by, bz);
+    if (b > 0 && REG[b].dynLog && (w.getMeta(bx, by, bz) & 7) < 4) continue; // atraviesa las ramas finas de otros árboles
+    if (b > 0 && REG[b].solid && !REG[b].replace && !REG[b].leaves) return true; if (p[1] < 1) return true; // las hojas de otros árboles no lo frenan
+  }
+  return false;
+}
+function dynFallingUpdate(dt) {
+  dynProcessQueue();
+  for (let i = DYNT.falling.length - 1; i >= 0; i--) {
+    const F = DYNT.falling[i]; F.t += dt; let done = F.t > 6;
+    const n = Math.max(1, Math.ceil(dt / 0.02)); const h = dt / n;
+    for (let k = 0; k < n && !done; k++) {
+      if (F.drop) { F.vy -= 20 * h; const ody = F.dy; F.dy += F.vy * h; if (dynBlocked(F, dynRot(F.ax, F.th))) { F.dy = ody; done = true; } }
+      else { F.om += (1.2 + 9 * Math.sin(F.th)) * h; const oth = F.th; F.th = Math.min(Math.PI / 2, F.th + F.om * h); if (dynBlocked(F, dynRot(F.ax, F.th))) { F.th = oth; done = true; } else if (F.th >= Math.PI / 2) done = true; }
+    }
+    if (done) { DYNT.last = { t: F.t, th: F.th, dy: F.dy, n: F.blocks.length, drop: F.drop }; dynFallingSettle(F); DYNT.falling.splice(i, 1); }
+  }
+}
+// al tocar el suelo desaparece y deja madera, palos, brotes y manzanas donde cayó cada parte
+function dynFallingSettle(F) {
+  const R = dynRot(F.ax, F.th); const w = F.w; const out = new Map(); const at = new Map();
+  const add = (name, n, p) => { if (!(n > 0) || ID[name] === undefined) return; out.set(name, (out.get(name) || 0) + n); if (!at.has(name)) at.set(name, []); at.get(name).push(p); };
+  let wood = 0, woodP = []; let sp = 'oak';
+  for (const B of F.blocks) {
+    const d = REG[B.id]; if (!d) continue; const p = dynPos(F, R, B, 0.5, 0.5, 0.5);
+    if (d.dynLog) { sp = d.dynLog; const ww = DYN_W[B.m & 7] / 16; wood += ww * ww * 1.6; woodP.push(p); if ((B.m & 7) <= 1 && Math.random() < 0.2) add('stick', 1, p); }
+    else if (d.leaves) {
+      const lsp = d.leaves; if (Math.random() < 0.012) add(lsp + '_sapling', 1, p); if (Math.random() < 0.012) add('stick', 1, p); if ((lsp === 'oak' || lsp === 'dark_oak') && Math.random() < 0.006) add('apple', 1, p);
+      if (Math.random() < 0.08) blockParticles(w, Math.floor(p[0]), Math.floor(p[1]), Math.floor(p[2]), B.id, 3, 1.5);
+    }
+  }
+  const nlog = Math.max(woodP.length ? 1 : 0, Math.round(wood)); for (let i = 0; i < nlog; i++) add(sp + '_log', 1, woodP[(i * 7) % woodP.length]);
+  if (!out.has(sp + '_sapling') && F.blocks.length > 30 && Math.random() < 0.6) add(sp + '_sapling', 1, woodP[woodP.length - 1] || F.piv);
+  for (const [name, n] of out) { const ps = at.get(name); let left = n; let j = 0; while (left > 0) { const c = Math.min(left, 16); const p = ps[(j * 5) % ps.length]; dropItem(F.dim, p[0], p[1] + 0.3, p[2], { id: ID[name], c }, (Math.random() - 0.5) * 2, 2, (Math.random() - 0.5) * 2, 10); left -= c; j++; } }
+  for (const p of woodP.slice(0, 12)) blockParticles(w, Math.floor(p[0]), Math.floor(p[1]), Math.floor(p[2]), ID[sp + '_log'], 4, 2);
+  const c = woodP[Math.floor(woodP.length / 2)] || F.piv; playSound('break', c[0], c[1], c[2], 1, ID.oak_log); playSound('fall', c[0], c[1], c[2], 0.8);
+  if (G.player && Math.hypot(G.player.x - c[0], G.player.z - c[2]) < 14) G.shake = Math.max(G.shake || 0, 0.35);
+}
+// dibujo: cada bloque como caja girada con el árbol (las ramas con su grosor)
+const _dtm = new Float32Array(16);
+function drawFallingTrees(dim) {
+  if (!DYNT.falling.length) return; const cam = R.cam;
+  for (const F of DYNT.falling) {
+    if (F.dim !== dim) continue; const Rm = dynRot(F.ax, F.th); const L = F.w.light(Math.floor(F.piv[0]), Math.floor(F.piv[1]) + 1, Math.floor(F.piv[2]));
+    for (const B of F.blocks) {
+      const d = REG[B.id]; if (!d || !d.faces) continue; const s = d.dynLog ? DYN_W[B.m & 7] / 16 : 1; const o = (1 - s) / 2;
+      const p = dynPos(F, Rm, B, o, 0, o); const m = _dtm;
+      m[0] = Rm[0] * s; m[1] = Rm[1] * s; m[2] = Rm[2] * s; m[3] = 0; m[4] = Rm[3]; m[5] = Rm[4]; m[6] = Rm[5]; m[7] = 0; m[8] = Rm[6] * s; m[9] = Rm[7] * s; m[10] = Rm[8] * s; m[11] = 0;
+      m[12] = p[0] - cam[0]; m[13] = p[1] - cam[1]; m[14] = p[2] - cam[2]; m[15] = 1;
+      drawBox(m, d.faces, L, d.tint ? [0.48, 0.7, 0.32, 1] : null, null, 0);
+    }
+  }
+}
+
 // ===== i_main.js
 // ============================================================================
 //  Principal: bucle, chunks, cámara, sonido, menús, opciones, guardado
@@ -9672,7 +9962,7 @@ function serializeWorld() {
   const players = Object.assign({}, G.playerStates || {}); players.__local = playerState(G.player); players.__local.name = G.player.name;
   if (G.net && G.net.role === 'host') for (const c of G.net.conns.values()) if (c.ent && c.ent.state) players[c.ent.name] = c.ent.state;
   const ents = []; for (const e of G.entities.values()) { if (e.proxy || e.remotePlayer || e.removed || e.dead) continue; if (e instanceof Mob && (e.persist || !e.def.hostile)) ents.push({ k: 'mob', ty: e.type, d: e.dim, x: e.x, y: e.y, z: e.z, hp: e.hp, c: e.color, p: e.persist, n: e.name }); else if (e.type === 'item') ents.push({ k: 'item', d: e.dim, x: e.x, y: e.y, z: e.z, s: e.stack }); else if (e.isBoat) ents.push({ k: 'boat', d: e.dim, x: e.x, y: e.y, z: e.z, r: e.rot }); }
-  return { format: 'minecraft2-world', version: 3, name: G.worldName, seed: G.seed, seedStr: G.seedStr, gameMode: G.defaultMode || G.gameMode, curMode: G.gameMode, difficulty: G.difficulty, cheats: G.cheats, time: G.time, rain: G.rain, rainTimer: G.rainTimer, worldSpawn: G.worldSpawn, dragonKilled: G.dragonKilled, endInit: G.endInit, gateway: G.gateway, keepInventory: G.keepInventory, containers: G.containers, spawned: [...G.spawned], dims, players, entities: ents, created: G.created || Date.now(), lastPlayed: Date.now(), structures: G.structures !== false, climate: G.climate || 1, fluid: typeof flSerialize === 'function' ? flSerialize() : null };
+  return { format: 'minecraft2-world', version: 3, name: G.worldName, seed: G.seed, seedStr: G.seedStr, gameMode: G.defaultMode || G.gameMode, curMode: G.gameMode, difficulty: G.difficulty, cheats: G.cheats, time: G.time, rain: G.rain, rainTimer: G.rainTimer, worldSpawn: G.worldSpawn, dragonKilled: G.dragonKilled, endInit: G.endInit, gateway: G.gateway, keepInventory: G.keepInventory, containers: G.containers, spawned: [...G.spawned], dims, players, entities: ents, created: G.created || Date.now(), lastPlayed: Date.now(), structures: G.structures !== false, climate: G.climate || 1, dynTrees: !!G.dynTrees, fluid: typeof flSerialize === 'function' ? flSerialize() : null };
 }
 function worldIcon() { try { const c = document.createElement('canvas'); c.width = 64; c.height = 64; c.getContext('2d').drawImage($('gl'), ($('gl').width - $('gl').height) / 2, 0, $('gl').height, $('gl').height, 0, 0, 64, 64); return c.toDataURL('image/jpeg', 0.7); } catch (e) { return null; } }
 async function saveWorld(silent) {
@@ -9707,6 +9997,7 @@ function startWorld(data, isNew, netWelcome) {
   G.defaultMode = data.gameMode || 'survival'; G.gameMode = data.curMode || data.gameMode || 'survival'; G.created = data.created || Date.now(); G.structures = data.structures !== false;
   G.climate = data.climate ?? (isNew ? 3 : 1); // biomas por clima en mundos nuevos; los antiguos siguen con los clásicos
   G.worlds = { overworld: new World('overworld', G.seed, G.climate), nether: new World('nether', G.seed, G.climate), end: new World('end', G.seed, G.climate) };
+  G.dynTrees = !!data.dynTrees; G.worlds.overworld.gen.dynTrees = G.dynTrees; // árboles dinámicos (opción al crear el mundo)
   if (!G.structures) for (const d in G.worlds) { G.worlds[d].gen.genStructures = () => { }; G.worlds[d].noStruct = true; }
   if (data.dims) for (const d in data.dims) for (const k in data.dims[d]) G.worlds[d].saved[k] = data.dims[d][k];
   G.containers = data.containers || {}; G.spawned = new Set(data.spawned || []); G.dragonKilled = !!data.dragonKilled; G.endInit = !!data.endInit; G.gateway = data.gateway || null; G.rain = data.rain || 0; G.rainTimer = data.rainTimer || G.rainTimer;
@@ -9920,6 +10211,7 @@ function gameFrame(dt) {
   if (!pausedSP && p.ragdoll && input.jump && p.ragdoll.alive && p.ragdoll.t > 0.5) p.ragdoll.dur = 0; // saltar = levantarse
   if (!pausedSP && typeof ragUpdate === 'function') ragUpdate(wdt);
   if (!pausedSP && typeof debrisUpdate === 'function') { debrisUpdate(wdt); boomUpdate(wdt); }
+  if (!pausedSP && typeof dynFallingUpdate === 'function') dynFallingUpdate(wdt);
   if (!pausedSP && typeof snowStampTick === 'function') snowStampTick(dt);
   if (!pausedSP) updateInteraction(dt);
   smoothProxies(dt); updateParticles(wdt, w);
@@ -10087,7 +10379,7 @@ async function refreshWorlds() {
 }
 function updWBtns() { $('wPlay').disabled = $('wExport').disabled = $('wDelete').disabled = !selWorld; }
 async function playWorld(id) { const rec = await DB.get(id); if (!rec) return; G.worldId = id; G.iconURL = rec.icon; startWorld(rec.data, false); G.pendingHost = G.hostAfterLoad; G.hostAfterLoad = false; }
-const CREATE = { mode: 'survival', diff: 2, cheats: true, structs: true };
+const CREATE = { mode: 'survival', diff: 2, cheats: true, structs: true, dyn: true };
 // ------------------------------------------------------------ OPCIONES: pestañas de gráficos, físicas, audio y controles
 const OPT = { tab: 'gfx', keepScroll: false };
 const OPT_TABS = [['gfx', 'Gráficos'], ['phys', 'Físicas'], ['audio', 'Audio'], ['ctl', 'Controles']];
@@ -10272,11 +10564,12 @@ function setupMenus() {
   $('cDiff').onclick = () => { CREATE.diff = (CREATE.diff + 1) % 4; $('cDiff').textContent = 'Dificultad: ' + DIFFNAMES[CREATE.diff]; };
   $('cCheats').onclick = () => { CREATE.cheats = !CREATE.cheats; $('cCheats').textContent = 'Trucos: ' + (CREATE.cheats ? 'SÍ' : 'NO'); };
   $('cStruct').onclick = () => { CREATE.structs = !CREATE.structs; $('cStruct').textContent = 'Estructuras: ' + (CREATE.structs ? 'SÍ' : 'NO'); };
+  $('cDyn').onclick = () => { CREATE.dyn = !CREATE.dyn; $('cDyn').textContent = 'Árboles dinámicos: ' + (CREATE.dyn ? 'SÍ' : 'NO'); };
   $('cBack').onclick = () => { showScreen('sWorlds'); refreshWorlds(); };
-  $('cGo').onclick = () => { const [seed, seedStr] = seedFromString($('cSeed').value); G.worldId = 'w' + Date.now(); G.iconURL = null; startWorld({ name: $('cName').value.trim() || 'Nuevo mundo', seed, seedStr, gameMode: CREATE.mode, difficulty: CREATE.diff, cheats: CREATE.cheats, structures: CREATE.structs }, true); G.pendingHost = G.hostAfterLoad; G.hostAfterLoad = false; };
+  $('cGo').onclick = () => { const [seed, seedStr] = seedFromString($('cSeed').value); G.worldId = 'w' + Date.now(); G.iconURL = null; startWorld({ name: $('cName').value.trim() || 'Nuevo mundo', seed, seedStr, gameMode: CREATE.mode, difficulty: CREATE.diff, cheats: CREATE.cheats, structures: CREATE.structs, dynTrees: CREATE.dyn }, true); G.pendingHost = G.hostAfterLoad; G.hostAfterLoad = false; };
   // multijugador
   $('mBack').onclick = () => goMenu(); $('mHost').onclick = () => { G.hostAfterLoad = true; showScreen('sWorlds'); refreshWorlds(); };
-  const join = async lan => { const name = $('mName').value.trim() || SETTINGS.name; SETTINGS.name = name; saveSettings(); const code = $('mCode').value.trim(); if (code.length < 4) { $('mErr').textContent = 'Escribe el código del mundo.'; return; } $('mErr').textContent = 'Conectando...'; try { const wl = await joinGame(code, lan, name); G.worldId = null; startWorld({ name: wl.worldName, seed: wl.seed, climate: wl.climate || 1, seedStr: wl.seedStr, gameMode: wl.gm, difficulty: wl.diff, time: wl.time, dragonKilled: wl.dk, endInit: wl.ei, gateway: wl.gw, worldSpawn: wl.spawn, keepInventory: wl.keep }, false, wl); } catch (e) { stopNet(); $('mErr').textContent = 'Error: ' + e.message; } };
+  const join = async lan => { const name = $('mName').value.trim() || SETTINGS.name; SETTINGS.name = name; saveSettings(); const code = $('mCode').value.trim(); if (code.length < 4) { $('mErr').textContent = 'Escribe el código del mundo.'; return; } $('mErr').textContent = 'Conectando...'; try { const wl = await joinGame(code, lan, name); G.worldId = null; startWorld({ name: wl.worldName, seed: wl.seed, climate: wl.climate || 1, dynTrees: !!wl.dyn, seedStr: wl.seedStr, gameMode: wl.gm, difficulty: wl.diff, time: wl.time, dragonKilled: wl.dk, endInit: wl.ei, gateway: wl.gw, worldSpawn: wl.spawn, keepInventory: wl.keep }, false, wl); } catch (e) { stopNet(); $('mErr').textContent = 'Error: ' + e.message; } };
   $('mJoin').onclick = () => join(false); $('mJoinLan').onclick = () => join(true);
   $('mCode').addEventListener('keydown', e => e.stopPropagation()); $('mName').addEventListener('keydown', e => e.stopPropagation());
   // opciones

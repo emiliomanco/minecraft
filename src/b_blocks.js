@@ -214,6 +214,9 @@ defB('cherry_log', 'Tronco de cerezo', { tex: { top: 'cherry_log_top', side: 'ch
 defB('cherry_planks', 'Tablones de cerezo', { hard: 2, tool: 'axe', flammable: true, planks: true });
 defB('cherry_leaves', 'Hojas de cerezo', { trans: 1, hard: 0.2, att: 1, wave: 1, drop: null, flammable: true, leaves: 'cherry' });
 defB('cherry_sapling', 'Brote de cerezo', Object.assign({}, PL, { drop: 'cherry_sapling', sapling: 'cherry' }));
+// árboles dinámicos: ramas con grosor (meta & 7) que se unen con sus vecinas; el árbol es un solo cuerpo y tarda 4 veces más que un tronco
+const DYN_SPECIES = ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'cherry'];
+for (const w of DYN_SPECIES) defB('dyn_' + w + '_log', 'Rama de ' + REG[ID[w + '_log']].disp.replace('Tronco de ', ''), { render: 'shape', shape: 'dynlog', solid: true, opaque: false, tex: { top: w + '_log_top', side: w + '_log' }, hard: 8, tool: 'axe', flammable: true, log: true, dynLog: w, drop: w + '_log' });
 defB('pink_petals', 'Pétalos rosas', { render: 'box', box: [0, 0, 0, 16, 1, 16], trans: 1, solid: false, hard: 0, replace: true });
 defB('blast_furnace', 'Alto horno', { tex: { top: 'blast_furnace_top', side: 'blast_furnace_side', front: 'blast_furnace_front' }, hard: 3.5, tool: 'pickaxe', lvl: 1, ui: 'furnace', orient: true, smeltKind: 'ore' });
 defB('smoker', 'Ahumador', { tex: { top: 'smoker_top', side: 'smoker_side', front: 'smoker_front' }, hard: 3.5, tool: 'axe', ui: 'furnace', orient: true, smeltKind: 'food' });

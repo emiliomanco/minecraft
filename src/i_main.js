@@ -97,7 +97,7 @@ function serializeWorld() {
   const players = Object.assign({}, G.playerStates || {}); players.__local = playerState(G.player); players.__local.name = G.player.name;
   if (G.net && G.net.role === 'host') for (const c of G.net.conns.values()) if (c.ent && c.ent.state) players[c.ent.name] = c.ent.state;
   const ents = []; for (const e of G.entities.values()) { if (e.proxy || e.remotePlayer || e.removed || e.dead) continue; if (e instanceof Mob && (e.persist || !e.def.hostile)) ents.push({ k: 'mob', ty: e.type, d: e.dim, x: e.x, y: e.y, z: e.z, hp: e.hp, c: e.color, p: e.persist, n: e.name }); else if (e.type === 'item') ents.push({ k: 'item', d: e.dim, x: e.x, y: e.y, z: e.z, s: e.stack }); else if (e.isBoat) ents.push({ k: 'boat', d: e.dim, x: e.x, y: e.y, z: e.z, r: e.rot }); }
-  return { format: 'minecraft2-world', version: 3, name: G.worldName, seed: G.seed, seedStr: G.seedStr, gameMode: G.defaultMode || G.gameMode, curMode: G.gameMode, difficulty: G.difficulty, cheats: G.cheats, time: G.time, rain: G.rain, rainTimer: G.rainTimer, worldSpawn: G.worldSpawn, dragonKilled: G.dragonKilled, endInit: G.endInit, gateway: G.gateway, keepInventory: G.keepInventory, containers: G.containers, spawned: [...G.spawned], dims, players, entities: ents, created: G.created || Date.now(), lastPlayed: Date.now(), structures: G.structures !== false, climate: G.climate || 1, fluid: typeof flSerialize === 'function' ? flSerialize() : null };
+  return { format: 'minecraft2-world', version: 3, name: G.worldName, seed: G.seed, seedStr: G.seedStr, gameMode: G.defaultMode || G.gameMode, curMode: G.gameMode, difficulty: G.difficulty, cheats: G.cheats, time: G.time, rain: G.rain, rainTimer: G.rainTimer, worldSpawn: G.worldSpawn, dragonKilled: G.dragonKilled, endInit: G.endInit, gateway: G.gateway, keepInventory: G.keepInventory, containers: G.containers, spawned: [...G.spawned], dims, players, entities: ents, created: G.created || Date.now(), lastPlayed: Date.now(), structures: G.structures !== false, climate: G.climate || 1, dynTrees: !!G.dynTrees, fluid: typeof flSerialize === 'function' ? flSerialize() : null };
 }
 function worldIcon() { try { const c = document.createElement('canvas'); c.width = 64; c.height = 64; c.getContext('2d').drawImage($('gl'), ($('gl').width - $('gl').height) / 2, 0, $('gl').height, $('gl').height, 0, 0, 64, 64); return c.toDataURL('image/jpeg', 0.7); } catch (e) { return null; } }
 async function saveWorld(silent) {
@@ -132,6 +132,7 @@ function startWorld(data, isNew, netWelcome) {
   G.defaultMode = data.gameMode || 'survival'; G.gameMode = data.curMode || data.gameMode || 'survival'; G.created = data.created || Date.now(); G.structures = data.structures !== false;
   G.climate = data.climate ?? (isNew ? 3 : 1); // biomas por clima en mundos nuevos; los antiguos siguen con los clásicos
   G.worlds = { overworld: new World('overworld', G.seed, G.climate), nether: new World('nether', G.seed, G.climate), end: new World('end', G.seed, G.climate) };
+  G.dynTrees = !!data.dynTrees; G.worlds.overworld.gen.dynTrees = G.dynTrees; // árboles dinámicos (opción al crear el mundo)
   if (!G.structures) for (const d in G.worlds) { G.worlds[d].gen.genStructures = () => { }; G.worlds[d].noStruct = true; }
   if (data.dims) for (const d in data.dims) for (const k in data.dims[d]) G.worlds[d].saved[k] = data.dims[d][k];
   G.containers = data.containers || {}; G.spawned = new Set(data.spawned || []); G.dragonKilled = !!data.dragonKilled; G.endInit = !!data.endInit; G.gateway = data.gateway || null; G.rain = data.rain || 0; G.rainTimer = data.rainTimer || G.rainTimer;
@@ -345,6 +346,7 @@ function gameFrame(dt) {
   if (!pausedSP && p.ragdoll && input.jump && p.ragdoll.alive && p.ragdoll.t > 0.5) p.ragdoll.dur = 0; // saltar = levantarse
   if (!pausedSP && typeof ragUpdate === 'function') ragUpdate(wdt);
   if (!pausedSP && typeof debrisUpdate === 'function') { debrisUpdate(wdt); boomUpdate(wdt); }
+  if (!pausedSP && typeof dynFallingUpdate === 'function') dynFallingUpdate(wdt);
   if (!pausedSP && typeof snowStampTick === 'function') snowStampTick(dt);
   if (!pausedSP) updateInteraction(dt);
   smoothProxies(dt); updateParticles(wdt, w);
@@ -512,7 +514,7 @@ async function refreshWorlds() {
 }
 function updWBtns() { $('wPlay').disabled = $('wExport').disabled = $('wDelete').disabled = !selWorld; }
 async function playWorld(id) { const rec = await DB.get(id); if (!rec) return; G.worldId = id; G.iconURL = rec.icon; startWorld(rec.data, false); G.pendingHost = G.hostAfterLoad; G.hostAfterLoad = false; }
-const CREATE = { mode: 'survival', diff: 2, cheats: true, structs: true };
+const CREATE = { mode: 'survival', diff: 2, cheats: true, structs: true, dyn: true };
 // ------------------------------------------------------------ OPCIONES: pestañas de gráficos, físicas, audio y controles
 const OPT = { tab: 'gfx', keepScroll: false };
 const OPT_TABS = [['gfx', 'Gráficos'], ['phys', 'Físicas'], ['audio', 'Audio'], ['ctl', 'Controles']];
@@ -697,11 +699,12 @@ function setupMenus() {
   $('cDiff').onclick = () => { CREATE.diff = (CREATE.diff + 1) % 4; $('cDiff').textContent = 'Dificultad: ' + DIFFNAMES[CREATE.diff]; };
   $('cCheats').onclick = () => { CREATE.cheats = !CREATE.cheats; $('cCheats').textContent = 'Trucos: ' + (CREATE.cheats ? 'SÍ' : 'NO'); };
   $('cStruct').onclick = () => { CREATE.structs = !CREATE.structs; $('cStruct').textContent = 'Estructuras: ' + (CREATE.structs ? 'SÍ' : 'NO'); };
+  $('cDyn').onclick = () => { CREATE.dyn = !CREATE.dyn; $('cDyn').textContent = 'Árboles dinámicos: ' + (CREATE.dyn ? 'SÍ' : 'NO'); };
   $('cBack').onclick = () => { showScreen('sWorlds'); refreshWorlds(); };
-  $('cGo').onclick = () => { const [seed, seedStr] = seedFromString($('cSeed').value); G.worldId = 'w' + Date.now(); G.iconURL = null; startWorld({ name: $('cName').value.trim() || 'Nuevo mundo', seed, seedStr, gameMode: CREATE.mode, difficulty: CREATE.diff, cheats: CREATE.cheats, structures: CREATE.structs }, true); G.pendingHost = G.hostAfterLoad; G.hostAfterLoad = false; };
+  $('cGo').onclick = () => { const [seed, seedStr] = seedFromString($('cSeed').value); G.worldId = 'w' + Date.now(); G.iconURL = null; startWorld({ name: $('cName').value.trim() || 'Nuevo mundo', seed, seedStr, gameMode: CREATE.mode, difficulty: CREATE.diff, cheats: CREATE.cheats, structures: CREATE.structs, dynTrees: CREATE.dyn }, true); G.pendingHost = G.hostAfterLoad; G.hostAfterLoad = false; };
   // multijugador
   $('mBack').onclick = () => goMenu(); $('mHost').onclick = () => { G.hostAfterLoad = true; showScreen('sWorlds'); refreshWorlds(); };
-  const join = async lan => { const name = $('mName').value.trim() || SETTINGS.name; SETTINGS.name = name; saveSettings(); const code = $('mCode').value.trim(); if (code.length < 4) { $('mErr').textContent = 'Escribe el código del mundo.'; return; } $('mErr').textContent = 'Conectando...'; try { const wl = await joinGame(code, lan, name); G.worldId = null; startWorld({ name: wl.worldName, seed: wl.seed, climate: wl.climate || 1, seedStr: wl.seedStr, gameMode: wl.gm, difficulty: wl.diff, time: wl.time, dragonKilled: wl.dk, endInit: wl.ei, gateway: wl.gw, worldSpawn: wl.spawn, keepInventory: wl.keep }, false, wl); } catch (e) { stopNet(); $('mErr').textContent = 'Error: ' + e.message; } };
+  const join = async lan => { const name = $('mName').value.trim() || SETTINGS.name; SETTINGS.name = name; saveSettings(); const code = $('mCode').value.trim(); if (code.length < 4) { $('mErr').textContent = 'Escribe el código del mundo.'; return; } $('mErr').textContent = 'Conectando...'; try { const wl = await joinGame(code, lan, name); G.worldId = null; startWorld({ name: wl.worldName, seed: wl.seed, climate: wl.climate || 1, dynTrees: !!wl.dyn, seedStr: wl.seedStr, gameMode: wl.gm, difficulty: wl.diff, time: wl.time, dragonKilled: wl.dk, endInit: wl.ei, gateway: wl.gw, worldSpawn: wl.spawn, keepInventory: wl.keep }, false, wl); } catch (e) { stopNet(); $('mErr').textContent = 'Error: ' + e.message; } };
   $('mJoin').onclick = () => join(false); $('mJoinLan').onclick = () => join(true);
   $('mCode').addEventListener('keydown', e => e.stopPropagation()); $('mName').addEventListener('keydown', e => e.stopPropagation());
   // opciones
