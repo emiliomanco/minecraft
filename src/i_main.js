@@ -97,7 +97,7 @@ function serializeWorld() {
   const players = Object.assign({}, G.playerStates || {}); players.__local = playerState(G.player); players.__local.name = G.player.name;
   if (G.net && G.net.role === 'host') for (const c of G.net.conns.values()) if (c.ent && c.ent.state) players[c.ent.name] = c.ent.state;
   const ents = []; for (const e of G.entities.values()) { if (e.proxy || e.remotePlayer || e.removed || e.dead) continue; if (e instanceof Mob && (e.persist || !e.def.hostile)) ents.push({ k: 'mob', ty: e.type, d: e.dim, x: e.x, y: e.y, z: e.z, hp: e.hp, c: e.color, p: e.persist, n: e.name }); else if (e.type === 'item') ents.push({ k: 'item', d: e.dim, x: e.x, y: e.y, z: e.z, s: e.stack }); else if (e.isBoat) ents.push({ k: 'boat', d: e.dim, x: e.x, y: e.y, z: e.z, r: e.rot }); }
-  return { format: 'minecraft2-world', version: 3, name: G.worldName, seed: G.seed, seedStr: G.seedStr, gameMode: G.defaultMode || G.gameMode, curMode: G.gameMode, difficulty: G.difficulty, cheats: G.cheats, time: G.time, rain: G.rain, rainTimer: G.rainTimer, worldSpawn: G.worldSpawn, dragonKilled: G.dragonKilled, endInit: G.endInit, gateway: G.gateway, keepInventory: G.keepInventory, containers: G.containers, spawned: [...G.spawned], dims, players, entities: ents, created: G.created || Date.now(), lastPlayed: Date.now(), structures: G.structures !== false, climate: G.climate || 1, dynTrees: !!G.dynTrees, fluid: typeof flSerialize === 'function' ? flSerialize() : null };
+  return { format: 'minecraft2-world', version: 3, name: G.worldName, seed: G.seed, seedStr: G.seedStr, gameMode: G.defaultMode || G.gameMode, curMode: G.gameMode, difficulty: G.difficulty, cheats: G.cheats, time: G.time, rain: G.rain, rainTimer: G.rainTimer, worldSpawn: G.worldSpawn, dragonKilled: G.dragonKilled, endInit: G.endInit, gateway: G.gateway, keepInventory: G.keepInventory, doWaterDespawn: !!G.doWaterDespawn, doDaylightCycle: G.doDaylightCycle !== false, doWeatherCycle: G.doWeatherCycle !== false, containers: G.containers, spawned: [...G.spawned], dims, players, entities: ents, created: G.created || Date.now(), lastPlayed: Date.now(), structures: G.structures !== false, climate: G.climate || 1, dynTrees: !!G.dynTrees, fluid: typeof flSerialize === 'function' ? flSerialize() : null };
 }
 function worldIcon() { try { const c = document.createElement('canvas'); c.width = 64; c.height = 64; c.getContext('2d').drawImage($('gl'), ($('gl').width - $('gl').height) / 2, 0, $('gl').height, $('gl').height, 0, 0, 64, 64); return c.toDataURL('image/jpeg', 0.7); } catch (e) { return null; } }
 async function saveWorld(silent) {
@@ -114,7 +114,7 @@ function findSpawn(w) {
   return { x: 0.5, z: 0.5 };
 }
 function resetGameState() {
-  G.entities = new Map(); G.particles = []; G.containers = {}; G.spawned = new Set(); G.tick = 0; G.rtick = 0; G.tickFrozen = false; G.tickRate = 1; G.dragonKilled = false; G.endInit = false; G.gateway = null; G.creditsShown = false; G.playerStates = {}; G.rain = 0; G.rainLevel = 0; G.rainTimer = 12000 + Math.random() * 24000;
+  G.entities = new Map(); G.particles = []; G.containers = {}; G.spawned = new Set(); G.tick = 0; G.rtick = 0; G.tickFrozen = false; G.tickRate = 1; G.dragonKilled = false; G.endInit = false; G.gateway = null; G.creditsShown = false; G.playerStates = {}; G.rain = 0; G.rainLevel = 0; G.wet = 0; G.rainTimer = 12000 + Math.random() * 24000;
   TICK_TIMERS.length = 0; NETBATCH.length = 0; R.plights = []; UI.open = null; G.paused = false; G.wardenWarn = 0;
 }
 function migrateWorld(data) { // v2 -> v3: los objetos pasaron de id 256+ a 1000+
@@ -128,7 +128,7 @@ function migrateWorld(data) { // v2 -> v3: los objetos pasaron de id 256+ a 1000
 }
 function startWorld(data, isNew, netWelcome) {
   data = migrateWorld(data); resetGameState(); audioInit();
-  G.worldName = data.name; G.seed = data.seed >>> 0; G.seedStr = data.seedStr; G.difficulty = data.difficulty ?? 2; G.cheats = data.cheats !== false; G.time = data.time ?? 1000; G.keepInventory = !!data.keepInventory; if (typeof flRestore === 'function') flRestore(data.fluid || null);
+  G.worldName = data.name; G.seed = data.seed >>> 0; G.seedStr = data.seedStr; G.difficulty = data.difficulty ?? 2; G.cheats = data.cheats !== false; G.time = data.time ?? 1000; G.keepInventory = !!data.keepInventory; G.doWaterDespawn = !!data.doWaterDespawn; G.doDaylightCycle = data.doDaylightCycle !== false; G.doWeatherCycle = data.doWeatherCycle !== false; if (typeof flRestore === 'function') flRestore(data.fluid || null);
   G.defaultMode = data.gameMode || 'survival'; G.gameMode = data.curMode || data.gameMode || 'survival'; G.created = data.created || Date.now(); G.structures = data.structures !== false;
   G.climate = data.climate ?? (isNew ? 3 : 1); // biomas por clima en mundos nuevos; los antiguos siguen con los clásicos
   G.worlds = { overworld: new World('overworld', G.seed, G.climate), nether: new World('nether', G.seed, G.climate), end: new World('end', G.seed, G.climate) };
@@ -314,7 +314,7 @@ function gameTick() {
 function worldTick() {
   const p = G.player; const client = G.net && G.net.role === 'client';
   G.tick++;
-  if (!client) { G.time++; if (--G.rainTimer <= 0) { G.rain = G.rain ? 0 : 1; G.thunder = G.rain && Math.random() < 0.3; G.rainTimer = G.rain ? 6000 + Math.random() * 6000 : 18000 + Math.random() * 30000; } }
+  if (!client) { if (G.doDaylightCycle !== false) G.time++; if (G.doWeatherCycle !== false && --G.rainTimer <= 0) { G.rain = G.rain ? 0 : 1; G.thunder = G.rain && Math.random() < 0.3; G.rainTimer = G.rain ? 6000 + Math.random() * 6000 : 18000 + Math.random() * 30000; } }
   G.rainLevel = lerp(G.rainLevel || 0, G.rain ? 1 : 0, G.weatherFast > 0 ? 0.05 : 0.004); if (G.weatherFast > 0) G.weatherFast--;
   // entidades
   if (typeof processPathQueue === 'function') processPathQueue();
@@ -339,6 +339,7 @@ function gameFrame(dt) {
     accW += dt * 1000 * rate; let m = 0; const mx = Math.max(4, Math.ceil(rate * 4)); while (accW >= 50 && m < mx) { worldTick(); accW -= 50; m++; if (G.tickFrozen && G.tickStep > 0 && --G.tickStep <= 0) { accW = 0; break; } } if (m >= mx) accW = 0;
   }
   const wdt = pausedSP ? 0 : Math.min(0.1, dt * rate);
+  if (G.wclock === undefined) G.wclock = performance.now() / 1000; G.wclock += pausedSP ? 0 : dt * rate; // reloj de las animaciones del mundo
   const typing = $('chatIn').classList.contains('on');
   const input = (UI.open || typing || G.paused || p.dead) ? {} : { f: held('forward'), b: held('back'), l: held('left'), r: held('right'), jump: held('jump'), sneak: SETTINGS.ctl.toggleSneak ? !!INPUT.tSneak : held('sneak'), sprint: SETTINGS.ctl.toggleSprint ? (held('forward') ? !!INPUT.tSprint : (INPUT.tSprint = false)) : held('sprint'), useHeld: p.eatT > 0 || p.bowT > 0 };
   if (!pausedSP && !p.dead && !p.ragdoll && p.boat) { p.savePrev(); boatRide(p, dt, input, pausedSP ? 1 : clamp(acc / 50, 0, 1)); }
@@ -370,9 +371,11 @@ function gameFrame(dt) {
   // ondas del agua (estelas, salpicaduras, chorros): fuentes y un paso de simulación en GPU antes de dibujar
   if (typeof ripUpdate === 'function') { if (!pausedSP) ripSources(w, dt); ripUpdate(wdt); }
   if (typeof flUpdate === 'function') flUpdate(wdt, w); // fluido continuo (partículas en GPU)
+  if (typeof flamerTick === 'function') flamerTick(w, wdt);
+  if (typeof rainPuddleTick === 'function') rainPuddleTick(w, wdt); // charcos de lluvia (partículas) // calor del lanzallamas y de los conductores: evapora el agua
   renderWorld(w, eye, yaw, pitch, {
     fov: G.fovCur, under, roll, bob, biome: w.biomeAt(Math.floor(p.x), Math.floor(p.z)),
-    drawEntities: () => { drawAllEntities(p.dim, alphaW, perspective > 0 && G.gameMode !== 'spectator'); },
+    drawEntities: () => { drawAllEntities(p.dim, alphaW, perspective > 0 && G.gameMode !== 'spectator', perspective === 0 && G.gameMode !== 'spectator' && !p.ragdoll && !p.boat && !p.sleeping && !p.gliding && !p.spy); },
     particles: G.particles, flames: G._flames, fireCells: G._fireCells, drawOverlay: tr => drawOverlays(tr), drawHand: perspective === 0 && !hudHidden && G.gameMode !== 'spectator' && !p.spy && !p.ragdoll && (G.zoomCur || 1) < 1.3 ? drawHand : null,
     exposure: p.effects.night ? 1.6 : 1
   });
@@ -419,7 +422,11 @@ function emitterFX(w, dt) {
   G._fires = fires; G._flames = flames; G._fireCells = cells; G._lavas = lavas;
 }
 function weatherFX(w, dt) {
-  const p = G.player; const rl = G.rainLevel || 0; if (AU.rain) AU.rain.gain.value = w.dim === 'overworld' ? rl * 0.12 * (SETTINGS.audio.weather ?? 1) : 0;
+  const p = G.player; const rl = G.rainLevel || 0;
+  // suelo mojado: se moja en ~30 s de lluvia y tarda unos minutos en secarse (solo donde llueve: ni nieve ni desierto)
+  { const bio = BIOMES[w.biomeAt(Math.floor(p.x), Math.floor(p.z))]; const rains = w.dim === 'overworld' && bio && !bio.snow && bio.id !== BI.desert && bio.id !== BI.savanna;
+    const tg = rains ? rl : 0; G.wet = G.wet || 0; G.wet += (tg - G.wet) * Math.min(1, dt * (tg > G.wet ? 0.07 : 0.006)); }
+  if (AU.rain) AU.rain.gain.value = w.dim === 'overworld' ? rl * 0.12 * (SETTINGS.audio.weather ?? 1) : 0;
   if (w.dim === 'overworld' && rl > 0.05) {
     const n = Math.floor(rl * [40, 120, 260][SETTINGS.particles ?? 2] * dt * 10);
     for (let i = 0; i < n; i++) {
@@ -487,8 +494,13 @@ function drawHand() {
     if (d.isBlock && d.render !== 'cross' && d.render !== 'fire') { M4.rotY(m, 0.785); M4.scale(m, 0.4, 0.4, 0.4); M4.translate(m, -0.5, -0.3, -0.5); const b = d.box; if (b && b[4] < 12) { M4.translate(m, b[0] / 16, 0, b[2] / 16); M4.scale(m, (b[3] - b[0]) / 16, (b[4] - b[1]) / 16, (b[5] - b[2]) / 16); } drawBox(m, d.faces, light, (d.tint || d.tintTop) ? [0.55, 0.78, 0.35, 1] : null, null, d.emissive ? 0.6 : 0); }
     else { M4.rotY(m, -1.2); M4.rotZ(m, 0.25); if (d.tool || d.bow || d.trident) { M4.rotZ(m, 0.4); } M4.translate(m, -0.3, -0.15, 0); M4.scale(m, 0.62, 0.62, 0.04); drawBox(m, d.isBlock ? d.faces[0] : d.icon, light, d.tint ? [0.55, 0.78, 0.35, 1] : null, null, 0, ITEM_UVR); }
   } else {
-    M4.translate(m, 0.08, -0.12, 0); M4.rotX(m, 0.75 - s * 1.2); M4.rotY(m, -0.35 - s * 0.3); M4.rotZ(m, -0.15); M4.translate(m, -0.07, -0.35, -0.07); M4.scale(m, 0.15, 0.55, 0.15);
-    drawBox(m, L6({ all: 'steve_skin', top: 'steve_skin' }), light);
+    // brazo derecho como en el clásico: el hombro queda fuera de la pantalla abajo a la derecha y la mano asoma hacia el centro
+    // (antes quedaba entero por debajo del borde y no se veía)
+    // la caja va de la mano (y = 0) al hombro (arriba de la piel = manga), así lo que se ve es la mano y el antebrazo
+    const a = M4.create(); M4.translate(a, 0.44 + bx - s2 * 0.32, -0.44 + by + Math.sin(s2 * Math.PI) * 0.14, -0.74 - s * 0.22);
+    M4.rotX(a, 2.5 + s * 0.5); M4.rotZ(a, -0.46 - s * 0.3); M4.rotY(a, 0.35);
+    M4.translate(a, -0.125, 0, -0.125); M4.scale(a, 0.25, 0.85, 0.25);
+    drawBox(a, MODELS.steve[2].t, light); // con la piel del jugador
   }
 }
 // ------------------------------------------------------------ MENÚS
@@ -704,7 +716,7 @@ function setupMenus() {
   $('cGo').onclick = () => { const [seed, seedStr] = seedFromString($('cSeed').value); G.worldId = 'w' + Date.now(); G.iconURL = null; startWorld({ name: $('cName').value.trim() || 'Nuevo mundo', seed, seedStr, gameMode: CREATE.mode, difficulty: CREATE.diff, cheats: CREATE.cheats, structures: CREATE.structs, dynTrees: CREATE.dyn }, true); G.pendingHost = G.hostAfterLoad; G.hostAfterLoad = false; };
   // multijugador
   $('mBack').onclick = () => goMenu(); $('mHost').onclick = () => { G.hostAfterLoad = true; showScreen('sWorlds'); refreshWorlds(); };
-  const join = async lan => { const name = $('mName').value.trim() || SETTINGS.name; SETTINGS.name = name; saveSettings(); const code = $('mCode').value.trim(); if (code.length < 4) { $('mErr').textContent = 'Escribe el código del mundo.'; return; } $('mErr').textContent = 'Conectando...'; try { const wl = await joinGame(code, lan, name); G.worldId = null; startWorld({ name: wl.worldName, seed: wl.seed, climate: wl.climate || 1, dynTrees: !!wl.dyn, seedStr: wl.seedStr, gameMode: wl.gm, difficulty: wl.diff, time: wl.time, dragonKilled: wl.dk, endInit: wl.ei, gateway: wl.gw, worldSpawn: wl.spawn, keepInventory: wl.keep }, false, wl); } catch (e) { stopNet(); $('mErr').textContent = 'Error: ' + e.message; } };
+  const join = async lan => { const name = $('mName').value.trim() || SETTINGS.name; SETTINGS.name = name; saveSettings(); const code = $('mCode').value.trim(); if (code.length < 4) { $('mErr').textContent = 'Escribe el código del mundo.'; return; } $('mErr').textContent = 'Conectando...'; try { const wl = await joinGame(code, lan, name); G.worldId = null; startWorld({ name: wl.worldName, seed: wl.seed, climate: wl.climate || 1, dynTrees: !!wl.dyn, seedStr: wl.seedStr, gameMode: wl.gm, difficulty: wl.diff, time: wl.time, dragonKilled: wl.dk, endInit: wl.ei, gateway: wl.gw, worldSpawn: wl.spawn, keepInventory: wl.keep, doDaylightCycle: wl.rules ? wl.rules.dc : true, doWeatherCycle: wl.rules ? wl.rules.wc : true, doWaterDespawn: wl.rules ? wl.rules.wd : false }, false, wl); } catch (e) { stopNet(); $('mErr').textContent = 'Error: ' + e.message; } };
   $('mJoin').onclick = () => join(false); $('mJoinLan').onclick = () => join(true);
   $('mCode').addEventListener('keydown', e => e.stopPropagation()); $('mName').addEventListener('keydown', e => e.stopPropagation());
   // opciones

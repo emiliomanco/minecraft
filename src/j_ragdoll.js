@@ -18,8 +18,9 @@ const rv = { sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], add: (a, b)
 // partes del modelo de una entidad (incluye la armadura del jugador) y su escala
 function ragModelOf(e) {
   if (e.type === 'player') return { parts: MODELS.steve.concat(playerArmorParts(e)), scale: 0.9375, tint: [1, 1, 1, 1] };
-  const d = MOB[e.type]; if (!d) return null; const parts = MODELS[d.model]; if (!parts) return null;
-  let tint = d.tint ? [...d.tint, 1] : [1, 1, 1, 1]; if (e.type === 'sheep' && e.color) tint = [...e.color, 1];
+  const d = MOB[e.type]; if (!d) return null; let parts = modelFor(e, d); if (!parts) return null;
+  if (e.type === 'sheep') { e.woolTint = e.color ? [...e.color, 1] : null; if (e.sheared) parts = parts.filter(p => !p.wool); }
+  const tint = d.tint && !MODELS[e.type] ? [...d.tint, 1] : [1, 1, 1, 1];
   return { parts, scale: (MODEL_SCALE[d.model] || 1) * (d.scale || 1), tint, emis: (e.type === 'blaze' || e.type === 'magma_cube') ? 0.6 : 0 };
 }
 // transformación mundial de una parte en la pose actual (igual que drawModel, sin la escala de la caja)
@@ -28,6 +29,7 @@ function ragPartFrame(pt, e, x, y, z, yaw, scale, t) {
   M4.translate(m, pt.p[0], pt.p[1], pt.p[2]); const off = partOffset(pt, e, t); if (off) M4.translate(m, off[0], off[1], off[2]);
   const pivot = M4.xform(m, 0, 0, 0);
   const r = partRot(pt, e, t); if (r[1]) M4.rotY(m, r[1]); if (r[0]) M4.rotX(m, r[0]); if (r[2]) M4.rotZ(m, r[2]);
+  if (pt.rot) { if (pt.rot[1]) M4.rotY(m, pt.rot[1]); if (pt.rot[0]) M4.rotX(m, pt.rot[0]); if (pt.rot[2]) M4.rotZ(m, pt.rot[2]); }
   const c = M4.xform(m, pt.o[0] + pt.s[0] / 2, pt.o[1] + pt.s[1] / 2, pt.o[2] + pt.s[2] / 2);
   const ax = [rv.norm([m[0], m[1], m[2]]), rv.norm([m[4], m[5], m[6]]), rv.norm([m[8], m[9], m[10]])];
   return { c: [c[0], c[1], c[2]], ax, half: [pt.s[0] * sc / 2, pt.s[1] * sc / 2, pt.s[2] * sc / 2], pivot: [pivot[0], pivot[1], pivot[2]] };
@@ -36,7 +38,7 @@ function ragPartFrame(pt, e, x, y, z, yaw, scale, t) {
 const RAG_LIMIT = { head: 0.9, dhead: 0.9, legR: 1.5, legL: 1.5, legFR: 1.3, legFL: 1.3, legBR: 1.3, legBL: 1.3, wingR: 1.6, wingL: 1.6 };
 // límites anatómicos [adelante, atrás, hacia fuera, hacia dentro, torsión] (radianes): rodillas/caderas casi bisagra,
 // hombros con mucho juego, cuello que gira pero no se dobla del todo hacia atrás
-let RAG_TWIST = true, RAG_SELF = true, RAG_INTER = true, RAG_ANISO = true;
+let RAG_TWIST = true, RAG_SELF = true, RAG_INTER = true, RAG_ANISO = true, RAG_LIMIT_IT = 4, RAG_CDAMP = 0.6, RAG_LIM_PONLY = true, RAG_LIM_NOCONTACT = false; // estables: límites una vez por paso, amortiguación en contacto
 function ragJointLimits(role) {
   if (role === 'head' || role === 'dhead') return [0.85, 0.6, 0.55, 0.55, 1.1];
   if (role.startsWith('arm')) return [2.8, 1.0, 1.7, 0.3, 1.2];
@@ -150,7 +152,7 @@ function ragStep(rd, dt) {
   const w = rd.world; const g = RAG_G * dt * dt;
   for (const b of rd.bodies) {
     const c = ragCenter(b); const L = w.get(Math.floor(c[0]), Math.floor(c[1]), Math.floor(c[2])); const inLiq = L > 0 && REG[L] && REG[L].liquid;
-    const damp = inLiq ? 0.9 : 0.995, gg = inLiq ? -g * 0.15 : g;
+    const damp = inLiq ? 0.9 : b.contact ? 0.985 : 0.995, gg = inLiq ? -g * 0.15 : g; // en contacto con el suelo se amortigua más (se asienta)
     for (let i = 0; i < 4; i++) { const k = i * 3; for (let a = 0; a < 3; a++) { const v = (b.p[k + a] - b.q[k + a]) * damp; b.q[k + a] = b.p[k + a]; b.p[k + a] += v; } b.p[k + 1] -= gg; }
   }
   for (let it = 0; it < 5; it++) {
@@ -163,18 +165,18 @@ function ragStep(rd, dt) {
       const ra = ragAxes(J.a); const fromR = v => rv.add(rv.add(rv.mul(ra[0], v[0]), rv.mul(ra[1], v[1])), rv.mul(ra[2], v[2]));
       const rest = fromR(J.rest), fw = fromR(J.fwd), sd = fromR(J.side);
       const piv = ragPoint(J.b, wb), cb = ragCenter(J.b), dir = rv.norm(rv.sub(cb, piv)); const cos = clamp(rv.dot(dir, rest), -1, 1); const sw = Math.acos(cos);
-      if (sw > 1e-3) {
+      if (sw > 1e-3 && (RAG_LIMIT_IT < 0 || it === RAG_LIMIT_IT) && !(RAG_LIM_NOCONTACT && J.b.contact)) {
         const pf = rv.dot(dir, fw), ps = rv.dot(dir, sd); const th = Math.atan2(ps, pf); const L = J.L;
         const a = Math.max(0.3, pf >= 0 ? L[0] : L[1]), bb = Math.max(0.3, ps >= 0 ? L[2] : L[3]); const ct = Math.cos(th), st = Math.sin(th); const lim = RAG_ANISO ? 1 / Math.sqrt((ct / a) ** 2 + (st / bb) ** 2) : J.lim;
         if (sw > lim) {
           const ax0 = rv.cross(rest, dir); const al = rv.len(ax0);
-          if (al > 1e-4) ragRotate(J.b, piv, rv.mul(ax0, 1 / al), -Math.min(0.25, (sw - lim) * 0.6)); // girar el hueso alrededor del pivote (la articulación no se mueve)
+          if (al > 1e-4) ragRotate(J.b, piv, rv.mul(ax0, 1 / al), -Math.min(0.08, (sw - lim) * 0.3)); // suave: si no, pelea con el suelo y vibra // girar el hueso alrededor del pivote (la articulación no se mueve)
         }
       }
       // torsión: el eje x del miembro, visto en el plano perpendicular al miembro, frente al de reposo
-      if (RAG_TWIST) { const bax = ragAxes(J.b); const ref = fromR(J.tw); const pr = v => rv.sub(v, rv.mul(dir, rv.dot(v, dir)));
+      if (RAG_TWIST && (RAG_LIMIT_IT < 0 || it === RAG_LIMIT_IT) && !J.b.contact && /^(arm|legR$|legL$)/.test(J.b.role)) { /* la torsión de un miembro apoyado (o de las patas de un cuadrúpedo) peleaba con el suelo */ const bax = ragAxes(J.b); const ref = fromR(J.tw); const pr = v => rv.sub(v, rv.mul(dir, rv.dot(v, dir)));
         const u = pr(bax[0]), r0 = pr(ref); if (rv.len(u) > 1e-3 && rv.len(r0) > 1e-3) { const un = rv.norm(u), rn = rv.norm(r0); const ang = Math.atan2(rv.dot(rv.cross(rn, un), dir), rv.dot(rn, un));
-          const ex = Math.abs(ang) - J.L[4]; if (ex > 0) ragRotate(J.b, piv, dir, -Math.sign(ang) * Math.min(0.2, ex * 0.5)); } }
+          const ex = Math.abs(ang) - J.L[4]; if (ex > 0) ragRotate(J.b, piv, dir, -Math.sign(ang) * Math.min(0.06, ex * 0.25)); } }
     }
     // los huesos del mismo cuerpo no se atraviesan (salvo los unidos por una articulación)
     if (RAG_SELF) ragSelfCollide(rd);
@@ -188,19 +190,23 @@ function ragStep(rd, dt) {
           let vx = 0, vy = 0, vz = 0; for (let i = 0; i < 4; i++) { vx += cw[i] * (b.p[i * 3] - b.q[i * 3]); vy += cw[i] * (b.p[i * 3 + 1] - b.q[i * 3 + 1]); vz += cw[i] * (b.p[i * 3 + 2] - b.q[i * 3 + 2]); }
           const vn = vx * n[0] + vy * n[1] + vz * n[2]; const imp = Math.abs(vn) / dt; if (imp > rd.maxImpact) rd.maxImpact = imp;
           const tx = vx - n[0] * vn, ty = vy - n[1] * vn, tz = vz - n[2] * vn; const mu = 0.8 * s;
-          // rebote casi nulo: anular la velocidad normal entrante
-          const nn = vn < 0 ? vn * s : 0;
+          // sin rebote: se anula la velocidad normal en el contacto, también la que dejó la propia corrección de
+          // penetración (si no, cada empuje hacia fuera se convertía en un saltito y el cuerpo no paraba de vibrar)
+          const nn = vn * s;
           for (let i = 0; i < 4; i++) { b.q[i * 3] += cw[i] * (tx * mu + n[0] * nn); b.q[i * 3 + 1] += cw[i] * (ty * mu + n[1] * nn); b.q[i * 3 + 2] += cw[i] * (tz * mu + n[2] * nn); }
         }
       }
     }
   }
+  // apoyado en el suelo: se queda con una fracción de la velocidad en cada paso (rozamiento y reposo; sin esto las
+  // correcciones de contacto, uniones y límites se iban acumulando en temblores y saltitos)
+  if (RAG_CDAMP < 1) for (const b of rd.bodies) if (b.contact) for (let k = 0; k < 12; k++) b.q[k] = b.p[k] - (b.p[k] - b.q[k]) * RAG_CDAMP;
 }
 // gira las 4 partículas de un cuerpo alrededor del punto o, eje unitario k, ángulo a (Rodrigues); también las previas
 // para no convertir la corrección en velocidad
 function ragRotate(b, o, k, a) {
   const c = Math.cos(a), s = Math.sin(a);
-  for (const arr of [b.p, b.q]) for (let i = 0; i < 4; i++) { const v = [arr[i * 3] - o[0], arr[i * 3 + 1] - o[1], arr[i * 3 + 2] - o[2]]; const kv = rv.cross(k, v), kd = rv.dot(k, v);
+  for (const arr of (RAG_LIM_PONLY ? [b.p] : [b.p, b.q])) for (let i = 0; i < 4; i++) { const v = [arr[i * 3] - o[0], arr[i * 3 + 1] - o[1], arr[i * 3 + 2] - o[2]]; const kv = rv.cross(k, v), kd = rv.dot(k, v);
     arr[i * 3] = o[0] + v[0] * c + kv[0] * s + k[0] * kd * (1 - c); arr[i * 3 + 1] = o[1] + v[1] * c + kv[1] * s + k[1] * kd * (1 - c); arr[i * 3 + 2] = o[2] + v[2] * c + kv[2] * s + k[2] * kd * (1 - c); }
 }
 // ---- cápsulas: puntos más cercanos entre dos segmentos
@@ -212,19 +218,27 @@ function segClosest(p1, q1, p2, q2) {
 }
 const lerpW = (w0, w1, s) => [w0[0] + (w1[0] - w0[0]) * s, w0[1] + (w1[1] - w0[1]) * s, w0[2] + (w1[2] - w0[2]) * s, w0[3] + (w1[3] - w0[3]) * s];
 // separa dos cápsulas de cuerpos (de este u otro ragdoll); devuelve true si chocaban
-function ragCapPair(A, B, k) {
+// stab: corrección sin velocidad (mueve también las posiciones previas) para los choques de un cuerpo consigo mismo
+function ragMoveStab(b, w, d, s) { for (let i = 0; i < 4; i++) { const k = w[i] * s; b.p[i * 3] += d[0] * k; b.p[i * 3 + 1] += d[1] * k; b.p[i * 3 + 2] += d[2] * k; b.q[i * 3] += d[0] * k; b.q[i * 3 + 1] += d[1] * k; b.q[i * 3 + 2] += d[2] * k; } }
+function ragCapPair(A, B, k, stab) {
   const ca = A.cap, cb = B.cap; if (!ca || !cb) return false;
   const a0 = ragPoint(A, ca.w0), a1 = ragPoint(A, ca.w1), b0 = ragPoint(B, cb.w0), b1 = ragPoint(B, cb.w1);
   const [s, t] = segClosest(a0, a1, b0, b1); const pa = rv.add(a0, rv.mul(rv.sub(a1, a0), s)), pb = rv.add(b0, rv.mul(rv.sub(b1, b0), t));
   let d = rv.sub(pa, pb); const L = rv.len(d); const R2 = ca.r + cb.r; if (L >= R2) return false;
   const n = L > 1e-5 ? rv.mul(d, 1 / L) : [0, 1, 0]; const pen = Math.min(0.04, (R2 - L) * k);
   const wa = lerpW(ca.w0, ca.w1, s), wb = lerpW(cb.w0, cb.w1, t); const sw = RAG_W2(wa) + RAG_W2(wb);
-  ragMove(A, wa, n, pen / sw); ragMove(B, wb, n, -pen / sw); return true;
+  const mv = stab ? ragMoveStab : ragMove; mv(A, wa, n, pen / sw); mv(B, wb, n, -pen / sw); return true;
 }
 function ragSelfCollide(rd) {
-  const B = rd.bodies; for (let i = 0; i < B.length; i++) for (let j = i + 1; j < B.length; j++) {
-    const a = B[i], b = B[j]; if (a === rd.root || b === rd.root) continue; // el torso está unido a todos
-    ragCapPair(a, b, 0.5); }
+  const B = rd.bodies;
+  // los pares que ya se tocan en la postura inicial (patas juntas, brazo pegado al cuerpo) no chocan entre sí: si no, se
+  // empujan sin parar y el cuerpo tiembla
+  if (!rd.selfSkip) { rd.selfSkip = new Set(); for (let i = 0; i < B.length; i++) for (let j = i + 1; j < B.length; j++) { const a = B[i], b = B[j]; if (!a.cap || !b.cap) continue;
+    const a0 = ragPoint(a, a.cap.w0), a1 = ragPoint(a, a.cap.w1), b0 = ragPoint(b, b.cap.w0), b1 = ragPoint(b, b.cap.w1); const [s, t] = segClosest(a0, a1, b0, b1);
+    const d = rv.len(rv.sub(rv.add(a0, rv.mul(rv.sub(a1, a0), s)), rv.add(b0, rv.mul(rv.sub(b1, b0), t)))); if (d < (a.cap.r + b.cap.r) * 1.05) rd.selfSkip.add(i * 64 + j); } }
+  for (let i = 0; i < B.length; i++) for (let j = i + 1; j < B.length; j++) {
+    const a = B[i], b = B[j]; if (a === rd.root || b === rd.root || rd.selfSkip.has(i * 64 + j)) continue; // el torso está unido a todos
+    ragCapPair(a, b, 0.5, true); }
 }
 // entre ragdolls distintos y contra entidades que no lo son (nadie se atraviesa; un golpe despierta al dormido)
 function ragInterCollide() {
@@ -319,7 +333,7 @@ function drawRagdolls(dim, selfFirstPerson) {
         m[4] = A[1][0] * h[1] * 2; m[5] = A[1][1] * h[1] * 2; m[6] = A[1][2] * h[1] * 2; m[7] = 0;
         m[8] = A[2][0] * h[2] * 2; m[9] = A[2][1] * h[2] * 2; m[10] = A[2][2] * h[2] * 2; m[11] = 0;
         m[12] = cx - (A[0][0] * h[0] + A[1][0] * h[1] + A[2][0] * h[2]); m[13] = cy - (A[0][1] * h[0] + A[1][1] * h[1] + A[2][1] * h[2]); m[14] = cz - (A[0][2] * h[0] + A[1][2] * h[1] + A[2][2] * h[2]); m[15] = 1;
-        drawBox(m, P.pt.t, L, rd.model.tint, flash, rd.model.emis || 0);
+        drawBox(m, P.pt.t, L, P.pt.wool && rd.entity && rd.entity.woolTint ? rd.entity.woolTint : rd.model.tint, flash, rd.model.emis || 0);
       }
     }
   }

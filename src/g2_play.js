@@ -217,16 +217,47 @@ function closeScreen() {
 }
 function netContainer() { if (UI.data && UI.data.key && G.net && G.net.role === 'client') netSend({ t: 'cu', k: UI.data.key, c: UI.data.c }); }
 // creativo
-const CREATIVE_TABS = [['Construcción', i => { const d = REG[i]; return d.isBlock && d.render === 'cube' && !d.ui && !d.light && !/ore|log|leaves|sand|gravel|dirt|grass|nylium|wool/.test(d.name); }],
-  ['Colores', i => /wool|terracotta|glass|concrete|carpet/.test(REG[i].name)],
+const CREATIVE_TABS = [['Construcción', i => { const d = REG[i]; return d.isBlock && ((d.render === 'cube' && !d.ui && !d.light && !/ore|log|leaves|sand|gravel|dirt|grass|nylium|wool|terracotta|concrete|glass|tnt|target|note_block|lamp|sponge|spawner|slime|honey|melon|pumpkin|hay|ice|snow|netherrack|soul|wart|shroom|magma|moss|sculk|clay|mud$|amethyst|froglight|bee_nest|cactus|debris|stem$|vault|bedrock|dripstone|budding|daylight/.test(d.name)) || /stairs|slab|_wall$|fence|door|trapdoor/.test(d.name)); }],
+  ['Colores', i => REG[i].isBlock && /wool|terracotta|glass|concrete|carpet/.test(REG[i].name)],
   ['Naturales', i => { const d = REG[i]; return d.isBlock && (/ore|log|leaves|sand|gravel|dirt|grass|nylium|sapling|flower|mushroom|cactus|snow|ice|stone$|netherrack|soul|end_stone|moss|sculk|dripstone|clay|mud|basalt|blackstone|kelp|seagrass|lily|vine|fungus|roots|stem|wart|melon|pumpkin|bush|fern|poppy|dandelion|orchid|cornflower|daisy|amethyst|cane|chorus|petals|debris/.test(d.name)); }],
-  ['Funcionales', i => { const d = REG[i]; return d.isBlock && (d.ui || d.light || /portal|spawner|bed|tnt|bars|fence|wall|rail|ladder|slab|scaffold|lever|button|plate|rod|lamp|detector|target|note|slime|honey/.test(d.name)); }],
-  ['Herramientas', i => { const d = REG[i]; return !d.isBlock && (d.tool && d.tool.type !== 'sword' || /bucket|flint_and|extinguisher|shears|compass|clock|spyglass|map|lead|brush|broom|boat|fishing|rocket|saddle|name_tag|bone_meal|eye_of|ender_pearl/.test(d.name)); }],
+  ['Funcionales', i => { const d = REG[i]; return d.isBlock && (d.ui || d.light || /portal|spawner|vault|bed|tnt|bars|rail|ladder|scaffold|lever|button|plate|rod|lamp|detector|target|note|slime|honey|sponge|bedrock/.test(d.name)) && !/stairs|slab|_wall$|fence|door/.test(d.name); }],
+  ['Herramientas', i => { const d = REG[i]; return !d.isBlock && (d.tool && d.tool.type !== 'sword' || /bucket|flint_and|extinguisher|flamethrower|sponge_item|shears|compass|clock|spyglass|map|lead|brush|broom|boat|fishing|rocket|saddle|name_tag|bone_meal|eye_of|ender_pearl/.test(d.name)); }],
   ['Combate', i => { const d = REG[i]; return !d.isBlock && (d.armor || (d.tool && d.tool.type === 'sword') || /bow|arrow|shield|trident|mace|totem|elytra|snowball|obliterator/.test(d.name) || (d.tool && d.tool.type === 'axe')); }],
   ['Comida', i => !REG[i].isBlock && !!REG[i].food],
   ['Ingredientes', i => { const d = REG[i]; return !d.isBlock && !d.food && !d.tool && !d.armor && !d.dur && !d.bucket && !/bow|arrow|shield|trident|mace|totem|elytra/.test(d.name); }],
   ['Buscar', null]];
-function allItemIds() { const a = []; for (let i = 1; i < REG.length; i++) { const d = REG[i]; if (!d) continue; if (d.isBlock && (d.liquid || d.portal || d.name === 'fire' || d.name === 'furnace_lit' || d.name === 'end_gateway' || d.name === 'end_portal')) continue; a.push(i); } return a; }
+// orden del inventario creativo (como el clásico): familias en orden, y dentro de cada una por especie de madera,
+// color (blanco → rosa), material (madera → netherita) y forma (bloque, escaleras, losa, valla, puerta…)
+const CR_WOODS = ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'bamboo', 'crimson', 'warped'];
+const CR_COLORS = ['white', 'light_gray', 'gray', 'black', 'brown', 'red', 'orange', 'yellow', 'lime', 'green', 'cyan', 'light_blue', 'blue', 'purple', 'magenta', 'pink'];
+const CR_TIERS = ['wooden', 'stone', 'leather', 'chainmail', 'iron', 'golden', 'diamond', 'netherite', 'turtle'];
+const CR_FORMS = ['log', 'stem', 'wood', 'stripped', 'planks', 'block', 'stairs', 'slab', 'wall', 'fence', 'fence_gate', 'door', 'trapdoor', 'pressure_plate', 'button', 'leaves', 'sapling', 'shovel', 'pickaxe', 'axe', 'hoe', 'sword', 'helmet', 'chestplate', 'leggings', 'boots'];
+const CR_GROUPS = [
+  /^(oak|spruce|birch|jungle|acacia|dark_oak|mangrove|cherry|crimson|warped)_(log|stem|wood|planks|stairs|slab|fence|fence_gate|door|trapdoor|pressure_plate|button)$/,
+  /^(stone|cobblestone|mossy_cobblestone|smooth_stone|stone_bricks?|mossy_stone_bricks|cracked_stone_bricks|chiseled_stone_bricks)(_stairs|_slab|_wall|_button|_pressure_plate)?$/,
+  /^(polished_)?(granite|diorite|andesite)/, /^(cobbled_|polished_|chiseled_|reinforced_)?deepslate(_bricks?|_tiles)?(_stairs|_slab|_wall)?$/, /tuff|calcite/,
+  /^bricks?($|_)|^brick_|^mud_bricks?/, /sandstone/, /prismarine/, /nether_brick|red_nether/, /basalt|blackstone/, /end_stone_brick|purpur/, /quartz_block|obsidian/,
+  /^(coal|iron|gold|redstone|emerald|lapis|diamond|netherite|copper|raw_iron|raw_gold|raw_copper|amethyst)_block$/, /copper/,
+  /wool$/, /carpet$/, /terracotta$/, /concrete$/, /concrete_powder$/, /^glass$|stained_glass$/, /glass_pane$/,
+  /^grass_block$|^snowy_grass$|^dirt$|^coarse_dirt|podzol|mycelium|^mud$|^clay$|^farmland$|^dirt_path$|moss_block/, /^sand$|^red_sand$|^gravel$/, /_ore$|ancient_debris/,
+  /_log$|_stem$/, /_leaves$/, /_sapling$|fungus$/, /flower|poppy|dandelion|orchid|cornflower|daisy|petals|tall_grass|^fern$|dead_bush|mushroom$|roots$/, /cactus|cane|bamboo|kelp|seagrass|lily_pad|vine/, /pumpkin|melon|hay_block/,
+  /ice$|snow/, /netherrack|nylium|soul_s|wart_block|shroomlight|magma_block|glowstone$/, /^end_stone$|chorus|dragon_egg/, /dripstone|amethyst|sculk/,
+  /crafting_table|furnace|smoker|smithing|anvil|enchanting|bookshelf|barrel|chest$/, /torch|lantern|campfire|end_rod|sea_lantern|froglight|lamp/, /bed$|ladder|scaffolding|bars$|rail/,
+  /redstone|lever|button|pressure_plate|target|daylight|note_block|lightning_rod|tnt|piston|observer|hopper|dispenser|dropper/,
+  /_shovel$|_pickaxe$|_axe$|_hoe$/, /bucket/, /flint_and_steel|fire_charge|bone_meal|shears|brush|fishing_rod|compass|clock|spyglass|map$|lead|name_tag|saddle|boat|broom|extinguisher|flamethrower|sponge_item/,
+  /_sword$/, /bow$|crossbow|arrow|trident|mace|shield|totem|obliterator/, /_helmet$|_chestplate$|_leggings$|_boots$/, /elytra/
+];
+const _crKey = new Map();
+function creativeKey(id) {
+  let k = _crKey.get(id); if (k) return k; const n = REG[id].name;
+  let g = CR_GROUPS.findIndex(re => re.test(n)); if (g < 0) g = CR_GROUPS.length;
+  const pre = (list) => { let best = -1, bl = 0; list.forEach((p, i) => { if ((n === p || n.startsWith(p + '_')) && p.length > bl) { best = i; bl = p.length; } }); return best; };
+  const sub = Math.max(pre(CR_WOODS), pre(CR_TIERS), pre(CR_COLORS));
+  const form = CR_FORMS.findIndex(f => n === f || n.endsWith('_' + f)); 
+  k = [g, sub, form, id]; _crKey.set(id, k); return k;
+}
+function creativeSort(ids) { return ids.sort((a, b) => { const A = creativeKey(a), B = creativeKey(b); for (let i = 0; i < 4; i++) if (A[i] !== B[i]) return A[i] - B[i]; return 0; }); }
+function allItemIds() { const a = []; for (let i = 1; i < REG.length; i++) { const d = REG[i]; if (!d) continue; if (d.isBlock && (d.liquid || d.portal || d.dynLog || d.name === 'fire' || d.name === 'furnace_lit' || d.name === 'end_gateway' || d.name === 'end_portal')) continue; a.push(i); } return a; }
 function buildCreative(panel, grid, sec) {
   const tabs = document.createElement('div'); tabs.className = 'ctabs'; panel.appendChild(tabs);
   const body = document.createElement('div'); body.className = 'cbody'; panel.appendChild(body);
@@ -236,7 +267,7 @@ function buildCreative(panel, grid, sec) {
     [...tabs.children].forEach((b, i) => b.classList.toggle('on', i === ti));
     const [name, f] = CREATIVE_TABS[ti]; const t = document.createElement('div'); t.className = 'ptitle'; t.textContent = name; body.appendChild(t);
     let ids = allItemIds();
-    if (f) ids = ids.filter(f); else { body.appendChild(search); const q = search.value.toLowerCase(); ids = ids.filter(i => REG[i].disp.toLowerCase().includes(q) || REG[i].name.includes(q)); setTimeout(() => search.focus(), 0); }
+    if (f) ids = creativeSort(ids.filter(f)); else { body.appendChild(search); const q = search.value.toLowerCase(); ids = ids.filter(i => REG[i].disp.toLowerCase().includes(q) || REG[i].name.includes(q)); setTimeout(() => search.focus(), 0); }
     const sc = document.createElement('div'); sc.className = 'cscroll'; body.appendChild(sc);
     grid(sc, ids.map(id => ({ palette: id })), 9);
     const bot = document.createElement('div'); bot.className = 'cbot'; body.appendChild(bot);
@@ -248,7 +279,7 @@ function buildCreative(panel, grid, sec) {
   search.addEventListener('keydown', e => { if (e.key !== 'Escape') e.stopPropagation(); });
   show(UI.ctab || 0);
 }
-function drawPlayerPreview(cv) { const g = cv.getContext('2d'); g.imageSmoothingEnabled = false; g.fillStyle = '#000'; g.fillRect(0, 0, 100, 140); const t = n => tileCanvas(n); g.drawImage(t('steve_face'), 34, 10, 32, 32); g.drawImage(t('steve_shirt'), 34, 42, 32, 46); g.drawImage(t('steve_skin'), 18, 42, 16, 46); g.drawImage(t('steve_skin'), 66, 42, 16, 46); g.drawImage(t('steve_pants'), 34, 88, 16, 46); g.drawImage(t('steve_pants'), 50, 88, 16, 46); const a = G.player.armor; const col = i => a[i] && REG[a[i].id].armor && ARMORMAT[REG[a[i].id].armor.mat] ? 'rgba(' + ARMORMAT[REG[a[i].id].armor.mat].col.join(',') + ',0.75)' : null; if (col(0)) { g.fillStyle = col(0); g.fillRect(32, 8, 36, 14); } if (col(1)) { g.fillStyle = col(1); g.fillRect(16, 42, 68, 30); } if (col(2)) { g.fillStyle = col(2); g.fillRect(34, 86, 32, 30); } if (col(3)) { g.fillStyle = col(3); g.fillRect(34, 120, 32, 14); } }
+function drawPlayerPreview(cv) { const g = cv.getContext('2d'); g.imageSmoothingEnabled = false; g.fillStyle = '#000'; g.fillRect(0, 0, 100, 140); const S = MODELS.steve, F = i => skinFaceCanvas(S[i], 5); g.drawImage(F(0), 34, 10, 32, 32); g.drawImage(F(1), 34, 42, 32, 46); g.drawImage(F(3), 18, 42, 16, 46); g.drawImage(F(2), 66, 42, 16, 46); g.drawImage(F(5), 34, 88, 16, 46); g.drawImage(F(4), 50, 88, 16, 46); const a = G.player.armor; const col = i => a[i] && REG[a[i].id].armor && ARMORMAT[REG[a[i].id].armor.mat] ? 'rgba(' + ARMORMAT[REG[a[i].id].armor.mat].col.join(',') + ',0.75)' : null; if (col(0)) { g.fillStyle = col(0); g.fillRect(32, 8, 36, 14); } if (col(1)) { g.fillStyle = col(1); g.fillRect(16, 42, 68, 30); } if (col(2)) { g.fillStyle = col(2); g.fillRect(34, 86, 32, 30); } if (col(3)) { g.fillStyle = col(3); g.fillRect(34, 120, 32, 14); } }
 
 // ------------------------------------------------------------ ENCANTAMIENTOS, YUNQUE Y COMERCIO
 const ENCH = { sharpness: ['Filo', 5], efficiency: ['Eficiencia', 5], unbreaking: ['Irrompibilidad', 3], protection: ['Protección', 4], feather_falling: ['Caída de pluma', 4], power: ['Poder', 5], fortune: ['Fortuna', 3], looting: ['Botín', 3], respiration: ['Respiración', 3], fire_aspect: ['Aspecto ígneo', 2] };
@@ -317,7 +348,8 @@ function onKeyDown(e) {
   // agacharse / correr en modo «alternar» (Opciones → Controles)
   if (!e.repeat && !UI.open && !G.paused) { if (a === 'sneak' && SETTINGS.ctl.toggleSneak) INPUT.tSneak = !INPUT.tSneak; if (a === 'sprint' && SETTINGS.ctl.toggleSprint) INPUT.tSprint = !INPUT.tSprint; }
   if (e.code === 'F3' || a === 'debug') { e.preventDefault(); if (!e.repeat && !INPUT.keys.F3) { F3 = !F3; setF3Display(); } INPUT.keys.F3 = true; INPUT.f3used = false; return; }
-  if (INPUT.keys.F3 && !INPUT.f3used && /^Key[BGNQ]$/.test(e.code)) { F3 = !F3; setF3Display(); }
+  if (INPUT.keys.F3 && !INPUT.f3used && (/^Key[BGNQ]$/.test(e.code) || e.code === 'F4')) { F3 = !F3; setF3Display(); }
+  if (INPUT.keys.F3 && e.code === 'F4') { e.preventDefault(); INPUT.f3used = true; if (!e.repeat) gmSwitchStep(); return; }
   if (INPUT.keys.F3) { if (e.code === 'KeyB') { F3B = !F3B; INPUT.f3used = true; chatMsg('Cajas de colisión: ' + (F3B ? 'visibles' : 'ocultas')); } if (e.code === 'KeyG') { F3G = !F3G; INPUT.f3used = true; chatMsg('Bordes de chunk: ' + (F3G ? 'visibles' : 'ocultos')); } if (e.code === 'KeyN') { INPUT.f3used = true; setGameMode(G.gameMode === 'spectator' ? 'creative' : 'spectator'); } if (e.code === 'KeyQ') { INPUT.f3used = true; chatMsg('F3+B: cajas  F3+G: chunks  F3+N: espectador'); } e.preventDefault(); return; }
   if (e.code === 'Escape') { e.preventDefault(); if (UI.open) closeScreen(); else if (G.paused) { if ($('sOptions').classList.contains('on') || $('sControls').classList.contains('on')) { waitingKey = null; showScreen('sPause'); } else pauseGame(false); } else if ($('sCredits').classList.contains('on')) { hideScreens(); lockPointer(); } else if (!G.player.dead) pauseGame(true); return; }
   if (UI.open) {
@@ -343,8 +375,27 @@ function onKeyDown(e) {
   if (e.code === 'F2') { e.preventDefault(); screenshot(); }
   if (e.code === 'F11') { e.preventDefault(); if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen().then(() => { try { navigator.keyboard && navigator.keyboard.lock(); } catch (err) { } }).catch(() => { }); }
 }
+// ---- F3+F4: selector de modo de juego (F4 pasa al siguiente; al soltar F3 se aplica)
+const GMSW = { open: false, sel: 0, el: null, modes: [['creative', 'Modo creativo', 'grass_block'], ['survival', 'Modo supervivencia', 'iron_sword'], ['adventure', 'Modo aventura', 'map'], ['spectator', 'Modo espectador', 'eye_of_ender']] };
+function gmSwitchRender() {
+  let el = GMSW.el; if (!el) { el = GMSW.el = document.createElement('div'); el.id = 'gmSwitch'; document.body.appendChild(el); }
+  const m = GMSW.modes; el.innerHTML = '<div class="gt">' + m[GMSW.sel][1] + '</div><div class="gi">' + m.map((q, i) => { const id = ID[q[2]] ?? ID.eye_of_ender ?? ID.grass_block; return '<div class="gs' + (i === GMSW.sel ? ' on' : '') + '"><img src="' + iconURL(id) + '"></div>'; }).join('') + '</div><div class="gk"><b>[ F4 ]</b> Siguiente</div>';
+  el.style.display = 'block';
+}
+function gmSwitchStep() {
+  if (G.mode !== 'game') return;
+  if (!GMSW.open) { GMSW.open = true; const cur = GMSW.modes.findIndex(q => q[0] === G.gameMode); GMSW.sel = ((cur < 0 ? 1 : cur) + 1) % GMSW.modes.length; } // como en Minecraft: empieza en el siguiente
+  else GMSW.sel = (GMSW.sel + 1) % GMSW.modes.length;
+  gmSwitchRender();
+}
+function gmSwitchApply() {
+  GMSW.open = false; if (GMSW.el) GMSW.el.style.display = 'none';
+  const m = GMSW.modes[GMSW.sel]; if (G.cheats === false && !(G.net && G.net.role === 'host')) { chatMsg('Los trucos no están activados en este mundo.', '#f88'); return; }
+  if (m[0] !== G.gameMode) { setGameMode(m[0]); chatMsg('Modo de juego cambiado a ' + m[1].replace('Modo ', '')); }
+}
 function setF3Display() { const v = F3 && G.mode === 'game' ? 'block' : 'none'; $('debugL').style.display = $('debugR').style.display = v; dbgT = 0; }
 function onKeyUp(e) {
+  if ((e.code === 'F3' || actionFor(e.code) === 'debug') && GMSW.open) gmSwitchApply();
   if (e.code === 'F3' || actionFor(e.code) === 'debug') INPUT.keys.F3 = false;
   INPUT.keys[e.code] = false;
 }
@@ -453,6 +504,8 @@ function useItem(hit) {
   if (d.trident) { p.bowT = 0.01; return 'hold'; }
   if (d.spyglass) { p.spy = true; return 'hold'; }
   if (d.extinguisher) { sprayExtinguisher(p); return 'hold'; }
+  if (d.flamethrower) { sprayFlamethrower(p); return 'hold'; }
+  if (d.pbfSponge) { spongeUse(p); return 'hold'; }
   if (d.broom) { broomUse(p); return 'hold'; }
   if (d.throwable) {
     const dir = lookDir(p);

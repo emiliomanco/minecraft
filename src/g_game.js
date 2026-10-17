@@ -36,6 +36,7 @@ shaped('gold_ingot', 1, ['NNN', 'NNN', 'NNN'], { N: 'gold_nugget' }); shapeless(
 shaped('iron_ingot', 1, ['NNN', 'NNN', 'NNN'], { N: 'iron_nugget' }); shapeless('iron_nugget', 9, ['iron_ingot']);
 shaped('bucket', 1, ['I I', ' I '], { I: 'iron_ingot' }); shapeless('flint_and_steel', 1, ['iron_ingot', 'flint']);
 shaped('fire_extinguisher', 1, ['INI', 'I I', 'INI'], { I: 'iron_ingot', N: 'iron_nugget' });
+shaped('flamethrower', 1, ['  F', 'IBI', 'II '], { I: 'iron_ingot', B: 'blaze_rod', F: 'flint_and_steel' }); shapeless('sponge_item', 2, ['sponge']);
 shaped('shears', 1, [' I', 'I '], { I: 'iron_ingot' }); shaped('compass', 1, [' I ', 'IRI', ' I '], { I: 'iron_ingot', R: 'redstone' }); shaped('clock', 1, [' G ', 'GRG', ' G '], { G: 'gold_ingot', R: 'redstone' });
 shaped('bow', 1, [' TS', 'T S', ' TS'], { T: 'stick', S: 'string' }); shaped('arrow', 4, ['F', 'S', 'E'], { F: 'flint', S: 'stick', E: 'feather' });
 shaped('crossbow', 1, ['STS', 'TIT', ' S '], { S: 'stick', T: 'string', I: 'iron_ingot' });
@@ -219,6 +220,7 @@ function markDirty(w, x, z, urgent) {
 }
 const NETBATCH = [];
 function onBlockSet(w, x, y, z, old, id, meta) {
+  if (old > 0 && id !== old && old !== ID.fire) for (const [ax, ay, az] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) if (w.get(x + ax, y + ay, z + az) === ID.fire) w.scheduleTick(x + ax, y + ay, z + az, 2, 4); // el fuego de al lado comprueba enseguida si se quedó sin apoyo
   if (old > 0 && REG[old].dynLog && !(id > 0 && REG[id].dynLog) && typeof dynOnRemoved === 'function') dynOnRemoved(w, x, y, z, old); // árbol dinámico: lo que queda suelto cae
   if (old === ID.bed && id !== ID.bed) for (const [dx, dz] of DIR4) { // la otra mitad de la cama se va con esta
     if (w.get(x + dx, y, z + dz) !== ID.bed) continue; const m = w.getMeta(x + dx, y, z + dz); const [fx, fz] = DIR4[m & 3]; const s = m & 4 ? -1 : 1;
@@ -291,12 +293,18 @@ function gravityTick(w, x, y, z) {
 function fizz(w, x, y, z) { playSound('fizz', x, y, z, 0.5); if (typeof vfxSmokeEmit === 'function') vfxSmokeEmit(x + 0.5, y + 1, z + 0.5, 1.0, 0.6, 2); for (let i = 0; i < 6; i++) smoke(x + Math.random(), y + 1, z + Math.random(), { r: 0.7, g: 0.7, b: 0.7, a: 0.5, size: 0.4, life: 1.2 }); }
 function fireTick(w, x, y, z) {
   if (w.get(x, y, z) !== ID.fire) return; const below = w.get(x, y - 1, z);
-  if (below > 0 && REG[below].infiniteFire) { return; }
+  // un bloque que conduce el calor justo encima: el agua quieta que tenga encima hierve (un octavo cada vez)
+  const cond = typeof heatConductor === 'function' && heatConductor(w.get(x, y + 1, z));
+  if (cond && w.get(x, y + 2, z) === ID.water && !(w.getMeta(x, y + 2, z) & LIQ_OCEAN) && Math.random() < 0.6) flamerBoilStatic(w, { x, y: y + 2, z, part: 27 }, 0);
+  if (below > 0 && REG[below].infiniteFire) { if (cond) w.scheduleTick(x, y, z, 40 + Math.random() * 20 | 0, 4); return; }
   if (G.rainLevel > 0.5 && w.dim === 'overworld' && w.light(x, y, z)[0] >= 15) { w.set(x, y, z, 0); fizz(w, x, y, z); return; }
   // sin combustible cerca, el fuego se consume poco a poco (no se apaga a golpes)
   let fuel = below > 0 && REG[below].flammable;
   if (!fuel) for (const [ax, ay, az] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, -1]]) { const n = w.get(x + ax, y + ay, z + az); if (n > 0 && REG[n].flammable) { fuel = true; break; } }
-  if (!fuel && Math.random() < 0.06) { w.set(x, y, z, 0); return; }
+  // el fuego no flota: sin suelo firme debajo ni nada inflamable al lado se apaga en el acto
+  const solidBelow = below > 0 && REG[below].solid && !REG[below].replace;
+  if (!fuel && !solidBelow) { w.set(x, y, z, 0); return; }
+  if (!fuel && Math.random() < 0.2) { w.set(x, y, z, 0); return; }
   // fuegos juntos se funden en uno mayor: más calor, se propaga más lejos y consume antes; lanza brasas
   let nbF = 0; for (let ax = -1; ax <= 1; ax++) for (let ay = -1; ay <= 1; ay++) for (let az = -1; az <= 1; az++) if ((ax || ay || az) && w.get(x + ax, y + ay, z + az) === ID.fire) nbF++;
   if (typeof emberEmit === 'function' && Math.random() < 0.12 + nbF * 0.04) emberEmit(w, x, y, z, 1 + nbF * 0.1);
@@ -329,6 +337,7 @@ function randomTicks(w, cx, cz) {
     const b = c.blocks[x | z << 4 | y << 8]; if (!b) continue; const wx = cx * 16 + x, wz = cz * 16 + z; const d = REG[b];
     if (d.sapling) { if (Math.random() < 0.15 && w.light(wx, y + 1, wz)[0] >= 9) growSapling(w, wx, y, wz, b); }
     else if (d.dynLog) dynGrowTick(w, wx, y, wz, b);
+    else if (b === ID.fire) fireTick(w, wx, y, wz); // por si perdió su tick programado (al recargar el mundo)
     else if (d.crop) { const m = w.getMeta(wx, y, wz); if (m < 7 && Math.random() < 0.35 && w.light(wx, y, wz)[0] + w.light(wx, y, wz)[1] >= 9) w.set(wx, y, wz, b, m + 1); }
     else if (b === ID.grass_block) { const a = w.get(wx, y + 1, wz); if (a > 0 && T_FULL[a]) w.set(wx, y, wz, ID.dirt); else for (let i = 0; i < 2; i++) { const nx = wx + (Math.random() * 3 | 0) - 1, ny = y + (Math.random() * 3 | 0) - 1, nz = wz + (Math.random() * 3 | 0) - 1; if (w.get(nx, ny, nz) === ID.dirt && w.get(nx, ny + 1, nz) === 0 && w.light(nx, ny + 1, nz)[0] >= 9) w.set(nx, ny, nz, ID.grass_block); } }
     else if (d.leaves && !(w.getMeta(wx, y, wz) & 1)) { let found = false; for (let dx = -4; dx <= 4 && !found; dx++) for (let dy = -4; dy <= 4 && !found; dy++) for (let dz = -4; dz <= 4 && !found; dz++) { const o = w.get(wx + dx, y + dy, wz + dz); if (o > 0 && REG[o].log) found = true; } if (!found) { w.set(wx, y, wz, 0); dropBlockItems(w, wx, y, wz, b, null, true); } }
@@ -486,13 +495,14 @@ function furnaceTick() {
   }
 }
 // ------------------------------------------------------------ comandos
+const GAMERULES = ['keepInventory', 'doWaterDespawn', 'doDaylightCycle', 'doWeatherCycle'];
 function runCommandBase(cmd) { // los comandos de siempre; runCommand (u_cmds.js) atiende antes /tp, /weather, /tick y /kill
   const a = cmd.trim().slice(1).split(/\s+/); const c = a[0].toLowerCase(); const p = G.player;
   const allowed = G.cheats !== false || (G.net && G.net.role === 'host');
   if (!allowed && c !== 'help' && c !== 'seed') return chatMsg('Los trucos no están activados en este mundo.', '#f88');
   const num = (v, cur) => v === undefined ? cur : v.startsWith('~') ? cur + (+v.slice(1) || 0) : +v;
   switch (c) {
-    case 'help': chatMsg('Comandos: /gamemode, /time, /weather, /tp, /give, /kill, /seed, /summon, /spawnpoint, /difficulty, /locate, /clear, /dimension, /gamerule keepInventory, /effect'); break;
+    case 'help': chatMsg('Comandos: /gamemode, /time, /weather, /tp, /give, /kill, /seed, /summon, /spawnpoint, /difficulty, /locate, /clear, /dimension, /gamerule <regla>, /effect'); break;
     case 'gamemode': case 'gm': { const m = { survival: 'survival', s: 'survival', '0': 'survival', creative: 'creative', c: 'creative', '1': 'creative', spectator: 'spectator', sp: 'spectator', '3': 'spectator', adventure: 'adventure', a: 'adventure', '2': 'adventure' }[a[1]]; if (!m) return chatMsg('Uso: /gamemode <survival|creative|spectator|adventure>', '#f88'); setGameMode(m); chatMsg('Modo de juego cambiado a ' + ({ survival: 'Supervivencia', creative: 'Creativo', spectator: 'Espectador', adventure: 'Aventura' })[m]); break; }
     case 'time': { if (a[1] === 'set') { const v = { day: 1000, noon: 6000, night: 13000, midnight: 18000, sunrise: 23000, sunset: 12000 }[a[2]] ?? +a[2]; G.time = Math.floor(G.time / 24000) * 24000 + (v || 0); } else if (a[1] === 'add') G.time += +a[2] || 0; else return chatMsg('Hora: ' + (G.time % 24000)); chatMsg('Hora establecida a ' + (G.time % 24000)); if (G.net && G.net.role === 'host') netBroadcast({ t: 'time', v: G.time }); break; }
     case 'weather': G.rain = a[1] === 'rain' || a[1] === 'thunder' ? 1 : 0; G.rainTimer = 12000; chatMsg('Clima: ' + (G.rain ? 'lluvia' : 'despejado')); break;
@@ -506,7 +516,15 @@ function runCommandBase(cmd) { // los comandos de siempre; runCommand (u_cmds.js
     case 'locate': { const name = (a[2] || a[1] || '').replace('structure', ''); const map = { village: 'village', aldea: 'village', stronghold: 'stronghold', fortaleza: 'stronghold', trial_chambers: 'trial_chambers', ancient_city: 'ancient_city', mansion: 'mansion', monument: 'monument', desert_pyramid: 'desert_pyramid', pyramid: 'desert_pyramid', pillager_outpost: 'pillager_outpost', outpost: 'pillager_outpost', mineshaft: 'mineshaft', shipwreck: 'shipwreck', jungle_temple: 'jungle_temple', fortress: 'nether_fortress', nether_fortress: 'nether_fortress', bastion: 'bastion', bastion_remnant: 'bastion', end_city: 'end_city', ruined_portal: 'ruined_portal', dungeon: 'dungeon' }; const st = map[name]; if (!st) return chatMsg('Estructuras: ' + Object.keys(map).join(', '), '#f88'); const sd = STRUCTS.find(s => s.name === st); if (sd.dim !== p.dim) return chatMsg('Esa estructura no está en esta dimensión.', '#f88'); const r = p.world.gen.structuresNear(st, p.x, p.z); if (!r) return chatMsg('No se encontró cerca.', '#f88'); chatMsg('La estructura más cercana está en X=' + r.x + ' Z=' + r.z + ' (' + Math.round(Math.hypot(r.x - p.x, r.z - p.z)) + ' bloques)', '#8f8'); break; }
     case 'clear': p.inv.fill(null); p.armor.fill(null); updateHUD(); chatMsg('Inventario vaciado'); break;
     case 'dimension': case 'tpdim': { const d = a[1]; if (!G.worlds[d]) return chatMsg('Uso: /dimension <overworld|nether|end>', '#f88'); if (d === 'end') travelPortal(p, 2); else { const w = G.worlds[d]; const x = d === 'nether' ? p.x / 8 : p.x * 8, z = d === 'nether' ? p.z / 8 : p.z * 8; ensureArea(w, x, z, 1); let y = d === 'nether' ? 64 : w.surfaceY(Math.floor(x), Math.floor(z)) + 1; if (d === 'nether') { for (let yy = 40; yy < 110; yy++) if (w.get(Math.floor(x), yy - 1, Math.floor(z)) > 0 && REG[w.get(Math.floor(x), yy - 1, Math.floor(z))].solid && w.get(Math.floor(x), yy, Math.floor(z)) === 0 && w.get(Math.floor(x), yy + 1, Math.floor(z)) === 0) { y = yy; break; } } changeDim(p, d, x, y, z); } break; }
-    case 'gamerule': if ((a[1] || '').toLowerCase() === 'keepinventory') { G.keepInventory = a[2] === 'true'; chatMsg('keepInventory = ' + G.keepInventory); } break;
+    case 'gamerule': { // reglas del mundo (se guardan con él)
+      const k = GAMERULES.find(r => r.toLowerCase() === (a[1] || '').toLowerCase());
+      if (!k) { chatMsg('Reglas: ' + GAMERULES.join(', '), '#f88'); break; }
+      const cur = k === 'doWaterDespawn' || k === 'keepInventory' ? !!G[k] : G[k] !== false;
+      if (a[2] === undefined) { chatMsg('La regla ' + k + ' está en: ' + cur); break; }
+      if (a[2] !== 'true' && a[2] !== 'false') { chatMsg('Valor no válido: usa true o false', '#f88'); break; }
+      G[k] = a[2] === 'true'; chatMsg('La regla ' + k + ' ahora es: ' + G[k]);
+      if (G.net && G.net.role === 'host') netSend({ t: 'rules', keep: G.keepInventory, dc: G.doDaylightCycle !== false, wc: G.doWeatherCycle !== false, wd: !!G.doWaterDespawn });
+      break; }
     case 'effect': { const e = a[2] || a[1]; const map = { speed: 'speed', velocidad: 'speed', regeneration: 'regen', jump_boost: 'jump', haste: 'haste', resistance: 'resistance', night_vision: 'night' }; if (map[e]) { p.effects[map[e]] = 20 * (+a[3] || 60); chatMsg('Efecto aplicado: ' + e); } else chatMsg('Efectos: ' + Object.keys(map).join(', ')); break; }
     default: chatMsg('Comando desconocido. Escribe /help', '#f88');
   }
