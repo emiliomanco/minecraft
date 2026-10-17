@@ -217,16 +217,47 @@ function closeScreen() {
 }
 function netContainer() { if (UI.data && UI.data.key && G.net && G.net.role === 'client') netSend({ t: 'cu', k: UI.data.key, c: UI.data.c }); }
 // creativo
-const CREATIVE_TABS = [['Construcción', i => { const d = REG[i]; return d.isBlock && d.render === 'cube' && !d.ui && !d.light && !/ore|log|leaves|sand|gravel|dirt|grass|nylium|wool/.test(d.name); }],
-  ['Colores', i => /wool|terracotta|glass|concrete|carpet/.test(REG[i].name)],
+const CREATIVE_TABS = [['Construcción', i => { const d = REG[i]; return d.isBlock && ((d.render === 'cube' && !d.ui && !d.light && !/ore|log|leaves|sand|gravel|dirt|grass|nylium|wool|terracotta|concrete|glass|tnt|target|note_block|lamp|sponge|spawner|slime|honey|melon|pumpkin|hay|ice|snow|netherrack|soul|wart|shroom|magma|moss|sculk|clay|mud$|amethyst|froglight|bee_nest|cactus|debris|stem$|vault|bedrock|dripstone|budding|daylight/.test(d.name)) || /stairs|slab|_wall$|fence|door|trapdoor/.test(d.name)); }],
+  ['Colores', i => REG[i].isBlock && /wool|terracotta|glass|concrete|carpet/.test(REG[i].name)],
   ['Naturales', i => { const d = REG[i]; return d.isBlock && (/ore|log|leaves|sand|gravel|dirt|grass|nylium|sapling|flower|mushroom|cactus|snow|ice|stone$|netherrack|soul|end_stone|moss|sculk|dripstone|clay|mud|basalt|blackstone|kelp|seagrass|lily|vine|fungus|roots|stem|wart|melon|pumpkin|bush|fern|poppy|dandelion|orchid|cornflower|daisy|amethyst|cane|chorus|petals|debris/.test(d.name)); }],
-  ['Funcionales', i => { const d = REG[i]; return d.isBlock && (d.ui || d.light || /portal|spawner|bed|tnt|bars|fence|wall|rail|ladder|slab|scaffold|lever|button|plate|rod|lamp|detector|target|note|slime|honey/.test(d.name)); }],
+  ['Funcionales', i => { const d = REG[i]; return d.isBlock && (d.ui || d.light || /portal|spawner|vault|bed|tnt|bars|rail|ladder|scaffold|lever|button|plate|rod|lamp|detector|target|note|slime|honey|sponge|bedrock/.test(d.name)) && !/stairs|slab|_wall$|fence|door/.test(d.name); }],
   ['Herramientas', i => { const d = REG[i]; return !d.isBlock && (d.tool && d.tool.type !== 'sword' || /bucket|flint_and|extinguisher|flamethrower|sponge_item|shears|compass|clock|spyglass|map|lead|brush|broom|boat|fishing|rocket|saddle|name_tag|bone_meal|eye_of|ender_pearl/.test(d.name)); }],
   ['Combate', i => { const d = REG[i]; return !d.isBlock && (d.armor || (d.tool && d.tool.type === 'sword') || /bow|arrow|shield|trident|mace|totem|elytra|snowball|obliterator/.test(d.name) || (d.tool && d.tool.type === 'axe')); }],
   ['Comida', i => !REG[i].isBlock && !!REG[i].food],
   ['Ingredientes', i => { const d = REG[i]; return !d.isBlock && !d.food && !d.tool && !d.armor && !d.dur && !d.bucket && !/bow|arrow|shield|trident|mace|totem|elytra/.test(d.name); }],
   ['Buscar', null]];
-function allItemIds() { const a = []; for (let i = 1; i < REG.length; i++) { const d = REG[i]; if (!d) continue; if (d.isBlock && (d.liquid || d.portal || d.name === 'fire' || d.name === 'furnace_lit' || d.name === 'end_gateway' || d.name === 'end_portal')) continue; a.push(i); } return a; }
+// orden del inventario creativo (como el clásico): familias en orden, y dentro de cada una por especie de madera,
+// color (blanco → rosa), material (madera → netherita) y forma (bloque, escaleras, losa, valla, puerta…)
+const CR_WOODS = ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'bamboo', 'crimson', 'warped'];
+const CR_COLORS = ['white', 'light_gray', 'gray', 'black', 'brown', 'red', 'orange', 'yellow', 'lime', 'green', 'cyan', 'light_blue', 'blue', 'purple', 'magenta', 'pink'];
+const CR_TIERS = ['wooden', 'stone', 'leather', 'chainmail', 'iron', 'golden', 'diamond', 'netherite', 'turtle'];
+const CR_FORMS = ['log', 'stem', 'wood', 'stripped', 'planks', 'block', 'stairs', 'slab', 'wall', 'fence', 'fence_gate', 'door', 'trapdoor', 'pressure_plate', 'button', 'leaves', 'sapling', 'shovel', 'pickaxe', 'axe', 'hoe', 'sword', 'helmet', 'chestplate', 'leggings', 'boots'];
+const CR_GROUPS = [
+  /^(oak|spruce|birch|jungle|acacia|dark_oak|mangrove|cherry|crimson|warped)_(log|stem|wood|planks|stairs|slab|fence|fence_gate|door|trapdoor|pressure_plate|button)$/,
+  /^(stone|cobblestone|mossy_cobblestone|smooth_stone|stone_bricks?|mossy_stone_bricks|cracked_stone_bricks|chiseled_stone_bricks)(_stairs|_slab|_wall|_button|_pressure_plate)?$/,
+  /^(polished_)?(granite|diorite|andesite)/, /^(cobbled_|polished_|chiseled_|reinforced_)?deepslate(_bricks?|_tiles)?(_stairs|_slab|_wall)?$/, /tuff|calcite/,
+  /^bricks?($|_)|^brick_|^mud_bricks?/, /sandstone/, /prismarine/, /nether_brick|red_nether/, /basalt|blackstone/, /end_stone_brick|purpur/, /quartz_block|obsidian/,
+  /^(coal|iron|gold|redstone|emerald|lapis|diamond|netherite|copper|raw_iron|raw_gold|raw_copper|amethyst)_block$/, /copper/,
+  /wool$/, /carpet$/, /terracotta$/, /concrete$/, /concrete_powder$/, /^glass$|stained_glass$/, /glass_pane$/,
+  /^grass_block$|^snowy_grass$|^dirt$|^coarse_dirt|podzol|mycelium|^mud$|^clay$|^farmland$|^dirt_path$|moss_block/, /^sand$|^red_sand$|^gravel$/, /_ore$|ancient_debris/,
+  /_log$|_stem$/, /_leaves$/, /_sapling$|fungus$/, /flower|poppy|dandelion|orchid|cornflower|daisy|petals|tall_grass|^fern$|dead_bush|mushroom$|roots$/, /cactus|cane|bamboo|kelp|seagrass|lily_pad|vine/, /pumpkin|melon|hay_block/,
+  /ice$|snow/, /netherrack|nylium|soul_s|wart_block|shroomlight|magma_block|glowstone$/, /^end_stone$|chorus|dragon_egg/, /dripstone|amethyst|sculk/,
+  /crafting_table|furnace|smoker|smithing|anvil|enchanting|bookshelf|barrel|chest$/, /torch|lantern|campfire|end_rod|sea_lantern|froglight|lamp/, /bed$|ladder|scaffolding|bars$|rail/,
+  /redstone|lever|button|pressure_plate|target|daylight|note_block|lightning_rod|tnt|piston|observer|hopper|dispenser|dropper/,
+  /_shovel$|_pickaxe$|_axe$|_hoe$/, /bucket/, /flint_and_steel|fire_charge|bone_meal|shears|brush|fishing_rod|compass|clock|spyglass|map$|lead|name_tag|saddle|boat|broom|extinguisher|flamethrower|sponge_item/,
+  /_sword$/, /bow$|crossbow|arrow|trident|mace|shield|totem|obliterator/, /_helmet$|_chestplate$|_leggings$|_boots$/, /elytra/
+];
+const _crKey = new Map();
+function creativeKey(id) {
+  let k = _crKey.get(id); if (k) return k; const n = REG[id].name;
+  let g = CR_GROUPS.findIndex(re => re.test(n)); if (g < 0) g = CR_GROUPS.length;
+  const pre = (list) => { let best = -1, bl = 0; list.forEach((p, i) => { if ((n === p || n.startsWith(p + '_')) && p.length > bl) { best = i; bl = p.length; } }); return best; };
+  const sub = Math.max(pre(CR_WOODS), pre(CR_TIERS), pre(CR_COLORS));
+  const form = CR_FORMS.findIndex(f => n === f || n.endsWith('_' + f)); 
+  k = [g, sub, form, id]; _crKey.set(id, k); return k;
+}
+function creativeSort(ids) { return ids.sort((a, b) => { const A = creativeKey(a), B = creativeKey(b); for (let i = 0; i < 4; i++) if (A[i] !== B[i]) return A[i] - B[i]; return 0; }); }
+function allItemIds() { const a = []; for (let i = 1; i < REG.length; i++) { const d = REG[i]; if (!d) continue; if (d.isBlock && (d.liquid || d.portal || d.dynLog || d.name === 'fire' || d.name === 'furnace_lit' || d.name === 'end_gateway' || d.name === 'end_portal')) continue; a.push(i); } return a; }
 function buildCreative(panel, grid, sec) {
   const tabs = document.createElement('div'); tabs.className = 'ctabs'; panel.appendChild(tabs);
   const body = document.createElement('div'); body.className = 'cbody'; panel.appendChild(body);
@@ -236,7 +267,7 @@ function buildCreative(panel, grid, sec) {
     [...tabs.children].forEach((b, i) => b.classList.toggle('on', i === ti));
     const [name, f] = CREATIVE_TABS[ti]; const t = document.createElement('div'); t.className = 'ptitle'; t.textContent = name; body.appendChild(t);
     let ids = allItemIds();
-    if (f) ids = ids.filter(f); else { body.appendChild(search); const q = search.value.toLowerCase(); ids = ids.filter(i => REG[i].disp.toLowerCase().includes(q) || REG[i].name.includes(q)); setTimeout(() => search.focus(), 0); }
+    if (f) ids = creativeSort(ids.filter(f)); else { body.appendChild(search); const q = search.value.toLowerCase(); ids = ids.filter(i => REG[i].disp.toLowerCase().includes(q) || REG[i].name.includes(q)); setTimeout(() => search.focus(), 0); }
     const sc = document.createElement('div'); sc.className = 'cscroll'; body.appendChild(sc);
     grid(sc, ids.map(id => ({ palette: id })), 9);
     const bot = document.createElement('div'); bot.className = 'cbot'; body.appendChild(bot);
