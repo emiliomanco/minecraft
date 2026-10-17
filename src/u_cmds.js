@@ -30,10 +30,11 @@ const CMD_SPEC = {
   gamerule: [['keepInventory', 'doWaterDespawn', 'doDaylightCycle', 'doWeatherCycle'], ['true', 'false']],
   effect: [['give'], CMD_EFFECTS, ['30', '60', '300']],
   liquids: [['delete', 'sphere', 'cube'], a => a[1] === 'delete' ? ['all', 'water', 'lava', 'honey', 'milk'] : ['water', 'lava', 'honey', 'milk'], a => a[1] === 'sphere' ? ['<radio>', '2', '3', '4'] : a[1] === 'cube' ? ['<lado>', '2', '4', '6'] : []],
+  set: [['cube', 'sphere'], () => ['air'].concat(REG.filter(d => d && d.isBlock && d.name).map(d => d.name))],
   tick: [['freeze', 'unfreeze', 'rate', 'step', 'query', '0.25', '0.5', '2', '4'], a => a[1] === 'rate' ? ['0.1', '0.5', '1', '2', '4', '10'] : a[1] === 'step' ? ['1', '20', '100'] : []]
 };
 CMD_SPEC.teleport = CMD_SPEC.tp;
-const CMD_HELP = { help: 'lista de comandos', liquids: 'delete all|water|lava|honey|milk · sphere|cube water|lava|honey|milk <radio|lado>', gamemode: '<modo>', time: 'set|add|query', weather: 'clear|rain|thunder [segundos]', tp: '<x y z> | <jugador> | <quién> <x y z|destino>', give: '<objeto> [cantidad]', kill: '[@s|@e|@e[type=mob]|mob]', seed: '', summon: '<mob> [x y z]', spawnpoint: '', difficulty: '<dificultad>', locate: 'structure <nombre>', clear: '', dimension: '<dimensión>', gamerule: 'keepInventory <true|false>', effect: 'give <efecto> [segundos]', tick: 'freeze | unfreeze | <velocidad> | rate <x> | step [ticks] | query' };
+const CMD_HELP = { help: 'lista de comandos', set: 'cube|sphere <bloque|air> (entre pos1 y pos2 del Edit Tool)', liquids: 'delete all|water|lava|honey|milk · sphere|cube water|lava|honey|milk <radio|lado>', gamemode: '<modo>', time: 'set|add|query', weather: 'clear|rain|thunder [segundos]', tp: '<x y z> | <jugador> | <quién> <x y z|destino>', give: '<objeto> [cantidad]', kill: '[@s|@e|@e[type=mob]|mob]', seed: '', summon: '<mob> [x y z]', spawnpoint: '', difficulty: '<dificultad>', locate: 'structure <nombre>', clear: '', dimension: '<dimensión>', gamerule: 'keepInventory <true|false>', effect: 'give <efecto> [segundos]', tick: 'freeze | unfreeze | <velocidad> | rate <x> | step [ticks] | query' };
 // ---- ejecución
 function runCommand(cmd) {
   const a = cmd.trim().slice(1).split(/\s+/); const c = (a[0] || '').toLowerCase(); const p = G.player;
@@ -80,6 +81,22 @@ function runCommand(cmd) {
       else { const v = +(k === 'rate' ? a[2] : k); if (!(v > 0)) return chatMsg('Uso: /tick ' + CMD_HELP.tick, '#f88'); G.tickRate = clamp(v, 0.05, 20); G.tickFrozen = false; chatMsg('Velocidad del mundo: x' + G.tickRate + ' (' + Math.round(20 * G.tickRate * 10) / 10 + ' ticks/s)'); }
       if (G.net && G.net.role === 'host') netBroadcast({ t: 'tick', f: G.tickFrozen, r: G.tickRate });
       return;
+    }
+    case 'set': { // world edit: rellena con un bloque (o aire) la caja o la esfera (elipsoide) entre pos1 y pos2 del Edit Tool
+      const shape = (a[1] || '').toLowerCase(), name = (a[2] || '').replace('minecraft:', '').toLowerCase();
+      if ((shape !== 'cube' && shape !== 'sphere') || !name) return chatMsg('Uso: /set cube|sphere <bloque> (antes marca pos1 y pos2 con el Edit Tool)', '#f88');
+      if (!WE.p1 || !WE.p2) return chatMsg('Marca pos1 (clic izquierdo) y pos2 (clic derecho) en bloques con el Edit Tool', '#f88');
+      const id = name === 'air' ? 0 : ID[name]; if (id === undefined || (id && !REG[id].isBlock)) return chatMsg('Bloque desconocido: ' + name, '#f88');
+      const x0 = Math.min(WE.p1[0], WE.p2[0]), x1 = Math.max(WE.p1[0], WE.p2[0]), y0 = Math.min(WE.p1[1], WE.p2[1]), y1 = Math.max(WE.p1[1], WE.p2[1]), z0 = Math.min(WE.p1[2], WE.p2[2]), z1 = Math.max(WE.p1[2], WE.p2[2]);
+      const vol = (x1 - x0 + 1) * (y1 - y0 + 1) * (z1 - z0 + 1); if (vol > 2000000) return chatMsg('Selección demasiado grande (' + vol.toLocaleString('es') + ' bloques; máximo 2.000.000)', '#f88');
+      const w = p.world; const cx = (x0 + x1 + 1) / 2, cy = (y0 + y1 + 1) / 2, cz = (z0 + z1 + 1) / 2, rx = (x1 - x0 + 1) / 2, ry = (y1 - y0 + 1) / 2, rz = (z1 - z0 + 1) / 2;
+      let n = 0, miss = 0;
+      for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) {
+        if (shape === 'sphere' && ((x + 0.5 - cx) / rx) ** 2 + ((y + 0.5 - cy) / ry) ** 2 + ((z + 0.5 - cz) / rz) ** 2 > 1) continue;
+        if (y < 0 || y >= w.H) continue; const cur = w.get(x, y, z); if (cur < 0) { miss++; continue; } if (cur === id && w.getMeta(x, y, z) === 0) continue;
+        setBlockNet(w, x, y, z, id, 0); n++;
+      }
+      return chatMsg((shape === 'cube' ? 'Caja' : 'Esfera') + ': ' + n.toLocaleString('es') + ' bloques de ' + (id ? REG[id].disp : 'aire') + (miss ? ' (' + miss.toLocaleString('es') + ' sin cargar, no se tocaron)' : ''));
     }
     case 'liquids': { // solo partículas del fluido continuo: el agua y la lava normales (y los océanos) no se tocan
       if (G.net && G.net.role === 'client') return chatMsg('Solo el anfitrión puede usar /liquids (él simula el fluido)', '#f88');

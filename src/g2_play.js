@@ -268,7 +268,7 @@ const CREATIVE_TABS = [['Construcción', i => { const d = REG[i]; return d.isBlo
   ['Colores', i => REG[i].isBlock && /wool|terracotta|glass|concrete|carpet/.test(REG[i].name)],
   ['Naturales', i => { const d = REG[i]; return d.isBlock && (/ore|log|leaves|sand|gravel|dirt|grass|nylium|sapling|flower|mushroom|cactus|snow|ice|stone$|netherrack|soul|end_stone|moss|sculk|dripstone|clay|mud|basalt|blackstone|kelp|seagrass|lily|vine|fungus|roots|stem|wart|melon|pumpkin|bush|fern|poppy|dandelion|orchid|cornflower|daisy|amethyst|cane|chorus|petals|debris/.test(d.name)); }],
   ['Funcionales', i => { const d = REG[i]; return d.isBlock && (d.ui || d.light || /portal|spawner|vault|bed|tnt|bars|rail|ladder|scaffold|lever|button|plate|rod|lamp|detector|target|note|slime|honey|sponge|bedrock/.test(d.name)) && !/stairs|slab|_wall$|fence|door/.test(d.name); }],
-  ['Herramientas', i => { const d = REG[i]; return !d.isBlock && (d.tool && d.tool.type !== 'sword' || /bucket|flint_and|extinguisher|flamethrower|sponge_item|diffuser|shears|compass|clock|spyglass|map|lead|brush|broom|boat|fishing|rocket|saddle|name_tag|bone_meal|eye_of|ender_pearl/.test(d.name)); }],
+  ['Herramientas', i => { const d = REG[i]; return !d.isBlock && (d.tool && d.tool.type !== 'sword' || /bucket|flint_and|extinguisher|flamethrower|sponge_item|diffuser|edit_tool|shears|compass|clock|spyglass|map|lead|brush|broom|boat|fishing|rocket|saddle|name_tag|bone_meal|eye_of|ender_pearl/.test(d.name)); }],
   ['Combate', i => { const d = REG[i]; return !d.isBlock && (d.armor || (d.tool && d.tool.type === 'sword') || /bow|arrow|shield|trident|mace|totem|elytra|snowball|obliterator/.test(d.name) || (d.tool && d.tool.type === 'axe')); }],
   ['Comida', i => !REG[i].isBlock && !!REG[i].food],
   ['Ingredientes', i => { const d = REG[i]; return !d.isBlock && !d.food && !d.tool && !d.armor && !d.dur && !d.bucket && !/bow|arrow|shield|trident|mace|totem|elytra/.test(d.name); }],
@@ -278,6 +278,14 @@ const CREATIVE_TABS = [['Construcción', i => { const d = REG[i]; return d.isBlo
 const CR_WOODS = ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'bamboo', 'crimson', 'warped'];
 const CR_COLORS = ['white', 'light_gray', 'gray', 'black', 'brown', 'red', 'orange', 'yellow', 'lime', 'green', 'cyan', 'light_blue', 'blue', 'purple', 'magenta', 'pink'];
 const CR_TIERS = ['wooden', 'stone', 'leather', 'chainmail', 'iron', 'golden', 'diamond', 'netherite', 'turtle'];
+// ---- world edit: dos esquinas (pos1, pos2) marcadas con el Edit Tool; /set rellena la caja o la esfera entre ellas
+const WE = { p1: null, p2: null };
+function weSetPos(k, x, y, z) {
+  const cur = k === 1 ? WE.p1 : WE.p2; if (cur && cur[0] === x && cur[1] === y && cur[2] === z) return;
+  if (k === 1) WE.p1 = [x, y, z]; else WE.p2 = [x, y, z]; const yo = G.player ? G.player.world.yOff || 0 : 0;
+  let n = ''; if (WE.p1 && WE.p2) n = ' (' + ((Math.abs(WE.p1[0] - WE.p2[0]) + 1) * (Math.abs(WE.p1[1] - WE.p2[1]) + 1) * (Math.abs(WE.p1[2] - WE.p2[2]) + 1)).toLocaleString('es') + ' bloques)';
+  chatMsg('Pos' + k + ': ' + x + ' ' + (y + yo) + ' ' + z + n, k === 1 ? '#f9a' : '#9cf'); playSound('click', x, y, z, 0.4);
+}
 const CR_FORMS = ['log', 'stem', 'wood', 'stripped', 'planks', 'block', 'stairs', 'slab', 'wall', 'fence', 'fence_gate', 'door', 'trapdoor', 'pressure_plate', 'button', 'leaves', 'sapling', 'shovel', 'pickaxe', 'axe', 'hoe', 'sword', 'helmet', 'chestplate', 'leggings', 'boots'];
 const CR_GROUPS = [
   /^(oak|spruce|birch|jungle|acacia|dark_oak|mangrove|cherry|crimson|warped)_(log|stem|wood|planks|stairs|slab|fence|fence_gate|door|trapdoor|pressure_plate|button)$/,
@@ -291,7 +299,7 @@ const CR_GROUPS = [
   /ice$|snow/, /netherrack|nylium|soul_s|wart_block|shroomlight|magma_block|glowstone$/, /^end_stone$|chorus|dragon_egg/, /dripstone|amethyst|sculk/,
   /crafting_table|furnace|smoker|smithing|anvil|enchanting|bookshelf|barrel|chest$/, /torch|lantern|campfire|end_rod|sea_lantern|froglight|lamp/, /bed$|ladder|scaffolding|bars$|rail/,
   /redstone|lever|button|pressure_plate|target|daylight|note_block|lightning_rod|tnt|piston|observer|hopper|dispenser|dropper/,
-  /_shovel$|_pickaxe$|_axe$|_hoe$/, /bucket/, /flint_and_steel|fire_charge|bone_meal|shears|brush|fishing_rod|compass|clock|spyglass|map$|lead|name_tag|saddle|boat|broom|extinguisher|flamethrower|sponge_item|diffuser/,
+  /_shovel$|_pickaxe$|_axe$|_hoe$/, /bucket/, /flint_and_steel|fire_charge|bone_meal|shears|brush|fishing_rod|compass|clock|spyglass|map$|lead|name_tag|saddle|boat|broom|extinguisher|flamethrower|sponge_item|diffuser|edit_tool/,
   /_sword$/, /bow$|crossbow|arrow|trident|mace|shield|totem|obliterator/, /_helmet$|_chestplate$|_leggings$|_boots$/, /elytra/
 ];
 const _crKey = new Map();
@@ -516,6 +524,7 @@ function placeBlock(hit, stack) {
 }
 function useItem(hit) {
   const p = G.player; const w = p.world; const s = p.held(); const d = s ? REG[s.id] : null;
+  if (d && d.editTool) { if (G.gameMode === 'creative' && hit && !hit.ent) weSetPos(2, hit.x, hit.y, hit.z); return true; } // world edit: pos2 (antes de abrir cofres o puertas)
   // interacción con entidades
   if (hit && hit.ent) {
     const e = hit.ent;
@@ -644,9 +653,12 @@ function updateInteraction(dt) {
   if (p.swing > 0) { p.swing += dt * 6; if (p.swing > 1) p.swing = 0; }
   // difusor en la mano: golpear el aire cambia de modo (Líquido ↔ PBF)
   { const s = p.held(); if (attack && !MINE.atkPrev && !tgt && s && REG[s.id].diffuser && G.gameMode !== 'spectator') { s.mode = s.mode === 'pbf' ? 'liquid' : 'pbf'; p.swing = 0.01; showActionMsg('Difusor: modo ' + (s.mode === 'pbf' ? 'PBF (líquido normal → partículas)' : 'Líquido (partículas → líquido normal)')); showItemName(); playSound('hit', p.x, p.eye, p.z, 0.3, ID.iron_block); } }
+  // Edit Tool (creativo): clic izquierdo en un bloque marca pos1 y no lo rompe
+  const editHeld = (() => { const s = p.held(); return !!(s && REG[s.id].editTool); })();
+  if (editHeld && attack && !MINE.atkPrev && tgt && !tgt.ent && G.gameMode === 'creative') { weSetPos(1, tgt.x, tgt.y, tgt.z); p.swing = 0.01; }
   MINE.atkPrev = attack;
   // atacar / minar
-  if (attack && G.gameMode !== 'spectator') {
+  if (attack && G.gameMode !== 'spectator' && !(editHeld && tgt && !tgt.ent)) {
     if (tgt && tgt.ent) { if (MINE.attackCool <= 0) { attackEntity(tgt.ent); MINE.attackCool = 0.35; p.swing = 0.01; } MINE.target = null; }
     else if (tgt) {
       const key = tgt.x + ',' + tgt.y + ',' + tgt.z;

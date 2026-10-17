@@ -363,7 +363,11 @@ function gameFrame(dt) {
   let roll = ragRoll; if (G.shake > 0) { G.shake = Math.max(0, G.shake - dt * 2.5); roll = (Math.random() - 0.5) * G.shake * 0.08; pitch += (Math.random() - 0.5) * G.shake * 0.05; yaw += (Math.random() - 0.5) * G.shake * 0.05; }
   if (p.hurtTime > 0) roll += Math.sin(p.hurtTime / 10 * Math.PI) * 0.06;
   { const cl = w.dim === 'overworld' ? Math.min(1, w.light(Math.floor(eye[0]), Math.floor(eye[1]), Math.floor(eye[2]))[0] / 12) : 1; R.camSky = lerp(R.camSky ?? 1, cl, Math.min(1, dt * 3)); }
-  const camB = blockAt(w, eye[0], eye[1], eye[2]); const under = liquidAt(w, eye[0], eye[1], eye[2]) === 1;
+  const camB = blockAt(w, eye[0], eye[1], eye[2]);
+  // líquido en el que está la cámara: 1 agua, 4 miel, 5 leche (la miel y la leche solo existen como partículas)
+  let underKind = liquidAt(w, eye[0], eye[1], eye[2]) === 1 ? 1 : 0;
+  if (typeof flMilkAt === 'function') { if (flMilkAt(w, eye[0], eye[1], eye[2])) underKind = 5; else if (!underKind && flHoneyAt(w, eye[0], eye[1], eye[2])) underKind = 4; }
+  const under = underKind > 0;
   // zoom (mantener la tecla; la rueda cambia el aumento entre 2x y 12x)
   const zoomOn = held('zoom') && !UI.open && !G.paused && !$('chatIn').classList.contains('on'); G.zoomCur = lerp(G.zoomCur || 1, zoomOn ? (G.zoomMag || SETTINGS.ctl.zoomMag || 4) : 1, Math.min(1, dt * 12));
   const tfov = SETTINGS.fov * (p.sprinting && !zoomOn ? 1.12 : 1) * (p.spy ? 0.14 : 1) * (p.bowT > 0 ? 1 - Math.min(1, p.bowT) * 0.15 : 1) * (p.gliding ? 1.1 : 1) / G.zoomCur;
@@ -376,7 +380,7 @@ function gameFrame(dt) {
   if (typeof flamerTick === 'function') flamerTick(w, wdt);
   if (typeof rainPuddleTick === 'function') rainPuddleTick(w, wdt); // la lluvia ya no crea partículas: evapora las gotas que quedaran // calor del lanzallamas y de los conductores: evapora el agua
   renderWorld(w, eye, yaw, pitch, {
-    fov: G.fovCur, under, roll, bob, biome: w.biomeAt(Math.floor(p.x), Math.floor(p.z)),
+    fov: G.fovCur, under, underKind, roll, bob, biome: w.biomeAt(Math.floor(p.x), Math.floor(p.z)),
     drawEntities: () => { drawAllEntities(p.dim, alphaW, perspective > 0 && G.gameMode !== 'spectator', perspective === 0 && G.gameMode !== 'spectator' && !p.ragdoll && !p.boat && !p.sleeping && !p.gliding && !p.spy); },
     particles: G.particles, flames: G._flames, fireCells: G._fireCells, drawOverlay: tr => drawOverlays(tr), drawHand: perspective === 0 && !hudHidden && G.gameMode !== 'spectator' && !p.spy && !p.ragdoll && (G.zoomCur || 1) < 1.3 ? drawHand : null,
     exposure: p.effects.night ? 1.6 : 1
@@ -473,6 +477,11 @@ function drawOverlays(trans) {
       }
     }
     if (lines.length) drawLines(lines, [0, 0, 0, 0.9]);
+    { const s = p.held(); if (s && REG[s.id].editTool && (WE.p1 || WE.p2)) { // world edit: pos1 (rosa), pos2 (azul) y la selección (amarillo)
+      if (WE.p1) drawLines(boxLines(WE.p1[0] - 0.01, WE.p1[1] - 0.01, WE.p1[2] - 0.01, WE.p1[0] + 1.01, WE.p1[1] + 1.01, WE.p1[2] + 1.01), [1, 0.45, 0.65, 1]);
+      if (WE.p2) drawLines(boxLines(WE.p2[0] - 0.01, WE.p2[1] - 0.01, WE.p2[2] - 0.01, WE.p2[0] + 1.01, WE.p2[1] + 1.01, WE.p2[2] + 1.01), [0.5, 0.75, 1, 1]);
+      if (WE.p1 && WE.p2) drawLines(boxLines(Math.min(WE.p1[0], WE.p2[0]) - 0.02, Math.min(WE.p1[1], WE.p2[1]) - 0.02, Math.min(WE.p1[2], WE.p2[2]) - 0.02, Math.max(WE.p1[0], WE.p2[0]) + 1.02, Math.max(WE.p1[1], WE.p2[1]) + 1.02, Math.max(WE.p1[2], WE.p2[2]) + 1.02), [1, 0.9, 0.3, 1]);
+    } }
     const beams = entityBeams(p.dim); if (beams.length) drawLines(beams, [0.9, 0.4, 1, 1]);
     if (F3B) { const L = []; for (const e of G.entities.values()) if (e.dim === p.dim && Math.abs(e.x - p.x) < 48 && Math.abs(e.z - p.z) < 48) L.push(...boxLines(e.x - e.w / 2, e.y, e.z - e.w / 2, e.x + e.w / 2, e.y + e.h, e.z + e.w / 2)); if (L.length) drawLines(L, [1, 1, 1, 1]); }
     if (F3G) { const L = []; const cx = (Math.floor(p.x) >> 4) * 16, cz = (Math.floor(p.z) >> 4) * 16; for (const [x, z] of [[cx, cz], [cx + 16, cz], [cx, cz + 16], [cx + 16, cz + 16]]) L.push(x - R.cam[0], -R.cam[1], z - R.cam[2], x - R.cam[0], w.H - R.cam[1], z - R.cam[2]); for (let y = 0; y <= w.H; y += 16) L.push(...boxLines(cx, y, cz, cx + 16, y, cz + 16)); drawLines(L, [1, 1, 0, 1]); }

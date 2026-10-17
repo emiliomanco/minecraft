@@ -644,7 +644,8 @@ function flRender() {
     flBindTex(P, 'u_pos', 0, FL.pos[FL.cur]); flBindTex(P, 'u_vel', 1, FL.vel[FL.cur]); flBindTex(P, 'u_lam', 2, FL.lam); flBindTex(P, 'u_scl', 9, FL.scaleTex); flBindTex(P, 'u_depthCopy', 3, R.fbo.copy.depth);
     if (P.u.u_near) { gl.uniform1f(P.u.u_near, R.near); gl.uniform1f(P.u.u_far, R.far); } if (P.u.u_res) gl.uniform2f(P.u.u_res, S.w, S.h); };
   // 1) profundidad (desde dentro del agua, la más lejana: es donde el rayo sale del líquido, no la bolita más cercana)
-  const camIn = typeof flLiquidAt === 'function' && flLiquidAt(G.world, R.cam[0], R.cam[1], R.cam[2]) === 1; FL.camIn = camIn;
+  // cámara dentro del líquido (agua, leche o miel): se dibuja la superficie vista desde dentro, sin el «tubo» vacío alrededor
+  const camIn = flLiquidAt(G.world, R.cam[0], R.cam[1], R.cam[2]) === 1 || flHoneyAt(G.world, R.cam[0], R.cam[1], R.cam[2]) || flMilkAt(G.world, R.cam[0], R.cam[1], R.cam[2]); FL.camIn = camIn;
   gl.bindFramebuffer(gl.FRAMEBUFFER, S.fdA.fb); gl.viewport(0, 0, S.w, S.h); gl.clearColor(0, 0, 0, 0); gl.clearDepth(camIn ? 0 : 1); gl.enable(gl.DEPTH_TEST); gl.depthFunc(camIn ? gl.GREATER : gl.LESS); gl.depthMask(true); gl.disable(gl.BLEND);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); sphU(S.sph); if (!(K & 1)) gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, FL.hi); gl.depthFunc(gl.LESS); gl.clearDepth(1);
   // 2) grosor

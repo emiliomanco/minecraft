@@ -5,7 +5,7 @@ const R = { gl: null, q: 2, dyn: 1, progs: {}, fbo: {}, w: 1, h: 1, view: M4.cre
 const GLSL_COMMON = `
 precision highp float; precision highp int; precision highp sampler2DArray; precision highp sampler2DShadow;
 uniform vec3 u_sunDir; uniform vec3 u_sunReal; uniform vec3 u_sunCol; uniform vec3 u_amb; uniform vec3 u_camPos;
-uniform float u_time; uniform float u_tide; uniform int u_dim; uniform float u_rain; uniform float u_wet; uniform vec3 u_fogCol; uniform vec2 u_fog; uniform float u_under; uniform float u_bright; uniform float u_expo;
+uniform float u_time; uniform float u_tide; uniform int u_dim; uniform float u_rain; uniform float u_wet; uniform vec3 u_fogCol; uniform vec2 u_fog; uniform float u_under; uniform vec3 u_uT, u_uS; uniform float u_bright; uniform float u_expo;
 uniform sampler2DShadow u_shadow; uniform mat4 u_shadowVP; uniform float u_shadowOn; uniform float u_shadowTexel;
 uniform sampler2DShadow u_shadow2; uniform mat4 u_shadowVP2; uniform float u_shadowTexel2; uniform float u_shadowFar;
 uniform vec4 u_lp[8]; uniform vec3 u_lc[8]; uniform int u_nl;
@@ -61,8 +61,8 @@ vec3 dynLights(vec3 p){ vec3 s=vec3(0); for(int i=0;i<8;i++){ if(i>=u_nl) break;
 uniform float u_camSky;
 vec3 applyFog(vec3 col, vec3 p, float sv){
   float d=length(p);
-  if(u_under>0.5){ // bajo el agua: el rojo se apaga primero; la luz dispersada viene del sol y del cielo y se oscurece con la profundidad
-    vec3 sT=vec3(0.47,0.105,0.09); vec3 Tr=exp(-sT*d*0.85); vec3 Lw=(u_sunCol*0.45+u_amb*1.2)*vec3(0.106,0.62,0.74)*0.8*(0.15+0.85*u_camSky*u_camSky);
+  if(u_under>0.5){ // dentro de un líquido (agua, miel, leche: u_uT absorción, u_uS color de la luz dispersada); se oscurece con la profundidad
+    vec3 sT=u_uT; vec3 Tr=exp(-sT*d*0.85); vec3 Lw=(u_sunCol*0.45+u_amb*1.2)*u_uS*0.8*(0.15+0.85*u_camSky*u_camSky);
     return col*Tr+Lw*(1.0-Tr); }
   float f=smoothstep(u_fog.x,u_fog.y,d);
   // la niebla solo toma el color del cielo (y el brillo del sol) donde hay cielo visible
@@ -864,14 +864,17 @@ function computeEnv(dim, camY, under, biome) {
   } else {
     ENV.sunDir = [0, 1, 0]; ENV.sunCol = [0, 0, 0]; ENV.fogCol = [0.04, 0.03, 0.06]; ENV.amb = [0.32, 0.28, 0.4]; ENV.fog = [60, SETTINGS.rd * 16];
   }
-  if (under) { ENV.fogCol = [0.015, 0.07, 0.1]; }
+  // dentro de un líquido: niebla y tinte según cuál (agua azulada, miel ámbar, leche blanca)
+  const UK = { 1: [[0.015, 0.07, 0.1], [0.47, 0.105, 0.09], [0.106, 0.62, 0.74], [0.5, 0.85, 1.1]], 4: [[0.36, 0.17, 0.02], [0.9, 1.7, 3.2], [1.0, 0.52, 0.1], [1.25, 0.78, 0.32]], 5: [[0.88, 0.88, 0.85], [2.4, 2.4, 2.5], [1.15, 1.15, 1.12], [1.12, 1.12, 1.1]] };
+  const uk = UK[R.underKind || 1]; ENV.uT = uk[1]; ENV.uS = uk[2]; ENV.uCol = uk[3];
+  if (under) { ENV.fogCol = uk[0]; }
 }
 function setCommon(P) {
   const gl = R.gl, u = P.u;
   if (u.u_sunDir) gl.uniform3fv(u.u_sunDir, ENV.sunDir); if (u.u_sunReal) gl.uniform3fv(u.u_sunReal, ENV.sunReal); if (u.u_sunCol) gl.uniform3fv(u.u_sunCol, ENV.sunCol);
   if (u.u_amb) gl.uniform3fv(u.u_amb, ENV.amb); if (u.u_camPos) gl.uniform3fv(u.u_camPos, R.cam); if (u.u_time) gl.uniform1f(u.u_time, R.time); if (u.u_tide) gl.uniform1f(u.u_tide, oceanTide());
   if (u.u_dim) gl.uniform1i(u.u_dim, R.dimIdx); if (u.u_rain) gl.uniform1f(u.u_rain, G.rainLevel || 0); if (u.u_wet) gl.uniform1f(u.u_wet, G.mode === 'game' ? G.wet || 0 : 0); if (u.u_fogCol) gl.uniform3fv(u.u_fogCol, ENV.fogCol);
-  if (u.u_fog) gl.uniform2fv(u.u_fog, ENV.fog); if (u.u_under) gl.uniform1f(u.u_under, R.under ? 1 : 0); if (u.u_bright) gl.uniform1f(u.u_bright, SETTINGS.brightness); if (u.u_expo) gl.uniform1f(u.u_expo, R.expo || 0.3); if (u.u_camSky) gl.uniform1f(u.u_camSky, R.camSky ?? 1);
+  if (u.u_fog) gl.uniform2fv(u.u_fog, ENV.fog); if (u.u_under) gl.uniform1f(u.u_under, R.under ? 1 : 0); if (u.u_uT) { gl.uniform3fv(u.u_uT, ENV.uT || [0.47, 0.105, 0.09]); gl.uniform3fv(u.u_uS, ENV.uS || [0.106, 0.62, 0.74]); } if (u.u_bright) gl.uniform1f(u.u_bright, SETTINGS.brightness); if (u.u_expo) gl.uniform1f(u.u_expo, R.expo || 0.3); if (u.u_camSky) gl.uniform1f(u.u_camSky, R.camSky ?? 1);
   if (u.u_shadowOn) gl.uniform1f(u.u_shadowOn, R.shadowActive ? 1 : 0); if (u.u_shadowVP) gl.uniformMatrix4fv(u.u_shadowVP, false, R.shadowVP);
   if (u.u_shadowTexel) gl.uniform1f(u.u_shadowTexel, 1 / (R.shadowSize || 1));
   if (u.u_shadow) { gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, R.fbo.shadow ? R.fbo.shadow.tex : R.dummyShadow); gl.uniform1i(u.u_shadow, 1); }
@@ -897,7 +900,7 @@ function renderWorld(world, cam, yaw, pitch, opts = {}) {
   if (R.lost) return; // contexto de GPU perdido: esperar a que se restaure
   const gl = R.gl; resize(); R.time = (G.mode === 'game' && G.wclock !== undefined) ? G.wclock : performance.now() / 1000; // reloj del mundo: /tick freeze también para olas, hojas, nubes y llamas
   R.dimIdx = world.dim === 'overworld' ? 0 : world.dim === 'nether' ? 1 : 2;
-  R.cam = cam; R.under = !!opts.under;
+  R.cam = cam; R.under = !!opts.under; R.underKind = opts.underKind || 1;
   const fov = (opts.fov || SETTINGS.fov) * Math.PI / 180; const far = Math.max(160, SETTINGS.rd * 16 * 1.6 + 48);
   R.near = 0.05; R.far = far;
   M4.persp(R.proj, fov, R.w / R.h, R.near, far);
@@ -1059,7 +1062,7 @@ function postProcess(world, opts) {
   const warm = Math.exp(-Math.max(0, s[1]) * 4); gl.uniform3f(P.u.u_rayCol, 1.0, lerp(0.85, 0.55, warm), lerp(0.7, 0.3, warm));
   expoU(P, R.fbo.b1.tex); if (P.u.u_shock) gl.uniform4fv(P.u.u_shock, typeof boomShock === 'function' ? boomShock() : [0, 0, 0, 0]);
   gl.uniform1f(P.u.u_under, R.under ? 1 : 0); gl.uniform1f(P.u.u_time, R.time); gl.uniform1f(P.u.u_exposure, opts.exposure || 1.0); gl.uniform1f(P.u.u_q, R.q);
-  gl.uniform1f(P.u.u_nether, world.dim === 'nether' ? 1 : 0); gl.uniform3f(P.u.u_underCol, 0.5, 0.85, 1.1);
+  gl.uniform1f(P.u.u_nether, world.dim === 'nether' ? 1 : 0); const uc = ENV.uCol || [0.5, 0.85, 1.1]; gl.uniform3f(P.u.u_underCol, uc[0], uc[1], uc[2]);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
   gl.enable(gl.DEPTH_TEST);
 }
