@@ -9281,12 +9281,12 @@ void main(){
   float ph=P.w;
   if(x1.x<1.0||x1.z<1.0||x1.y<1.0||x1.x>float(u_vdim.x)-1.0||x1.z>float(u_vdim.z)-1.0||x1.y>float(u_vdim.y)-1.0) ph+=30.0;
   else { float vv=vox(ivec3(floor(x1))); float fy=fract(x1.y);
-    // las partículas NUNCA pasan a líquido normal al tocar el de su mismo tipo (se hunden en él y siguen siendo partículas);
-    // solo se marcan las reacciones entre tipos distintos: lava en agua quieta (piedra) y agua/miel/leche en lava quieta
-    bool lavaP=ph>1.5&&ph<2.5;
-    if(lavaP && vv>26.5 && vv<27.5){ vec3 sw=seaWave(x1.xz+u_org.xz); if(fy<0.92+sw.x-0.04) ph+=10.0; }
-    else if(lavaP && vv>16.5 && vv<25.5){ float a=vv-16.0; float lv=a>8.5?1.0:a/8.0*0.92; if(fy<lv-0.04) ph+=10.0; }
-    else if(!lavaP && vv>32.5 && vv<41.5){ float a=vv-32.0; float lv=a>8.5?1.0:a/8.0*0.92; if(fy<lv-0.04) ph+=20.0; } }
+    // dentro de líquido normal (por debajo de su superficie): la CPU decide. Del mismo tipo, la partícula desaparece (nunca
+    // pasa a líquido normal); de otro tipo, reaccionan (lava + agua → piedra u obsidiana). Miel y leche se hunden en el agua
+    bool wl=ph<3.5;
+    if(wl && vv>26.5 && vv<27.5){ vec3 sw=seaWave(x1.xz+u_org.xz); if(fy<0.92+sw.x-0.04) ph+=10.0; }
+    else if(wl && vv>16.5 && vv<25.5){ float a=vv-16.0; float lv=a>8.5?1.0:a/8.0*0.92; if(fy<lv-0.04) ph+=10.0; }
+    else if(vv>32.5 && vv<41.5){ float a=vv-32.0; float lv=a>8.5?1.0:a/8.0*0.92; if(fy<lv-0.04) ph+=20.0; } }
   o=vec4(x1,ph);
 }`;
 // 2) claves (celda con hash, índice)
@@ -9438,7 +9438,7 @@ function flResize() {
   for (const b of [FL.rb.pbo, FL.rb.pbo2]) if (b) gl.deleteBuffer(b);
   if (FL.P) for (const k in FL.P) if (FL.P[k] && FL.P[k].p) gl.deleteProgram(FL.P[k].p);
   FL.hi = 0; FL.alive = 0; FL.ptr = 0; FL.spawnQ.length = 0; FL.killQ.length = 0; FL.occ = new Map(); FL.calm = new Map(); FL.acc2 = new Map(); FL.full = new Set();
-  FL.parked = []; FL.parkCells = new Map(); FL.absAcc = [0, 0, 0, 0, 0, 0]; FL.exitAcc = [0, 0, 0, 0, 0, 0]; FL.world = null; FL.pending = null;
+  FL.parked = []; FL.parkCells = new Map(); FL.exitAcc = [0, 0, 0, 0, 0, 0]; FL.world = null; FL.pending = null;
   flInit();
 }
 // ---------------------------------------------------------------- campo de colisión
@@ -9821,9 +9821,9 @@ function flRender() {
 //  Integración con el mundo
 // ============================================================================
 // El líquido normal (lagos, mar) sigue guardado en las celdas como volumen y fluye con las reglas de siempre (k_fluids).
-// Partículas y líquido normal no se convierten el uno en el otro por sí solos (solo con el difusor): una partícula que
-// toca líquido normal de su mismo tipo se hunde en él y sigue siendo partícula; entre tipos distintos reaccionan
-// (lava + agua → piedra u obsidiana, con vapor).
+// Partículas y líquido normal no se convierten el uno en el otro por sí solos (solo con el difusor): las partículas que
+// entran en líquido normal de su mismo tipo desaparecen (solo las de ese bloque); entre tipos distintos reaccionan
+// (lava + agua → piedra u obsidiana, con vapor). Miel y leche se hunden en el agua y la lava las quema.
 // El agua puesta con cubo (o derramada) lleva LIQ_PLACED: sobre tierra, pasto, hojas, arena… se va filtrando.
 const LIQ_PLACED = 16;
 let FL_POROUS = null;
@@ -9858,7 +9858,7 @@ function flSpawnCell(w, x, y, z, a, phase, vx, vy, vz) {
   return k;
 }
 // el hueco ya lleno de partículas no vuelve a pedir agua al mar (las partículas cuentan como líquido): pasado un
-// segundo se convierte en mar igualmente (las partículas siguen siendo partículas)
+// segundo se convierte en mar igualmente (las partículas que queden dentro desaparecen al tocarlo)
 FL.oceanFill = [];
 function flOceanFillTick() {
   const L = FL.oceanFill; if (!L.length) return;
@@ -9867,38 +9867,19 @@ function flOceanFillTick() {
 // ---------------------------------------------------------------- lo que hacen las partículas (tras cada lectura)
 const FLK = (x, y, z) => ((x + 32768) * 65536 + (z + 32768)) * 512 + (y + 64);
 FL.frame = 0; FL.spawnFrame = null; FL.calm = new Map(); FL.acc2 = new Map(); FL.occ = new Map();
-// Partículas que entran en agua (o lava) quieta: se suman a ese líquido. El recuento es global por líquido (FL_PPB/8
-// partículas = 1/8 de bloque), no por celda: un cubo que se reparte entre muchas celdas de un lago antes se quedaba en
-// recuentos sueltos por debajo del octavo y desaparecía sin subir el nivel
-FL.absAcc = [0, 0, 0]; FL.absAt = [null, null, null];
+// Partícula que entra en agua o lava normal (marcada por el shader). Del mismo tipo: desaparece, sin sumar nada al
+// líquido normal (solo las de ese bloque; las demás siguen siendo partículas). De otro tipo: reaccionan (piedra,
+// obsidiana, vapor). Devuelve false si ese líquido ya no está (la partícula sigue siendo partícula).
 function flAbsorb(w, x, y, z, base, flag) {
   const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z);
-  if (base >= 4) { if (flag === 2 && Math.random() < 0.05) fizz(w, bx, by, bz); return true; } // miel y leche: la lava las quema (no tienen versión normal)
-  const lavaP = base === 2; const into = flag === 1 ? 1 : 2; // líquido quieto en el que entró
+  if (base >= 4) { if (flag === 2 && Math.random() < 0.05) fizz(w, bx, by, bz); return true; } // miel y leche: la lava las quema
+  const lavaP = base === 2; const into = flag === 1 ? 1 : 2; // líquido normal en el que entró
   const isInto = b => b > 0 && REG[b] && (REG[b].liquid === into || (into === 1 && REG[b].inWater));
-  // la celda donde quedó (o una vecina, si la lectura llegó un poco desfasada)
   let cx = bx, cy = by, cz = bz;
   if (!isInto(w.get(cx, cy, cz))) { let f = false; for (const [dx, dy, dz] of [[0, -1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0]]) if (isInto(w.get(bx + dx, by + dy, bz + dz))) { cx = bx + dx; cy = by + dy; cz = bz + dz; f = true; break; }
     if (!f) return false; } // ya no hay líquido ahí (la lectura llegó tarde): sigue siendo partícula
-  if (into === 1 && (w.getMeta(cx, cy, cz) & LIQ_OCEAN)) { if (lavaP) flQuenchAcc(w, cx, cy, cz, true); return true; } // el mar se lo traga
-  if (lavaP !== (into === 2)) { flQuenchAcc(w, cx, cy, cz, lavaP); return true; }
-  FL.absAt[into] = [w, cx, cy, cz]; FL.absAcc[into]++;
-  while (FL.absAcc[into] >= FL_PPB / 8) { const [ww, ax, ay, az] = FL.absAt[into]; if (!flAddOctave(ww, ax, ay, az, into)) break; FL.absAcc[into] -= FL_PPB / 8; }
-  return true;
-}
-// suma 1/8 al cuerpo de líquido de la celda: arriba de su columna, o en la columna de una vecina si esa está tapada
-function flAddOctave(w, x, y, z, liq) {
-  const id = liq === 1 ? ID.water : ID.lava;
-  const tryCol = (cx, cy, cz) => {
-    const b = w.get(cx, cy, cz); if (!(b > 0 && REG[b] && (REG[b].liquid === liq || (liq === 1 && REG[b].inWater)))) return false;
-    let ty = cy; while (ty < cy + 12) { const u = w.get(cx, ty + 1, cz); if (u > 0 && REG[u] && (REG[u].liquid === liq || (liq === 1 && REG[u].inWater))) ty++; else break; }
-    if (w.get(cx, ty, cz) === id) { const m = w.getMeta(cx, ty, cz); const a = liqAmt(m); if (a < 8) { flSetStatic(w, cx, ty, cz, liq, a + 1, (m & LIQ_PLACED) !== 0); return true; } }
-    if (cellVol(w, cx, ty + 1, cz, liq) === 0) { flSetStatic(w, cx, ty + 1, cz, liq, 1, (w.getMeta(cx, ty, cz) & LIQ_PLACED) !== 0); return true; }
-    return false;
-  };
-  if (tryCol(x, y, z)) return true;
-  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) if (tryCol(x + dx, y, z + dz)) return true;
-  return false;
+  if (lavaP !== (into === 2)) flQuenchAcc(w, cx, cy, cz, lavaP); // tipos distintos: reacción
+  return true; // mismo tipo: desaparece
 }
 // partícula que se guarda como volumen en su sitio (salió de la región o el líquido al que iba ya no está):
 // recuento global por líquido y el octavo va a la celda (o a la de encima si está llena)
@@ -10059,7 +10040,7 @@ function flParkTick(w, dt) {
         const nx = q.x + q.vx * h, ny = q.y + q.vy * h, nz = q.z + q.vz * h; const bx = Math.floor(nx), by = Math.floor(ny), bz = Math.floor(nz);
         const b = w.get(bx, by, bz);
         if (b < 0) { flParkSettle(q, Math.floor(q.x), Math.floor(q.y), Math.floor(q.z)); break; } // chunk sin cargar: se queda ahí
-        if (b > 0 && REG[b].liquid && (REG[b].liquid === 2) !== (q.ph === 2)) { if (flAbsorb(w, nx, ny, nz, q.ph, REG[b].liquid === 1 ? 1 : 2)) { alive = false; break; } flParkSettle(q, bx, by, bz); break; } // solo reacciones entre tipos distintos; en su mismo líquido se hunden // miel y leche atraviesan el agua (se hunden)
+        if (b > 0 && REG[b].liquid && !(q.ph >= 4 && REG[b].liquid === 1)) { if (flAbsorb(w, nx, ny, nz, q.ph, REG[b].liquid === 1 ? 1 : 2)) { alive = false; break; } flParkSettle(q, bx, by, bz); break; } // mismo tipo: desaparece; distinto: reacción // miel y leche atraviesan el agua (se hunden)
         if (b > 0 && REG[b].solid) {
           const fb = w.get(Math.floor(q.x), by, Math.floor(q.z)); // ¿cae encima (el bloque está debajo) o choca de lado?
           if (q.vy < 0 && fb > 0 && REG[fb].solid && Math.floor(q.y) > by) { flParkSettle(q, Math.floor(q.x), by + 1, Math.floor(q.z)); break; }
