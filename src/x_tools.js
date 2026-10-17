@@ -3,7 +3,8 @@
 //  · Lanzallamas: como el extintor, pero el chorro es combustible ardiendo. Prende lo inflamable, a los mobs y la
 //    dinamita; el calor evapora el agua del fluido continuo a la que se apunta un rato. El agua que descansa sobre
 //    un bloque que conduce el calor (hierro, oro, cobre…) con fuego, lava o el chorro justo debajo también hierve.
-//  · Esponja (objeto): con el clic derecho mantenido borra las partículas de agua y lava del fluido continuo
+//  · Esponja (objeto): con el clic derecho mantenido borra el agua y la lava que mira: partículas del fluido continuo
+//    y también el líquido normal (lagos, ríos, lava; el mar vuelve a rellenar lo que se le quita)
 //    alrededor de donde se apunta. No toca el agua normal ni los océanos.
 // ============================================================================
 const FLAMER = { heat: new Map(), hot: new Map(), scanT: 0, sent: 0 };
@@ -119,13 +120,14 @@ function flamerBoilStatic(w, h, n) {
 }
 // ------------------------------------------------------------ esponja
 function spongeUse(p) {
-  if (typeof FL === 'undefined') return; const now = performance.now();
+  const now = performance.now();
   const w = p.world, dir = lookDir(p); let pt = null;
-  // punto: la primera celda con partículas en la mirada (hasta 5 bloques) o, si no hay, delante del bloque que se mira
+  // punto: la primera celda con partículas o con líquido en la mirada (hasta 5 bloques) o, si no hay, delante del bloque que se mira
   for (let t = 0.4; t < 5; t += 0.2) {
     const x = p.x + dir[0] * t, y = p.eye + dir[1] * t, z = p.z + dir[2] * t; const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z);
     const c = FL.occ && FL.occ.get(FLK(bx, by, bz)); if (c && c.idx.length) { pt = [x, y, z]; break; }
-    const b = w.get(bx, by, bz); if (b > 0 && REG[b].solid) { pt = [x - dir[0] * 0.4, y - dir[1] * 0.4, z - dir[2] * 0.4]; break; }
+    const b = w.get(bx, by, bz); if (b > 0 && REG[b].liquid) { pt = [x, y, z]; break; }
+    if (b > 0 && REG[b].solid) { pt = [x - dir[0] * 0.4, y - dir[1] * 0.4, z - dir[2] * 0.4]; break; }
   }
   if (!pt) pt = [p.x + dir[0] * 2, p.eye + dir[1] * 2, p.z + dir[2] * 2];
   p.swing = Math.max(p.swing || 0, 0.01);
@@ -133,9 +135,22 @@ function spongeUse(p) {
   const n = spongeAt(w, pt, 1.6);
   if (n && Math.random() < 0.3) playSound('splash', pt[0], pt[1], pt[2], 0.25);
 }
-// borra las partículas del fluido continuo a menos de r del punto; devuelve cuántas
+// borra el líquido normal (celdas de agua o lava) a menos de r del punto, como mucho cada 0,1 s; devuelve cuántas
+const SPONGE = { last: 0 };
+function spongeStatic(w, pt, r) {
+  const now = performance.now(); if (now - SPONGE.last < 100) return 0; SPONGE.last = now;
+  const ri = Math.ceil(r), R2 = (r + 0.5) * (r + 0.5); let n = 0; const cx = Math.floor(pt[0]), cy = Math.floor(pt[1]), cz = Math.floor(pt[2]);
+  for (let dy = -ri; dy <= ri; dy++) for (let dz = -ri; dz <= ri; dz++) for (let dx = -ri; dx <= ri; dx++) {
+    const x = cx + dx, y = cy + dy, z = cz + dz; const b = w.get(x, y, z); if (!(b > 0 && REG[b].liquid)) continue;
+    const ex = x + 0.5 - pt[0], ey = y + 0.5 - pt[1], ez = z + 0.5 - pt[2]; if (ex * ex + ey * ey + ez * ez > R2) continue;
+    w.set(x, y, z, 0); n++;
+  }
+  return n;
+}
+// borra las partículas del fluido continuo y el líquido normal a menos de r del punto; devuelve cuántas partículas/celdas
 function spongeAt(w, pt, r) {
-  if (typeof FL === 'undefined' || !FL.ok || FL.world !== w || !FL.rb.ready) return 0;
+  const ns = spongeStatic(w, pt, r);
+  if (typeof FL === 'undefined' || !FL.ok || FL.world !== w || !FL.rb.ready) return ns;
   const P = FL.rb.pos, o = FL.rb.orgNow; const R2 = r * r; const ri = Math.ceil(r); let n = 0;
   const cx = Math.floor(pt[0]), cy = Math.floor(pt[1]), cz = Math.floor(pt[2]);
   for (let dy = -ri; dy <= ri; dy++) for (let dz = -ri; dz <= ri; dz++) for (let dx = -ri; dx <= ri; dx++) {
@@ -144,6 +159,7 @@ function spongeAt(w, pt, r) {
       const ex = P[k] + o[0] - pt[0], ey = P[k + 1] + o[1] - pt[1], ez = P[k + 2] + o[2] - pt[2];
       if (ex * ex + ey * ey + ez * ez < R2) { flKill(i); c.idx.splice(j, 1); n++; } }
   }
+  n += ns * 27;
   if (n) for (let i = 0; i < Math.min(6, n / 20); i++) P_({ x: pt[0] + (Math.random() - 0.5) * r, y: pt[1] + (Math.random() - 0.5) * r, z: pt[2] + (Math.random() - 0.5) * r, vy: 0.5, life: 0.5, size: 0.08, r: 0.6, g: 0.75, b: 1, a: 0.6, grav: 4, layer: TEX.drip });
   return n;
 }

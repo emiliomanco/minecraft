@@ -166,7 +166,7 @@ void main(){ int i=idx(); vec4 Pi=texelFetch(u_pred,tc(i),0); if(Pi.w<0.5||Pi.w>
 const FS_FLVEL = GLSL_FLHEAD + `layout(location=0) out vec4 oP; layout(location=1) out vec4 oV;
 void main(){ int i=idx(); vec4 Pi=texelFetch(u_pred,tc(i),0); vec4 Xi=texelFetch(u_pos,tc(i),0); vec4 Vi=texelFetch(u_vel,tc(i),0);
   if(Pi.w<0.5){ oP=Xi; oV=Vi; return; }
-  if(Pi.w>=10.0){ oP=Pi; oV=vec4(0.0,0.0,0.0,Vi.w); return; }
+  if(Pi.w>=10.0){ oP=Pi; oV=Pi.w>=30.0?Vi:vec4(0.0,0.0,0.0,Vi.w); return; } // las que salen de la región conservan su velocidad (la CPU sigue su trayectoria)
   float base=Pi.w; bool lava=base>1.5&&base<2.5;
   vec3 vi=(Pi.xyz-Xi.xyz)/u_dt; vec3 acc=vec3(0.0); float ws=0.0; vec3 cen=vec3(0.0); float cn=0.0; float Ts=0.0;
   NEIGH_BEGIN(Pi.xyz)
@@ -394,6 +394,7 @@ function flUpdate(dt, w) {
   flOceanFillTick();
   const p = G.player; FL.frame++; flRecenter(w, p.x, p.y, p.z, false);
   if (FL.pending && FL.pending.dim === w.dim) { const a = FL.pending.p; FL.pending = null; for (let i = 0; i + 4 < a.length; i += 5) if (flSpawn(a[i], a[i + 1], a[i + 2], 0, 0, 0, a[i + 3], a[i + 4]) < 0) break; }
+  flParkTick(w, dt);
   if (FL.frame % 20 === 0) flVoxChunks(w);
   flVoxFlush(w);
   while (FL.hi > 0 && !FL.phase[FL.hi - 1]) FL.hi--;
@@ -740,7 +741,7 @@ function flAfterReadback() {
     const flag = Math.floor(pw / 10 + 1e-4); const base = Math.round(pw - flag * 10);
     const x = P[k4] + o[0], y = P[k4 + 1] + o[1], z = P[k4 + 2] + o[2];
     if (flag === 1 || flag === 2) { flAbsorb(w, x, y, z, base, flag); flKill(i); if (flag === 1 && Math.random() < 0.3 && typeof ripImpulse === 'function') { const sp = Math.hypot(V[k4], V[k4 + 1], V[k4 + 2]); ripImpulse(x, z, 0.3 + sp * 0.04, Math.min(1.4, 0.15 + sp * 0.18)); } continue; }
-    if (flag >= 3) { flExitVol(w, Math.floor(x), Math.floor(y), Math.floor(z), base); flKill(i); continue; } // salió de la región: guardarla como volumen donde esté
+    if (flag >= 3) { flPark(w, x, y, z, V[k4], V[k4 + 1], V[k4 + 2], base, V[k4 + 3]); flKill(i); continue; } // salió de la región: sigue como partícula fuera (nunca líquido normal)
     const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z); const key = FLK(bx, by, bz);
     let c = occ.get(key); if (!c) { c = { x: bx, y: by, z: bz, nw: 0, nl: 0, np: 0, top: -1e9, vx: 0, vy: 0, vz: 0, vmax: 0, idx: [] }; occ.set(key, c); }
     const vx = V[k4], vy = V[k4 + 1], vz = V[k4 + 2]; const sp = Math.hypot(vx, vy, vz);
@@ -823,9 +824,59 @@ function flSerialize() {
   if (!FL.ok || !FL.rb.ready || !FL.world) return null; const rb = FL.rb, o = rb.orgNow; const out = [];
   for (let i = 0; i < rb.count; i++) { const ph = FL.phase[i]; if (!ph || FL.dying.has(i)) continue; const k = i * 4; if (rb.pos[k + 3] < 0.5 || rb.pos[k + 3] >= 10) continue;
     out.push(+(rb.pos[k] + o[0]).toFixed(2), +(rb.pos[k + 1] + o[1]).toFixed(2), +(rb.pos[k + 2] + o[2]).toFixed(2), ph, +rb.vel[k + 3].toFixed(2)); if (out.length > 5 * 60000) break; }
+  for (const q of FL.parked) { if (out.length > 5 * 90000) break; if (q.w === FL.world) out.push(+q.x.toFixed(2), +q.y.toFixed(2), +q.z.toFixed(2), q.ph, +(q.t || 0).toFixed(2)); } // también las de fuera de la región
   return { dim: FL.world.dim, p: out };
 }
 function flRestore(data) { FL.pending = data; }
+// ---------------------------------------------------------------- partículas fuera de la región
+// Las que salen de la región simulada (un chorro de lava lanzado lejos, lo que queda atrás cuando el jugador se aleja)
+// ya no se convierten en líquido normal: se guardan aparte con su velocidad, siguen una caída balística sencilla contra
+// los bloques hasta posarse (amontonadas en rejilla, como estarían en reposo) y vuelven a ser partículas cuando la región
+// las alcanza de nuevo. Si tocan agua o lava normal por el camino, se suman a ella como dentro de la región.
+FL.parked = []; FL.parkCells = new Map(); const FL_PARK_MAX = 150000;
+function flPark(w, x, y, z, vx, vy, vz, ph, temp) {
+  if (FL.parked.length >= FL_PARK_MAX) { const q = FL.parked.shift(); flParkUnsettle(q); } // tope: las más viejas se pierden (nunca pasan a líquido normal)
+  FL.parked.push({ w, x, y, z, vx: vx || 0, vy: vy || 0, vz: vz || 0, ph, t: temp || 0, rest: false, ck: null });
+}
+// posarse: rejilla de FL_K×FL_K por capa dentro de la celda donde cae (las siguientes encima)
+function flParkSettle(q, bx, by, bz) {
+  const k = FLK(bx, by, bz); const n = FL.parkCells.get(k) || 0; FL.parkCells.set(k, n + 1); q.ck = k;
+  const KK = FL_K * FL_K, layer = Math.floor(n / KK), g = n % KK;
+  q.x = bx + ((g % FL_K) + 0.5) * FL_S; q.z = bz + (((g / FL_K) | 0) + 0.5) * FL_S; q.y = by + (layer + 0.5) * FL_S; q.vx = q.vy = q.vz = 0; q.rest = true;
+}
+function flParkUnsettle(q) { if (!q || q.ck === null) return; const n = (FL.parkCells.get(q.ck) || 1) - 1; if (n > 0) FL.parkCells.set(q.ck, n); else FL.parkCells.delete(q.ck); q.ck = null; }
+function flParkTick(w, dt) {
+  const L = FL.parked; if (!L.length) return;
+  let keep = 0; const spawnOk = flFree() > 2000;
+  for (let i = 0; i < L.length; i++) {
+    const q = L[i];
+    if (q.w !== w) { if (G.worlds && G.worlds[q.w.dim] === q.w) L[keep++] = q; else flParkUnsettle(q); continue; } // de otra dimensión: esperan; de un mundo cerrado: fuera
+    if (q.rest && (FL.frame + i) % 10) { L[keep++] = q; continue; } // posadas: solo se mira de vez en cuando si la región ya llegó
+    let alive = true;
+    if (!q.rest && dt > 0) {
+      { const bx = Math.floor(q.x), bz = Math.floor(q.z); let by = Math.floor(q.y); const b0 = w.get(bx, by, bz); // metida en un bloque: sale por arriba y se posa
+        if (b0 > 0 && REG[b0].solid) { let k = 0; while (k++ < 8) { by++; const b1 = w.get(bx, by, bz); if (!(b1 > 0 && REG[b1].solid)) break; } flParkSettle(q, bx, by, bz); } }
+    }
+    if (!q.rest && dt > 0) {
+      q.vy -= 9.81 * dt; const sp = Math.hypot(q.vx, q.vy, q.vz); const st = Math.min(10, Math.max(1, Math.ceil(sp * dt / 0.3))); const h = dt / st;
+      for (let s2 = 0; s2 < st && alive && !q.rest; s2++) {
+        const nx = q.x + q.vx * h, ny = q.y + q.vy * h, nz = q.z + q.vz * h; const bx = Math.floor(nx), by = Math.floor(ny), bz = Math.floor(nz);
+        const b = w.get(bx, by, bz);
+        if (b < 0) { flParkSettle(q, Math.floor(q.x), Math.floor(q.y), Math.floor(q.z)); break; } // chunk sin cargar: se queda ahí
+        if (b > 0 && REG[b].liquid) { flAbsorb(w, nx, ny, nz, q.ph, REG[b].liquid === 1 ? 1 : 2); alive = false; break; }
+        if (b > 0 && REG[b].solid) {
+          const fb = w.get(Math.floor(q.x), by, Math.floor(q.z)); // ¿cae encima (el bloque está debajo) o choca de lado?
+          if (q.vy < 0 && fb > 0 && REG[fb].solid && Math.floor(q.y) > by) { flParkSettle(q, Math.floor(q.x), by + 1, Math.floor(q.z)); break; }
+          q.vx *= -0.2; q.vz *= -0.2; if (q.vy > 0) q.vy = 0; continue; // de lado: rebota un poco y sigue cayendo
+        }
+        q.x = nx; q.y = ny; q.z = nz; if (q.y < -64) alive = false;
+      }
+    }
+    if (alive && spawnOk && flCanSim(w, q.x, q.y, q.z)) { if (flSpawn(q.x, q.y, q.z, q.vx, q.vy, q.vz, q.ph, q.t) >= 0) { flParkUnsettle(q); alive = false; } }
+    if (alive) L[keep++] = q;
+  }
+  L.length = keep;
+}
 // consultas para la física de las entidades (de la última lectura)
 // ¿celda con líquido de verdad? Pocas partículas sueltas sin nada debajo (gotas sobre la cabeza, salpicaduras) no cuentan
 function flCellWet(world, c) {

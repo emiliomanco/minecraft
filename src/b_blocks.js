@@ -335,7 +335,7 @@ for (const m in ARMORMAT) ARMORPART.forEach(([p, dn, du], slot) => {
 defI('fire_extinguisher', 'Extintor', { stack: 1, dur: 400, extinguisher: true });
 defI('one_hit_obliterator', 'One-Hit Obliterator', { stack: 1, dmg: 1e9, obliterator: true }); /* sin receta: solo en el menú creativo */
 defI('flamethrower', 'Lanzallamas', { stack: 1, dur: 600, flamethrower: true });
-defI('sponge_item', 'Esponja', { stack: 1, pbfSponge: true }); /* borra partículas de agua y lava del fluido continuo */
+defI('sponge_item', 'Esponja', { stack: 1, pbfSponge: true }); /* borra agua y lava: partículas del fluido continuo y líquido normal */
 // ---- codificación del meta de líquidos (agua/lava), compartida por simulación (k_fluids), mallado y render:
 //  bits 0-2: volumen en octavos (0 = bloque lleno 8/8, 1..7 = n/8)
 //  bit 3 (8): cayendo (columna vertical / chorro)
