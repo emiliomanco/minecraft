@@ -78,7 +78,7 @@ function openScreen(kind, data) {
   document.exitPointerLock && document.exitPointerLock();
   const panel = $('invPanel'); panel.innerHTML = ''; panel.className = 'panel ' + kind;
   const sec = (title, cls) => { const d = document.createElement('div'); d.className = 'sec ' + (cls || ''); if (title) { const t = document.createElement('div'); t.className = 'ptitle'; t.textContent = title; d.appendChild(t); } panel.appendChild(d); return d; };
-  const grid = (parent, slots, cols, cls) => { const g = document.createElement('div'); g.className = 'grid ' + (cls || ''); g.style.gridTemplateColumns = `repeat(${cols}, var(--sl))`; for (const s of slots) { const el = document.createElement('div'); el.className = 'slot' + (s.cls ? ' ' + s.cls : ''); s.el = el; UI.slots.push(s); el.addEventListener('mousedown', ev => slotClick(s, ev)); el.addEventListener('mouseenter', () => { UI.hover = s; showTooltip(s); }); el.addEventListener('mouseleave', () => { if (UI.hover === s) UI.hover = null; hideTooltip(); }); el.addEventListener('contextmenu', e => e.preventDefault()); g.appendChild(el); } parent.appendChild(g); return g; };
+  const grid = (parent, slots, cols, cls) => { const g = document.createElement('div'); g.className = 'grid ' + (cls || ''); g.style.gridTemplateColumns = `repeat(${cols}, var(--sl))`; for (const s of slots) { const el = document.createElement('div'); el.className = 'slot' + (s.cls ? ' ' + s.cls : ''); s.el = el; UI.slots.push(s); el.addEventListener('mousedown', ev => slotClick(s, ev)); el.addEventListener('mouseenter', ev => { UI.hover = s; showTooltip(s); if (UI.drag && (ev.buttons & 2)) dragEnter(s); }); el.addEventListener('mouseleave', () => { if (UI.hover === s) UI.hover = null; hideTooltip(); }); el.addEventListener('contextmenu', e => e.preventDefault()); g.appendChild(el); } parent.appendChild(g); return g; };
   if (kind === 'creative') { buildCreative(panel, grid, sec); }
   else {
     const top = sec(null, 'top');
@@ -149,8 +149,54 @@ function consumeCraft() { const c = UI.craft; for (let i = 0; i < c.grid.length;
 function smithResult() { const s = UI.smith; if (!s || !s[0] || !s[1] || s[1].id !== ID.netherite_ingot) return null; const n = REG[s[0].id].name; if (!n.startsWith('diamond_')) return null; const t = ID['netherite_' + n.slice(8)]; if (t === undefined) return null; return { id: t, c: 1, d: s[0].d || 0 }; }
 function consumeSmith() { const s = UI.smith; s[0] = null; s[1].c--; if (s[1].c <= 0) s[1] = null; if (s[2]) { s[2].c--; if (s[2].c <= 0) s[2] = null; } }
 function sameItem(a, b) { return a && b && a.id === b.id && (a.d || 0) === (b.d || 0) && !a.e && !b.e; }
+// sacar el resultado de una casilla de salida: en la mesa, la herrería y el yunque se gastan los ingredientes
+function outputTake(s) { if (s.craftOut === 'craft') consumeCraft(); else if (s.craftOut === 'smith') consumeSmith(); else if (s.craftOut === 'anvil') consumeAnvil(); else s.set(null); }
+function armorFits(st, slot) { const d = REG[st.id]; return !!(d.armor && d.armor.slot === slot) || (slot === 0 && st.id === ID.carved_pumpkin); }
+// tecla 1-9 sobre una casilla: intercambio con esa casilla de la barra rápida. En las salidas (mesa, horno, yunque,
+// herrería) solo se puede sacar: el resultado va a la barra si está vacía, o si tiene lo mismo y cabe, gastando los
+// ingredientes como un clic. Antes se copiaba el resultado sin gastar nada y se borraba lo que hubiera en la barra.
+function hotbarSwap(s, i) {
+  const p = G.player; const hb = p.inv[i];
+  if (s.output) {
+    const res = s.get(); if (!res) return;
+    if (hb && !(sameItem(hb, res) && hb.c + res.c <= REG[res.id].stack)) return; // ocupada con otra cosa: no se toca nada
+    if (hb) hb.c += res.c; else p.inv[i] = { ...res };
+    outputTake(s); playSound('click', 0, 0, 0, 0.2);
+  } else {
+    if (s.armor !== undefined && hb && !armorFits(hb, s.armor)) return;
+    const a = s.get(); s.set(hb || null); p.inv[i] = a || null;
+  }
+  if (s.onChange) s.onChange(); refreshInvUI();
+}
+// arrastre con el clic derecho mantenido y un objeto en el cursor: uno en cada casilla por la que se pasa; con Mayús, el
+// montón se reparte a partes iguales entre las casillas al soltar (si no alcanza para todas, uno en cada una por orden)
+function dragFits(s) { const c = UI.cursor; if (!c || s.output || s.palette || s.trash || !s.get) return false; if (s.armor !== undefined && !armorFits(c, s.armor)) return false; const cur = s.get(); return !cur || (sameItem(cur, c) && cur.c < REG[cur.id].stack); }
+function dragPutOne(s) { const c = UI.cursor; if (!c || !dragFits(s)) return false; const cur = s.get(); if (cur) cur.c++; else s.set({ ...c, c: 1 }); c.c--; if (c.c <= 0) UI.cursor = null; if (s.onChange) s.onChange(); return true; }
+function dragEnter(s) {
+  const D = UI.drag; if (!D || D.slots.includes(s) || !dragFits(s)) return;
+  D.slots.push(s); if (D.mode === 'one') dragPutOne(s); else if (s.el) s.el.classList.add('dragsel');
+  refreshInvUI();
+}
+function dragEnd() {
+  const D = UI.drag; UI.drag = null; if (!D) return;
+  for (const s of D.slots) if (s.el) s.el.classList.remove('dragsel');
+  if (D.mode === 'split' && UI.cursor) {
+    const list = D.slots.filter(dragFits); const n = list.length;
+    if (n === 1) dragPutOne(list[0]); // un solo clic: como un clic derecho normal
+    else if (n > 1) { const per = Math.floor(UI.cursor.c / n);
+      for (const s of list) { const c = UI.cursor; if (!c) break; const cur = s.get(); const room = REG[c.id].stack - (cur ? cur.c : 0); const k = Math.min(per >= 1 ? per : 1, room, c.c); if (k <= 0) continue;
+        if (cur) cur.c += k; else s.set({ ...c, c: k }); c.c -= k; if (c.c <= 0) UI.cursor = null; if (s.onChange) s.onChange(); } }
+  }
+  refreshInvUI();
+}
+window.addEventListener('mouseup', ev => { if (ev.button === 2 && UI.drag) dragEnd(); });
 function slotClick(s, ev) {
   ev.preventDefault(); const p = G.player; const right = ev.button === 2; const shift = ev.shiftKey;
+  if (right && UI.cursor && dragFits(s)) { // empieza el arrastre (un clic suelto sigue poniendo uno)
+    UI.drag = { mode: shift ? 'split' : 'one', slots: [s] };
+    if (UI.drag.mode === 'one') dragPutOne(s); else if (s.el) s.el.classList.add('dragsel');
+    refreshInvUI(); return;
+  }
   if (s.palette) { // creativo
     if (UI.cursor) { UI.cursor = null; } else { const d = REG[s.palette]; const st = { id: s.palette, c: shift || ev.button === 1 ? d.stack : (right ? 1 : d.stack), d: 0 }; if (shift) giveItem(p, st); else UI.cursor = st; }
     refreshInvUI(); return;
@@ -158,7 +204,7 @@ function slotClick(s, ev) {
   if (s.trash) { if (shift) { p.inv.fill(null); } UI.cursor = null; refreshInvUI(); return; }
   if (s.output) {
     const res = s.get(); if (!res) return;
-    const take = () => { if (s.craftOut === 'craft') consumeCraft(); else if (s.craftOut === 'smith') consumeSmith(); else if (s.craftOut === 'anvil') consumeAnvil(); else s.set(null); };
+    const take = () => outputTake(s);
     if (shift) { let guard = 0; while (guard++ < 64) { const r = s.get(); if (!r) break; const left = giveItem(p, r); if (left > 0) { if (left < r.c) { } break; } take(); if (!s.craftOut) break; } }
     else if (!UI.cursor) { UI.cursor = { ...res }; take(); }
     else if (sameItem(UI.cursor, res) && UI.cursor.c + res.c <= REG[res.id].stack) { UI.cursor.c += res.c; take(); }
@@ -166,7 +212,7 @@ function slotClick(s, ev) {
   }
   const cur = s.get();
   if (shift && cur) { quickMove(s); if (s.onChange) s.onChange(); refreshInvUI(); return; }
-  if (s.armor !== undefined && UI.cursor) { const d = REG[UI.cursor.id]; if (!(d.armor && d.armor.slot === s.armor) && !(s.armor === 0 && UI.cursor.id === ID.carved_pumpkin)) return; }
+  if (s.armor !== undefined && UI.cursor && !armorFits(UI.cursor, s.armor)) return;
   if (!right) {
     if (!UI.cursor) { if (cur) { UI.cursor = cur; s.set(null); } }
     else if (!cur) { s.set(UI.cursor); UI.cursor = null; }
@@ -205,6 +251,7 @@ function showTooltip(s) { const st = s.palette ? { id: s.palette, c: 1 } : s.get
   if (d.dur) h += `<br><span style="color:#aaa">Durabilidad: ${d.dur - (st.d || 0)} / ${d.dur}</span>`; if (d.armor && d.armor.pts) h += `<br><span style="color:#58f">+${d.armor.pts} armadura</span>`; if (d.dmg) h += `<br><span style="color:#5f5">${d.dmg} de daño</span>`; if (d.food) h += `<br><span style="color:#fa5">+${d.food[0]} comida</span>`; h += `<br><span style="color:#555;font-size:14px">minecraft:${d.name}</span>`; tt.innerHTML = h; tt.style.display = 'block'; }
 function hideTooltip() { $('tooltip').style.display = 'none'; }
 function closeScreen() {
+  if (UI.drag) dragEnd();
   const p = G.player; if (!UI.open) return;
   if (UI.craft && UI.open === 'craft') for (let i = 0; i < UI.craft.grid.length; i++) if (UI.craft.grid[i]) { const l = giveItem(p, UI.craft.grid[i]); if (l) dropItem(p.dim, p.x, p.eye, p.z, { ...UI.craft.grid[i], c: l }); UI.craft.grid[i] = null; }
   if (UI.open === 'inv' && UI.craft) { for (let i = 0; i < 4; i++) if (UI.craft.grid[i]) { const l = giveItem(p, UI.craft.grid[i]); if (l) dropItem(p.dim, p.x, p.eye, p.z, { ...UI.craft.grid[i], c: l }); UI.craft.grid[i] = null; } }
@@ -354,7 +401,7 @@ function onKeyDown(e) {
   if (e.code === 'Escape') { e.preventDefault(); if (UI.open) closeScreen(); else if (G.paused) { if ($('sOptions').classList.contains('on') || $('sControls').classList.contains('on')) { waitingKey = null; showScreen('sPause'); } else pauseGame(false); } else if ($('sCredits').classList.contains('on')) { hideScreens(); lockPointer(); } else if (!G.player.dead) pauseGame(true); return; }
   if (UI.open) {
     if (a === 'inventory' && !(document.activeElement && document.activeElement.tagName === 'INPUT')) { closeScreen(); e.preventDefault(); }
-    if (/^Digit[1-9]$/.test(e.code) && UI.hover && !UI.hover.palette && UI.hover.get) { const i = +e.code[5] - 1; const s = UI.hover; const a1 = s.get(), b1 = G.player.inv[i]; s.set(b1); G.player.inv[i] = a1; refreshInvUI(); }
+    if (/^Digit[1-9]$/.test(e.code) && UI.hover && !UI.hover.palette && !UI.hover.trash && UI.hover.get) hotbarSwap(UI.hover, +e.code[5] - 1);
     if (a === 'drop' && UI.hover && UI.hover.get && !UI.hover.palette) { const s = UI.hover.get(); if (s) { const n = e.ctrlKey ? s.c : 1; dropItem(G.player.dim, G.player.x, G.player.eye - 0.3, G.player.z, { ...s, c: n }, -Math.sin(G.player.yaw) * 4, 2, -Math.cos(G.player.yaw) * 4, 40); s.c -= n; if (s.c <= 0) UI.hover.set(null); refreshInvUI(); } }
     return;
   }
