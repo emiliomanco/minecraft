@@ -714,17 +714,18 @@ FL.frame = 0; FL.spawnFrame = null; FL.calm = new Map(); FL.acc2 = new Map(); FL
 FL.absAcc = [0, 0, 0]; FL.absAt = [null, null, null];
 function flAbsorb(w, x, y, z, base, flag) {
   const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z);
-  if (base >= 4) { if (flag === 2 && Math.random() < 0.05) fizz(w, bx, by, bz); return; } // miel y leche: la lava las quema (no tienen versión normal)
+  if (base >= 4) { if (flag === 2 && Math.random() < 0.05) fizz(w, bx, by, bz); return true; } // miel y leche: la lava las quema (no tienen versión normal)
   const lavaP = base === 2; const into = flag === 1 ? 1 : 2; // líquido quieto en el que entró
   const isInto = b => b > 0 && REG[b] && (REG[b].liquid === into || (into === 1 && REG[b].inWater));
   // la celda donde quedó (o una vecina, si la lectura llegó un poco desfasada)
   let cx = bx, cy = by, cz = bz;
   if (!isInto(w.get(cx, cy, cz))) { let f = false; for (const [dx, dy, dz] of [[0, -1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0]]) if (isInto(w.get(bx + dx, by + dy, bz + dz))) { cx = bx + dx; cy = by + dy; cz = bz + dz; f = true; break; }
-    if (!f) { flExitVol(w, bx, by, bz, base); return; } } // ya no hay líquido ahí: se guarda como volumen donde está
-  if (into === 1 && (w.getMeta(cx, cy, cz) & LIQ_OCEAN)) { if (lavaP) flQuenchAcc(w, cx, cy, cz, true); return; } // el mar se lo traga
-  if (lavaP !== (into === 2)) { flQuenchAcc(w, cx, cy, cz, lavaP); return; }
+    if (!f) return false; } // ya no hay líquido ahí (la lectura llegó tarde): sigue siendo partícula
+  if (into === 1 && (w.getMeta(cx, cy, cz) & LIQ_OCEAN)) { if (lavaP) flQuenchAcc(w, cx, cy, cz, true); return true; } // el mar se lo traga
+  if (lavaP !== (into === 2)) { flQuenchAcc(w, cx, cy, cz, lavaP); return true; }
   FL.absAt[into] = [w, cx, cy, cz]; FL.absAcc[into]++;
   while (FL.absAcc[into] >= FL_PPB / 8) { const [ww, ax, ay, az] = FL.absAt[into]; if (!flAddOctave(ww, ax, ay, az, into)) break; FL.absAcc[into] -= FL_PPB / 8; }
+  return true;
 }
 // suma 1/8 al cuerpo de líquido de la celda: arriba de su columna, o en la columna de una vecina si esa está tapada
 function flAddOctave(w, x, y, z, liq) {
@@ -776,7 +777,7 @@ function flAfterReadback() {
     const ph = FL.phase[i]; if (!ph || FL.spawnFrame[i] > F) continue; const k4 = i * 4; const pw = P[k4 + 3]; if (pw < 0.5) continue;
     const flag = Math.floor(pw / 10 + 1e-4); const base = Math.round(pw - flag * 10);
     const x = P[k4] + o[0], y = P[k4 + 1] + o[1], z = P[k4 + 2] + o[2];
-    if (flag === 1 || flag === 2) { flAbsorb(w, x, y, z, base, flag); flKill(i); if (flag === 1 && Math.random() < 0.3 && typeof ripImpulse === 'function') { const sp = Math.hypot(V[k4], V[k4 + 1], V[k4 + 2]); ripImpulse(x, z, 0.3 + sp * 0.04, Math.min(1.4, 0.15 + sp * 0.18)); } continue; }
+    if (flag === 1 || flag === 2) { const ab = flAbsorb(w, x, y, z, base, flag); flKill(i); if (!ab) { flSpawn(x, y + 0.02, z, 0, 0, 0, base, V[k4 + 3]); continue; } if (flag === 1 && Math.random() < 0.3 && typeof ripImpulse === 'function') { const sp = Math.hypot(V[k4], V[k4 + 1], V[k4 + 2]); ripImpulse(x, z, 0.3 + sp * 0.04, Math.min(1.4, 0.15 + sp * 0.18)); } continue; }
     if (flag >= 3) { flPark(w, x, y, z, V[k4], V[k4 + 1], V[k4 + 2], base, V[k4 + 3]); flKill(i); continue; } // salió de la región: sigue como partícula fuera (nunca líquido normal)
     const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z); const key = FLK(bx, by, bz);
     let c = occ.get(key); if (!c) { c = { x: bx, y: by, z: bz, nw: 0, nl: 0, np: 0, nh: 0, nm: 0, top: -1e9, vx: 0, vy: 0, vz: 0, vmax: 0, idx: [] }; occ.set(key, c); }
@@ -899,7 +900,7 @@ function flParkTick(w, dt) {
         const nx = q.x + q.vx * h, ny = q.y + q.vy * h, nz = q.z + q.vz * h; const bx = Math.floor(nx), by = Math.floor(ny), bz = Math.floor(nz);
         const b = w.get(bx, by, bz);
         if (b < 0) { flParkSettle(q, Math.floor(q.x), Math.floor(q.y), Math.floor(q.z)); break; } // chunk sin cargar: se queda ahí
-        if (b > 0 && REG[b].liquid && !(q.ph >= 4 && REG[b].liquid === 1)) { flAbsorb(w, nx, ny, nz, q.ph, REG[b].liquid === 1 ? 1 : 2); alive = false; break; } // miel y leche atraviesan el agua (se hunden)
+        if (b > 0 && REG[b].liquid && !(q.ph >= 4 && REG[b].liquid === 1)) { if (flAbsorb(w, nx, ny, nz, q.ph, REG[b].liquid === 1 ? 1 : 2)) { alive = false; break; } flParkSettle(q, bx, by, bz); break; } // miel y leche atraviesan el agua (se hunden)
         if (b > 0 && REG[b].solid) {
           const fb = w.get(Math.floor(q.x), by, Math.floor(q.z)); // ¿cae encima (el bloque está debajo) o choca de lado?
           if (q.vy < 0 && fb > 0 && REG[fb].solid && Math.floor(q.y) > by) { flParkSettle(q, Math.floor(q.x), by + 1, Math.floor(q.z)); break; }
