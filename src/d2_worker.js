@@ -10,7 +10,7 @@ const WORKER_MAIN = function () {
     try {
       if (m.t === 'gen') {
         let w = worlds[m.wid];
-        if (!w) { w = worlds[m.wid] = new World(m.dim, m.seed, m.climate); if (m.noStruct) w.gen.genStructures = () => { }; }
+        if (!w) { w = worlds[m.wid] = new World(m.dim, m.seed, m.climate); if (m.noStruct) w.gen.genStructures = () => { }; if (m.dyn) w.gen.dynTrees = true; }
         const c = new Chunk(w, m.cx, m.cz); w.gen.generate(c);
         self.postMessage({ t: 'gen', id: m.id, wid: m.wid, cx: m.cx, cz: m.cz, blocks: c.blocks, meta: c.meta, biomes: c.biomes, tint: c.tint, loot: c.loot, spawners: c.spawners, spawns: c.spawns, top: c.top }, [c.blocks.buffer, c.meta.buffer, c.biomes.buffer, c.tint.buffer]);
       } else if (m.t === 'mesh') {
@@ -42,7 +42,7 @@ function wkBusy() { let n = 0; for (const w of WK.list) n += w.busy; return n; }
 function requestGen(w, cx, cz) {
   if (!WK.ok) { w.ensure(cx, cz); return; }
   const k = ckey(cx, cz); if (!w.genPending) w.genPending = new Set(); if (w.genPending.has(k) || w.chunks.has(k)) return;
-  w.genPending.add(k); wpost({ t: 'gen', wid: worldId(w), dim: w.dim, seed: w.seed, climate: w.climate, cx, cz, noStruct: !!w.noStruct });
+  w.genPending.add(k); wpost({ t: 'gen', wid: worldId(w), dim: w.dim, seed: w.seed, climate: w.climate, dyn: !!w.gen.dynTrees, cx, cz, noStruct: !!w.noStruct });
 }
 function requestMesh(w, c) {
   buildRegion(w, c);

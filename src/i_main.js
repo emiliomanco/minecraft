@@ -14,8 +14,8 @@ function audioInit() {
   const rs = c.createBufferSource(); rs.buffer = b; rs.loop = true; const rf = c.createBiquadFilter(); rf.type = 'highpass'; rf.frequency.value = 900; const rg = c.createGain(); rg.gain.value = 0; rs.connect(rf); rf.connect(rg); rg.connect(AU.master); rs.start(); AU.rain = rg;
 }
 const MAT_SND = id => { const d = REG[id]; if (!d) return 'stone'; const n = d.name; if (/glass|ice/.test(n)) return 'glass'; if (/wool|carpet/.test(n)) return 'wool'; if (/sand|snow/.test(n)) return 'sand'; if (/gravel|dirt|farmland|path|mud|clay|soul/.test(n)) return 'gravel'; if (/grass|leaves|sapling|vine|fern|flower|kelp|moss|wart|roots|azalea/.test(n) || d.render === 'cross') return 'grass'; if (d.tool === 'axe' || /planks|log|wood|stem|bookshelf|chest|table|barrel/.test(n)) return 'wood'; return 'stone'; };
-function noiseHit(t, dur, freq, q, vol, type = 'bandpass', dest) { const c = AU.ctx; const s = c.createBufferSource(); s.buffer = AU.noise; s.playbackRate.value = 0.8 + Math.random() * 0.4; const f = c.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q; const g = c.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0008, t + dur); s.connect(f); f.connect(g); g.connect(dest || AU.out || AU.master); s.start(t, Math.random() * 1.5); s.stop(t + dur + 0.05); return g; }
-function tone(t, dur, f0, f1, vol, type = 'sine', dest) { const c = AU.ctx; const o = c.createOscillator(); o.type = type; o.frequency.setValueAtTime(f0, t); if (f1) o.frequency.exponentialRampToValueAtTime(f1, t + dur); const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); o.connect(g); g.connect(dest || AU.out || AU.master); o.start(t); o.stop(t + dur + 0.05); }
+function noiseHit(t, dur, freq, q, vol, type = 'bandpass', dest) { if (!(vol > 0) || !Number.isFinite(vol + freq + dur + t)) return; const c = AU.ctx; const s = c.createBufferSource(); s.buffer = AU.noise; s.playbackRate.value = 0.8 + Math.random() * 0.4; const f = c.createBiquadFilter(); f.type = type; f.frequency.value = freq; f.Q.value = q; const g = c.createGain(); g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0008, t + dur); s.connect(f); f.connect(g); g.connect(dest || AU.out || AU.master); s.start(t, Math.random() * 1.5); s.stop(t + dur + 0.05); return g; }
+function tone(t, dur, f0, f1, vol, type = 'sine', dest) { if (!(vol > 0) || !Number.isFinite(vol + f0 + dur + t + (f1 || 0)) || f1 < 0) return; const c = AU.ctx; const o = c.createOscillator(); o.type = type; o.frequency.setValueAtTime(f0, t); if (f1) o.frequency.exponentialRampToValueAtTime(f1, t + dur); const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + dur); o.connect(g); g.connect(dest || AU.out || AU.master); o.start(t); o.stop(t + dur + 0.05); }
 // categorías de sonido (Opciones → Audio)
 const SND_CAT = { click: 'ui', dig: 'blocks', place: 'blocks', break: 'blocks', glass: 'blocks', chest_open: 'blocks', chest_close: 'blocks', bucket: 'blocks', bucket_empty: 'blocks', ignite: 'blocks', note: 'blocks', fizz: 'blocks', portal: 'blocks', portal_ignite: 'blocks', end_portal: 'blocks',
   step: 'players', step_stone: 'players', hurt: 'players', eat: 'players', burp: 'players', drink: 'players', fall: 'players', bow: 'players', throw: 'players', break_item: 'players', levelup: 'players', hit: 'players', crit: 'players', arrow_hit: 'players', pop: 'players',
@@ -97,7 +97,7 @@ function serializeWorld() {
   const players = Object.assign({}, G.playerStates || {}); players.__local = playerState(G.player); players.__local.name = G.player.name;
   if (G.net && G.net.role === 'host') for (const c of G.net.conns.values()) if (c.ent && c.ent.state) players[c.ent.name] = c.ent.state;
   const ents = []; for (const e of G.entities.values()) { if (e.proxy || e.remotePlayer || e.removed || e.dead) continue; if (e instanceof Mob && (e.persist || !e.def.hostile)) ents.push({ k: 'mob', ty: e.type, d: e.dim, x: e.x, y: e.y, z: e.z, hp: e.hp, c: e.color, p: e.persist, n: e.name }); else if (e.type === 'item') ents.push({ k: 'item', d: e.dim, x: e.x, y: e.y, z: e.z, s: e.stack }); else if (e.isBoat) ents.push({ k: 'boat', d: e.dim, x: e.x, y: e.y, z: e.z, r: e.rot }); }
-  return { format: 'minecraft2-world', version: 3, name: G.worldName, seed: G.seed, seedStr: G.seedStr, gameMode: G.defaultMode || G.gameMode, curMode: G.gameMode, difficulty: G.difficulty, cheats: G.cheats, time: G.time, rain: G.rain, rainTimer: G.rainTimer, worldSpawn: G.worldSpawn, dragonKilled: G.dragonKilled, endInit: G.endInit, gateway: G.gateway, keepInventory: G.keepInventory, containers: G.containers, spawned: [...G.spawned], dims, players, entities: ents, created: G.created || Date.now(), lastPlayed: Date.now(), structures: G.structures !== false, climate: G.climate || 1, fluid: typeof flSerialize === 'function' ? flSerialize() : null };
+  return { format: 'minecraft2-world', version: 3, name: G.worldName, seed: G.seed, seedStr: G.seedStr, gameMode: G.defaultMode || G.gameMode, curMode: G.gameMode, difficulty: G.difficulty, cheats: G.cheats, time: G.time, rain: G.rain, rainTimer: G.rainTimer, worldSpawn: G.worldSpawn, dragonKilled: G.dragonKilled, endInit: G.endInit, gateway: G.gateway, keepInventory: G.keepInventory, containers: G.containers, spawned: [...G.spawned], dims, players, entities: ents, created: G.created || Date.now(), lastPlayed: Date.now(), structures: G.structures !== false, climate: G.climate || 1, dynTrees: !!G.dynTrees, fluid: typeof flSerialize === 'function' ? flSerialize() : null };
 }
 function worldIcon() { try { const c = document.createElement('canvas'); c.width = 64; c.height = 64; c.getContext('2d').drawImage($('gl'), ($('gl').width - $('gl').height) / 2, 0, $('gl').height, $('gl').height, 0, 0, 64, 64); return c.toDataURL('image/jpeg', 0.7); } catch (e) { return null; } }
 async function saveWorld(silent) {
@@ -114,7 +114,7 @@ function findSpawn(w) {
   return { x: 0.5, z: 0.5 };
 }
 function resetGameState() {
-  G.entities = new Map(); G.particles = []; G.containers = {}; G.spawned = new Set(); G.tick = 0; G.dragonKilled = false; G.endInit = false; G.gateway = null; G.creditsShown = false; G.playerStates = {}; G.rain = 0; G.rainLevel = 0; G.rainTimer = 12000 + Math.random() * 24000;
+  G.entities = new Map(); G.particles = []; G.containers = {}; G.spawned = new Set(); G.tick = 0; G.rtick = 0; G.tickFrozen = false; G.tickRate = 1; G.dragonKilled = false; G.endInit = false; G.gateway = null; G.creditsShown = false; G.playerStates = {}; G.rain = 0; G.rainLevel = 0; G.rainTimer = 12000 + Math.random() * 24000;
   TICK_TIMERS.length = 0; NETBATCH.length = 0; R.plights = []; UI.open = null; G.paused = false; G.wardenWarn = 0;
 }
 function migrateWorld(data) { // v2 -> v3: los objetos pasaron de id 256+ a 1000+
@@ -132,6 +132,7 @@ function startWorld(data, isNew, netWelcome) {
   G.defaultMode = data.gameMode || 'survival'; G.gameMode = data.curMode || data.gameMode || 'survival'; G.created = data.created || Date.now(); G.structures = data.structures !== false;
   G.climate = data.climate ?? (isNew ? 3 : 1); // biomas por clima en mundos nuevos; los antiguos siguen con los clásicos
   G.worlds = { overworld: new World('overworld', G.seed, G.climate), nether: new World('nether', G.seed, G.climate), end: new World('end', G.seed, G.climate) };
+  G.dynTrees = !!data.dynTrees; G.worlds.overworld.gen.dynTrees = G.dynTrees; // árboles dinámicos (opción al crear el mundo)
   if (!G.structures) for (const d in G.worlds) { G.worlds[d].gen.genStructures = () => { }; G.worlds[d].noStruct = true; }
   if (data.dims) for (const d in data.dims) for (const k in data.dims[d]) G.worlds[d].saved[k] = data.dims[d][k];
   G.containers = data.containers || {}; G.spawned = new Set(data.spawned || []); G.dragonKilled = !!data.dragonKilled; G.endInit = !!data.endInit; G.gateway = data.gateway || null; G.rain = data.rain || 0; G.rainTimer = data.rainTimer || G.rainTimer;
@@ -231,7 +232,7 @@ function manageChunks(w, x, z, budget) {
   if (G.net && G.net.role === 'host') for (const e of G.entities.values()) if (e.remotePlayer) { const ww = G.worlds[e.dim]; if (!ww) continue; const ecx = Math.floor(e.x) >> 4, ecz = Math.floor(e.z) >> 4; for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) if (!ww.chunk(ecx + dx, ecz + dz)) { if (WK.ok) requestGen(ww, ecx + dx, ecz + dz); else { if (performance.now() - t0 > budget * 1.5) return; ww.ensure(ecx + dx, ecz + dz); } } }
 }
 // ------------------------------------------------------------ BUCLE
-let lastT = performance.now(), acc = 0, fpsN = 0, fpsT = 0, FPS = 0, dbgT = 0;
+let lastT = performance.now(), acc = 0, accW = 0, fpsN = 0, fpsT = 0, FPS = 0, dbgT = 0;
 const MENU = { world: null, yaw: 0 };
 function frame(now) {
   requestAnimationFrame(frame);
@@ -288,11 +289,10 @@ function loadingFrame(dt) {
   renderWorld(w, [p.x, p.y + 1.6, p.z], p.yaw, p.pitch, {});
   if (ready >= total || performance.now() - G.loadStart > 25000) finishLoading();
 }
+// tick "real" (20 por segundo, siempre): el jugador, la red, el HUD y el guardado. /tick no lo afecta
 function gameTick() {
   const t0 = performance.now(); const p = G.player; const client = G.net && G.net.role === 'client';
-  G.tick++;
-  if (!client) { G.time++; if (--G.rainTimer <= 0) { G.rain = G.rain ? 0 : 1; G.rainTimer = G.rain ? 6000 + Math.random() * 6000 : 18000 + Math.random() * 30000; } }
-  G.rainLevel = lerp(G.rainLevel || 0, G.rain ? 1 : 0, 0.004);
+  G.rtick = (G.rtick || 0) + 1;
   if (!p.dead) {
     playerTick(p);
     const inP = entityInBlock(p.world, p, d => !!d.portal);
@@ -304,6 +304,18 @@ function gameTick() {
       if (sensor && (G.tick - (G.wardenT || 0)) > 100) { G.wardenT = G.tick; G.wardenWarn = (G.wardenWarn || 0) + 1; const msgs = ['El sculk vibra...', 'Algo se acerca...', 'Se acerca...', '¡Un Warden emerge!']; chatMsg(msgs[Math.min(3, G.wardenWarn - 1)], '#4cc'); if (G.wardenWarn >= 4 && ![...G.entities.values()].some(e => e.type === 'warden')) { const a = Math.random() * 6.28; const wx = p.x + Math.cos(a) * 7, wz = p.z + Math.sin(a) * 7; const m = spawnMob('warden', p.dim, wx, w.surfaceY(Math.floor(wx), Math.floor(wz)) > p.y + 5 ? p.y : p.y, wz); if (m) { m.target = p; m.persist = true; } G.wardenWarn = 0; for (let i = 0; i < 30; i++) smoke(wx, p.y, wz, { r: 0.1, g: 0.15, b: 0.15, size: 0.6 }); } }
     }
   }
+  if (G.net) { if (G.net.role === 'host') hostNetTick(); else clientNetTick(); }
+  if (G.rtick % 10 === 0) updateHUD();
+  if (G.rtick % 6000 === 0 && !client) saveWorld(true);
+  musicTick();
+  TICK_MS = lerp(TICK_MS, performance.now() - t0, 0.1);
+}
+// tick del mundo: tiempo, clima, entidades, fluidos, fuego, cultivos... /tick lo congela, acelera o ralentiza
+function worldTick() {
+  const p = G.player; const client = G.net && G.net.role === 'client';
+  G.tick++;
+  if (!client) { G.time++; if (--G.rainTimer <= 0) { G.rain = G.rain ? 0 : 1; G.thunder = G.rain && Math.random() < 0.3; G.rainTimer = G.rain ? 6000 + Math.random() * 6000 : 18000 + Math.random() * 30000; } }
+  G.rainLevel = lerp(G.rainLevel || 0, G.rain ? 1 : 0, G.weatherFast > 0 ? 0.05 : 0.004); if (G.weatherFast > 0) G.weatherFast--;
   // entidades
   if (typeof processPathQueue === 'function') processPathQueue();
   for (const [k, e] of G.entities) { if (e.removed) { G.entities.delete(k); continue; } if (e.proxy || e.remotePlayer) continue; if (client && !(e instanceof Projectile && e.type === 'eye')) continue; try { entityTick(e, 0.05); } catch (err) { console.error(err); e.removed = true; } }
@@ -317,27 +329,28 @@ function gameTick() {
     furnaceTick();
   }
   runTickTimers();
-  if (G.net) { if (G.net.role === 'host') hostNetTick(); else clientNetTick(); }
-  if (G.tick % 10 === 0) updateHUD();
-  if (G.tick % 6000 === 0 && !client) saveWorld(true);
-  musicTick();
-  TICK_MS = lerp(TICK_MS, performance.now() - t0, 0.1);
 }
 function gameFrame(dt) {
   const p = G.player; const w = G.world;
   const pausedSP = G.paused && !G.net;
-  if (!pausedSP) { acc += dt * 1000; let n = 0; while (acc >= 50 && n < 4) { gameTick(); acc -= 50; n++; } if (n >= 4) acc = 0; }
+  const rate = G.tickFrozen ? (G.tickStep > 0 ? 1 : 0) : (G.tickRate || 1); // /tick: el mundo se congela o cambia de velocidad; los jugadores no
+  if (!pausedSP) {
+    acc += dt * 1000; let n = 0; while (acc >= 50 && n < 4) { gameTick(); acc -= 50; n++; } if (n >= 4) acc = 0;
+    accW += dt * 1000 * rate; let m = 0; const mx = Math.max(4, Math.ceil(rate * 4)); while (accW >= 50 && m < mx) { worldTick(); accW -= 50; m++; if (G.tickFrozen && G.tickStep > 0 && --G.tickStep <= 0) { accW = 0; break; } } if (m >= mx) accW = 0;
+  }
+  const wdt = pausedSP ? 0 : Math.min(0.1, dt * rate);
   const typing = $('chatIn').classList.contains('on');
   const input = (UI.open || typing || G.paused || p.dead) ? {} : { f: held('forward'), b: held('back'), l: held('left'), r: held('right'), jump: held('jump'), sneak: SETTINGS.ctl.toggleSneak ? !!INPUT.tSneak : held('sneak'), sprint: SETTINGS.ctl.toggleSprint ? (held('forward') ? !!INPUT.tSprint : (INPUT.tSprint = false)) : held('sprint'), useHeld: p.eatT > 0 || p.bowT > 0 };
   if (!pausedSP && !p.dead && !p.ragdoll && p.boat) { p.savePrev(); boatRide(p, dt, input, pausedSP ? 1 : clamp(acc / 50, 0, 1)); }
   else if (!pausedSP && !p.dead && !p.ragdoll) { p.savePrev(); const steps = dt > 0.034 ? 2 : 1; for (let i = 0; i < steps; i++) updatePlayerPhysics(p, dt / steps, input); }
   if (!pausedSP && p.ragdoll && input.jump && p.ragdoll.alive && p.ragdoll.t > 0.5) p.ragdoll.dur = 0; // saltar = levantarse
-  if (!pausedSP && typeof ragUpdate === 'function') ragUpdate(dt);
-  if (!pausedSP && typeof debrisUpdate === 'function') { debrisUpdate(dt); boomUpdate(dt); }
+  if (!pausedSP && typeof ragUpdate === 'function') ragUpdate(wdt);
+  if (!pausedSP && typeof debrisUpdate === 'function') { debrisUpdate(wdt); boomUpdate(wdt); }
+  if (!pausedSP && typeof dynFallingUpdate === 'function') dynFallingUpdate(wdt);
   if (!pausedSP && typeof snowStampTick === 'function') snowStampTick(dt);
   if (!pausedSP) updateInteraction(dt);
-  smoothProxies(dt); updateParticles(pausedSP ? 0 : dt, w);
-  if (!pausedSP) { emitterFX(w, dt); weatherFX(w, dt); if (typeof vfxTick === 'function') vfxTick(w, dt); if (typeof efUpdate === 'function') efUpdate(w, dt); if (typeof emberUpdate === 'function') emberUpdate(w, dt); }
+  smoothProxies(dt); updateParticles(wdt, w);
+  if (!pausedSP && wdt > 0) { emitterFX(w, wdt); weatherFX(w, wdt); if (typeof vfxTick === 'function') vfxTick(w, wdt); if (typeof efUpdate === 'function') efUpdate(w, wdt); if (typeof emberUpdate === 'function') emberUpdate(w, wdt); }
   updateLights(dt);
   manageChunks(w, p.x, p.z, R.q === 0 ? 5 : 8);
   // cámara
@@ -353,13 +366,13 @@ function gameFrame(dt) {
   const zoomOn = held('zoom') && !UI.open && !G.paused && !$('chatIn').classList.contains('on'); G.zoomCur = lerp(G.zoomCur || 1, zoomOn ? (G.zoomMag || SETTINGS.ctl.zoomMag || 4) : 1, Math.min(1, dt * 12));
   const tfov = SETTINGS.fov * (p.sprinting && !zoomOn ? 1.12 : 1) * (p.spy ? 0.14 : 1) * (p.bowT > 0 ? 1 - Math.min(1, p.bowT) * 0.15 : 1) * (p.gliding ? 1.1 : 1) / G.zoomCur;
   G.fovCur = lerp(G.fovCur || tfov, tfov, Math.min(1, dt * 10));
-  R.yawCam = yaw; const alpha = pausedSP ? 1 : acc / 50;
+  R.yawCam = yaw; const alpha = pausedSP ? 1 : acc / 50, alphaW = pausedSP || rate === 0 ? 1 : clamp(accW / 50, 0, 1);
   // ondas del agua (estelas, salpicaduras, chorros): fuentes y un paso de simulación en GPU antes de dibujar
-  if (typeof ripUpdate === 'function') { if (!pausedSP) ripSources(w, dt); ripUpdate(pausedSP ? 0 : dt); }
-  if (typeof flUpdate === 'function') flUpdate(pausedSP ? 0 : dt, w); // fluido continuo (partículas en GPU)
+  if (typeof ripUpdate === 'function') { if (!pausedSP) ripSources(w, dt); ripUpdate(wdt); }
+  if (typeof flUpdate === 'function') flUpdate(wdt, w); // fluido continuo (partículas en GPU)
   renderWorld(w, eye, yaw, pitch, {
     fov: G.fovCur, under, roll, bob, biome: w.biomeAt(Math.floor(p.x), Math.floor(p.z)),
-    drawEntities: () => { drawAllEntities(p.dim, alpha, perspective > 0 && G.gameMode !== 'spectator'); },
+    drawEntities: () => { drawAllEntities(p.dim, alphaW, perspective > 0 && G.gameMode !== 'spectator'); },
     particles: G.particles, flames: G._flames, fireCells: G._fireCells, drawOverlay: tr => drawOverlays(tr), drawHand: perspective === 0 && !hudHidden && G.gameMode !== 'spectator' && !p.spy && !p.ragdoll && (G.zoomCur || 1) < 1.3 ? drawHand : null,
     exposure: p.effects.night ? 1.6 : 1
   });
@@ -501,7 +514,7 @@ async function refreshWorlds() {
 }
 function updWBtns() { $('wPlay').disabled = $('wExport').disabled = $('wDelete').disabled = !selWorld; }
 async function playWorld(id) { const rec = await DB.get(id); if (!rec) return; G.worldId = id; G.iconURL = rec.icon; startWorld(rec.data, false); G.pendingHost = G.hostAfterLoad; G.hostAfterLoad = false; }
-const CREATE = { mode: 'survival', diff: 2, cheats: true, structs: true };
+const CREATE = { mode: 'survival', diff: 2, cheats: true, structs: true, dyn: true };
 // ------------------------------------------------------------ OPCIONES: pestañas de gráficos, físicas, audio y controles
 const OPT = { tab: 'gfx', keepScroll: false };
 const OPT_TABS = [['gfx', 'Gráficos'], ['phys', 'Físicas'], ['audio', 'Audio'], ['ctl', 'Controles']];
@@ -602,7 +615,7 @@ function optPhysics(ui) {
   v = mode('ragdoll', 'los mobs y el jugador caen como muñecos de trapo al morir, con golpes fuertes y caídas grandes (tecla ' + keyLabel(SETTINGS.keys.ragdoll) + ' para activarlo tú).', 'animación de muerte clásica.');
   ui.slider('Duración del cuerpo', ...PK('ragdoll', 'corpse'), 1, 20, 0.5, x => x + ' s', 'Cuánto tiempo queda el cuerpo en el suelo antes de desaparecer.', { off: v });
   ui.slider('Golpe mínimo', ...PK('ragdoll', 'knock'), 3, 15, 0.5, x => x, 'Fuerza de empuje necesaria para tumbar a alguien (explosiones, golpes fuertes). Menos = se tumban con más facilidad.', { off: v });
-  ui.slider('Caída mínima', ...PK('ragdoll', 'fall'), 10, 40, 1, x => x + ' m/s', 'Velocidad de caída a partir de la cual se pierde el equilibrio.', { off: v });
+  ui.slider('Caída mínima', ...PK('ragdoll', 'fall'), 15, 60, 1, x => x + ' m/s (~' + Math.round(x * x / 64) + ' bloques)', 'Velocidad de caída a partir de la cual se pierde el equilibrio. Nunca pasa si hay agua debajo o llevas élitros.', { off: v });
   ui.slider('Máximo de ragdolls', ...PK('ragdoll', 'max'), 2, 40, 1, x => x, 'Ragdolls a la vez (más = más carga de CPU).', { off: v });
   ui.sec('Fuego');
   v = mode('fire', 'llamas volumétricas que se pegan a la superficie que arde y se funden entre ellas (calidad Realista o mejor).', 'llamas clásicas.');
@@ -686,11 +699,12 @@ function setupMenus() {
   $('cDiff').onclick = () => { CREATE.diff = (CREATE.diff + 1) % 4; $('cDiff').textContent = 'Dificultad: ' + DIFFNAMES[CREATE.diff]; };
   $('cCheats').onclick = () => { CREATE.cheats = !CREATE.cheats; $('cCheats').textContent = 'Trucos: ' + (CREATE.cheats ? 'SÍ' : 'NO'); };
   $('cStruct').onclick = () => { CREATE.structs = !CREATE.structs; $('cStruct').textContent = 'Estructuras: ' + (CREATE.structs ? 'SÍ' : 'NO'); };
+  $('cDyn').onclick = () => { CREATE.dyn = !CREATE.dyn; $('cDyn').textContent = 'Árboles dinámicos: ' + (CREATE.dyn ? 'SÍ' : 'NO'); };
   $('cBack').onclick = () => { showScreen('sWorlds'); refreshWorlds(); };
-  $('cGo').onclick = () => { const [seed, seedStr] = seedFromString($('cSeed').value); G.worldId = 'w' + Date.now(); G.iconURL = null; startWorld({ name: $('cName').value.trim() || 'Nuevo mundo', seed, seedStr, gameMode: CREATE.mode, difficulty: CREATE.diff, cheats: CREATE.cheats, structures: CREATE.structs }, true); G.pendingHost = G.hostAfterLoad; G.hostAfterLoad = false; };
+  $('cGo').onclick = () => { const [seed, seedStr] = seedFromString($('cSeed').value); G.worldId = 'w' + Date.now(); G.iconURL = null; startWorld({ name: $('cName').value.trim() || 'Nuevo mundo', seed, seedStr, gameMode: CREATE.mode, difficulty: CREATE.diff, cheats: CREATE.cheats, structures: CREATE.structs, dynTrees: CREATE.dyn }, true); G.pendingHost = G.hostAfterLoad; G.hostAfterLoad = false; };
   // multijugador
   $('mBack').onclick = () => goMenu(); $('mHost').onclick = () => { G.hostAfterLoad = true; showScreen('sWorlds'); refreshWorlds(); };
-  const join = async lan => { const name = $('mName').value.trim() || SETTINGS.name; SETTINGS.name = name; saveSettings(); const code = $('mCode').value.trim(); if (code.length < 4) { $('mErr').textContent = 'Escribe el código del mundo.'; return; } $('mErr').textContent = 'Conectando...'; try { const wl = await joinGame(code, lan, name); G.worldId = null; startWorld({ name: wl.worldName, seed: wl.seed, climate: wl.climate || 1, seedStr: wl.seedStr, gameMode: wl.gm, difficulty: wl.diff, time: wl.time, dragonKilled: wl.dk, endInit: wl.ei, gateway: wl.gw, worldSpawn: wl.spawn, keepInventory: wl.keep }, false, wl); } catch (e) { stopNet(); $('mErr').textContent = 'Error: ' + e.message; } };
+  const join = async lan => { const name = $('mName').value.trim() || SETTINGS.name; SETTINGS.name = name; saveSettings(); const code = $('mCode').value.trim(); if (code.length < 4) { $('mErr').textContent = 'Escribe el código del mundo.'; return; } $('mErr').textContent = 'Conectando...'; try { const wl = await joinGame(code, lan, name); G.worldId = null; startWorld({ name: wl.worldName, seed: wl.seed, climate: wl.climate || 1, dynTrees: !!wl.dyn, seedStr: wl.seedStr, gameMode: wl.gm, difficulty: wl.diff, time: wl.time, dragonKilled: wl.dk, endInit: wl.ei, gateway: wl.gw, worldSpawn: wl.spawn, keepInventory: wl.keep }, false, wl); } catch (e) { stopNet(); $('mErr').textContent = 'Error: ' + e.message; } };
   $('mJoin').onclick = () => join(false); $('mJoinLan').onclick = () => join(true);
   $('mCode').addEventListener('keydown', e => e.stopPropagation()); $('mName').addEventListener('keydown', e => e.stopPropagation());
   // opciones
@@ -705,6 +719,7 @@ function setupMenus() {
   $('dRespawn').onclick = () => respawn(); $('dTitle').onclick = () => quitToTitle(true);
   $('qBack').onclick = () => goMenu(); $('crBack').onclick = () => { hideScreens(); lockPointer(); };
   // chat
+  $('chatIn').addEventListener('input', () => cmdUIUpdate()); $('chatIn').addEventListener('keydown', e => cmdUIKey(e));
   $('chatIn').addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') { const v = $('chatIn').value.trim(); if (v) { if (v.startsWith('/')) runCommand(v); else { const txt = '<' + G.player.name + '> ' + v; if (G.net && G.net.role === 'client') netSend({ t: 'chat', m: v }); else { chatMsg(txt); if (G.net) netBroadcast({ t: 'chat', m: txt }); } } } closeChat(); } else if (e.key === 'Escape') closeChat(); });
 }
 let optReturn = 'sMain';

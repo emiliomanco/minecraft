@@ -143,6 +143,18 @@ function connects(d, nb) {
   return false;
 }
 // devuelve cajas en 1/16. nb(dx,dz) -> id del vecino en el mismo nivel
+// rama de árbol dinámico: columna o cubo central con su grosor y brazos hacia cada rama vecina (con el menor de los dos grosores)
+function dynLogBoxes(meta, ri) {
+  const w = DYN_W[meta & 7], a = 8 - w / 2, b = 8 + w / 2; const out = [];
+  const conn = o => { const nd = REG[regB[o]]; return nd && nd.dynLog ? DYN_W[regM[o] & 7] : 0; };
+  const up = conn(ri + LRR), dn = conn(ri - LRR); const bl = REG[regB[ri - LRR]]; const ground = !dn && bl && bl.solid && !bl.dynLog && !bl.leaves && !bl.replace;
+  out.push([a, dn || ground ? 0 : a, a, b, up ? 16 : b, b]);
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const nw = conn(ri + dx + dz * LR); if (!nw) continue; const ww = Math.min(w, nw), c0 = 8 - ww / 2, c1 = 8 + ww / 2;
+    out.push([dx > 0 ? b : dx < 0 ? 0 : c0, c0, dz > 0 ? b : dz < 0 ? 0 : c0, dx > 0 ? 16 : dx < 0 ? a : c1, c1, dz > 0 ? 16 : dz < 0 ? a : c1]);
+  }
+  return out;
+}
 function shapeBoxes(d, meta, nb, forCollision) {
   const f = meta & 3; const out = [];
   switch (d.shape) {
@@ -157,6 +169,7 @@ function shapeBoxes(d, meta, nb, forCollision) {
       if ((meta & 4) && !forCollision) { const P = [[2, 9, 1, 14, 11, 6], [10, 9, 2, 15, 11, 14], [2, 9, 10, 14, 11, 15], [1, 9, 2, 6, 11, 14]][f].slice(); P.push('white_wool'); out.push(P); }
       break;
     }
+    case 'dynlog': { const w = Math.max(DYN_W[meta & 7], 6), a = 8 - w / 2; out.push([a, 0, a, 16 - a, 16, 16 - a]); break; } // colisión/selección: la columna (mín. 6 px)
     case 'door': { const open = meta & 4; const side = (f + 2) % 4; out.push(PANEL[open ? (side + 1) % 4 : side]); break; }
     case 'trapdoor': { if (meta & 4) out.push(PANEL[(f + 2) % 4]); else out.push(meta & 8 ? [0, 13, 0, 16, 16, 16] : [0, 0, 0, 16, 3, 16]); break; }
     case 'gate': { const ax = f & 1; if (meta & 4) { out.push(ax ? [0, 0, 6, 2, 16, 10] : [6, 0, 0, 10, 16, 2]); out.push(ax ? [14, 0, 6, 16, 16, 10] : [6, 0, 14, 10, 16, 16]); } else out.push(ax ? [7, 0, 0, 9, 16, 16] : [0, 0, 7, 16, 16, 9]); break; }
@@ -247,7 +260,7 @@ function meshRegion(world, ch) {
     } else if (d.render === 'box') {
       emitBox(d, x, y, z, ri, meta, ch);
     } else if (d.render === 'shape') {
-      const boxes = shapeBoxes(d, meta, (dx, dz) => regB[ri + dx + dz * LR]); const lay = d.shape === 'door' && (meta & 8) ? d.layerTop : undefined;
+      const boxes = d.shape === 'dynlog' ? dynLogBoxes(meta, ri) : shapeBoxes(d, meta, (dx, dz) => regB[ri + dx + dz * LR]); const lay = d.shape === 'door' && (meta & 8) ? d.layerTop : undefined;
       for (const b of boxes) { if (b.length > 6) emitBox(d, x, y, z, ri, meta, ch, b.slice(0, 6), TEX[b[6]]); else emitBox(d, x, y, z, ri, meta, ch, b, lay); }
     } else if (d.render === 'liquid') {
       emitLiquidCell(d.liquid === 1 ? MB_W : O, d.liquid, x, y, z, ri, ch, bxw, bzw);

@@ -18,12 +18,12 @@ const FL = {
   rb: { pbo: null, sync: null, frame: 0, pos: null, vel: null, n: 0, ready: false, org: [0, 0, 0] },
   ents: new Float32Array(32), entV: new Float32Array(32), nEnt: 0
 };
-const FL_H = 0.4, FL_S = 0.2, FL_R = 0.08, FL_T = 262144, FL_PPB = 125; // 125 partículas por bloque (0,1 L de los cubos cada una)
+const FL_K = 6, FL_S = 1 / FL_K, FL_H = 0.34, FL_R = 0.066, FL_T = 262144, FL_PPB = FL_K * FL_K * FL_K; // 6×6×6 = 216 partículas por bloque, más pequeñas
 const GLSL_FLHEAD = `#version 300 es
 precision highp float; precision highp int; precision highp sampler2D; precision highp sampler3D;
 uniform sampler2D u_pos, u_vel, u_pred, u_lam, u_key, u_tab; uniform sampler3D u_vox;
 uniform ivec3 u_vdim; uniform int u_M; uniform float u_dt, u_kp, u_ks, u_eps;
-const float H=0.4, H2=0.16, RAD=0.08;
+const float H=0.34, H2=0.1156, RAD=0.066;
 uniform float u_time, u_rain, u_tide; uniform vec3 u_org;
 // oleaje del mar (el mismo que dibuja VS_CHUNK): x = desplazamiento de la superficie, yz = velocidad orbital horizontal
 uniform float u_waveK;
@@ -200,7 +200,7 @@ precision highp float; in vec2 v_q; in vec4 v_c; out vec4 o; void main(){ float 
 function flInit() {
   const gl = R.gl; FL.gl = gl; FL.ok = false;
   if (!gl.getExtension('EXT_color_buffer_float')) return;
-  FL.N = R.q >= 3 ? 131072 : 65536; FL.rows = FL.N / FL.W;
+  FL.N = R.q >= 3 ? 262144 : 131072; FL.rows = FL.N / FL.W;
   const P = {}; const C = (n, vs, fs) => { P[n] = compileRaw(vs, fs); };
   try {
     C('pred', VS_FLQUAD, FS_FLPRED); C('key', VS_FLQUAD, FS_FLKEY); C('sort', VS_FLQUAD, FS_FLSORT); C('tab', VS_FLTAB, FS_FLTAB);
@@ -583,7 +583,7 @@ function flRender() {
   gl.bindFramebuffer(gl.READ_FRAMEBUFFER, R.fbo.scene.fb); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, R.fbo.copy.fb);
   const K = FL.rskip || 0;
   if (!(K & 16)) gl.blitFramebuffer(0, 0, R.w, R.h, 0, 0, R.w, R.h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
-  const off = [FL.org[0] - R.cam[0], FL.org[1] - R.cam[1], FL.org[2] - R.cam[2]]; const rad = 0.155;
+  const off = [FL.org[0] - R.cam[0], FL.org[1] - R.cam[1], FL.org[2] - R.cam[2]]; const rad = 0.13;
   gl.bindVertexArray(FL.vao); gl.disable(gl.CULL_FACE);
   const sphU = P => { gl.useProgram(P.p); gl.uniformMatrix4fv(P.u.u_view, false, R.view); gl.uniformMatrix4fv(P.u.u_proj, false, R.proj); gl.uniform3f(P.u.u_off, off[0], off[1], off[2]); gl.uniform1f(P.u.u_rad, rad);
     flBindTex(P, 'u_pos', 0, FL.pos[FL.cur]); flBindTex(P, 'u_vel', 1, FL.vel[FL.cur]); flBindTex(P, 'u_lam', 2, FL.lam); flBindTex(P, 'u_scl', 9, FL.scaleTex); flBindTex(P, 'u_depthCopy', 3, R.fbo.copy.depth);
@@ -633,13 +633,13 @@ function flSetStatic(w, x, y, z, liq, amt, placed) {
   const m = liqMeta(Math.min(8, amt), false, false) | (placed && liq === 1 ? LIQ_PLACED : 0);
   if (b !== id || w.getMeta(x, y, z) !== m) w.set(x, y, z, id, m);
 }
-// a octavos de líquido en la celda → partículas (4×4 por capa de 1/4 de bloque, de abajo arriba)
+// a octavos de líquido en la celda → partículas (FL_K×FL_K por capa, de abajo arriba)
 function flSpawnCell(w, x, y, z, a, phase, vx, vy, vz) {
-  const n = Math.min(FL_PPB, Math.round(a / 8 * FL_PPB)); const s = FL_S; let k = 0;
-  const order = []; for (let i = 0; i < 25; i++) order.push(i);
-  for (let layer = 0; layer < 5 && k < n; layer++) {
-    for (let i = 24; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; const t = order[i]; order[i] = order[j]; order[j] = t; }
-    for (let q = 0; q < 25 && k < n; q++, k++) { const gx = order[q] % 5, gz = (order[q] / 5) | 0; const jt = () => (Math.random() - 0.5) * 0.03;
+  const n = Math.min(FL_PPB, Math.round(a / 8 * FL_PPB)); const s = FL_S; let k = 0; const KK = FL_K * FL_K;
+  const order = []; for (let i = 0; i < KK; i++) order.push(i);
+  for (let layer = 0; layer < FL_K && k < n; layer++) {
+    for (let i = KK - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; const t = order[i]; order[i] = order[j]; order[j] = t; }
+    for (let q = 0; q < KK && k < n; q++, k++) { const gx = order[q] % FL_K, gz = (order[q] / FL_K) | 0; const jt = () => (Math.random() - 0.5) * 0.03;
       flSpawn(x + (gx + 0.5) * s + jt(), y + (layer + 0.5) * s + jt(), z + (gz + 0.5) * s + jt(), vx + jt() * 5, vy, vz + jt() * 5, phase); }
   }
   return k;

@@ -219,6 +219,7 @@ function markDirty(w, x, z, urgent) {
 }
 const NETBATCH = [];
 function onBlockSet(w, x, y, z, old, id, meta) {
+  if (old > 0 && REG[old].dynLog && !(id > 0 && REG[id].dynLog) && typeof dynOnRemoved === 'function') dynOnRemoved(w, x, y, z, old); // árbol dinámico: lo que queda suelto cae
   if (old === ID.bed && id !== ID.bed) for (const [dx, dz] of DIR4) { // la otra mitad de la cama se va con esta
     if (w.get(x + dx, y, z + dz) !== ID.bed) continue; const m = w.getMeta(x + dx, y, z + dz); const [fx, fz] = DIR4[m & 3]; const s = m & 4 ? -1 : 1;
     if (x + dx + fx * s === x && z + dz + fz * s === z) w.set(x + dx, y, z + dz, 0);
@@ -316,7 +317,8 @@ function worldBuilder(w) {
   return { set: (x, y, z, id, m) => w.set(x, y, z, id, m || 0), get: (x, y, z) => w.get(x, y, z), setIfAir: (x, y, z, id, m) => { const b = w.get(x, y, z); if (b === 0 || (b > 0 && REG[b].replace)) w.set(x, y, z, id, m || 0); }, setIfSolid: (x, y, z, id) => { const b = w.get(x, y, z); if (b > 0 && REG[b].solid) w.set(x, y, z, id); } };
 }
 function growSapling(w, x, y, z, b) {
-  const kind = REG[b].sapling; const S = worldBuilder(w); const r = Math.random; w.set(x, y, z, 0);
+  const kind = REG[b].sapling; if (typeof dynOn === 'function' && dynOn(w) && dynGrowFromSapling(w, x, y, z, kind)) return; // árbol dinámico: brote → árbol joven
+  const S = worldBuilder(w); const r = Math.random; w.set(x, y, z, 0);
   ({ oak: treeOak, birch: treeBirch, spruce: (S, x, y, z, r) => treeSpruce(S, x, y, z, r, false), jungle: treeJungle, acacia: treeAcacia, dark_oak: treeDarkOak, mangrove: treeMangrove, cherry: treeCherry })[kind](S, x, y, z, r);
 }
 function treeCherry(S, x, y, z, r) { const h = 5 + (r() * 2 | 0); for (let i = 0; i < h; i++) S.set(x, y + i, z, ID.cherry_log); leafBlob(S, x, y + h, z, 3, ID.cherry_leaves, r); }
@@ -326,6 +328,7 @@ function randomTicks(w, cx, cz) {
     const x = Math.random() * 16 | 0, z = Math.random() * 16 | 0, y = (s << 4) + (Math.random() * 16 | 0); if (y >= H) continue;
     const b = c.blocks[x | z << 4 | y << 8]; if (!b) continue; const wx = cx * 16 + x, wz = cz * 16 + z; const d = REG[b];
     if (d.sapling) { if (Math.random() < 0.15 && w.light(wx, y + 1, wz)[0] >= 9) growSapling(w, wx, y, wz, b); }
+    else if (d.dynLog) dynGrowTick(w, wx, y, wz, b);
     else if (d.crop) { const m = w.getMeta(wx, y, wz); if (m < 7 && Math.random() < 0.35 && w.light(wx, y, wz)[0] + w.light(wx, y, wz)[1] >= 9) w.set(wx, y, wz, b, m + 1); }
     else if (b === ID.grass_block) { const a = w.get(wx, y + 1, wz); if (a > 0 && T_FULL[a]) w.set(wx, y, wz, ID.dirt); else for (let i = 0; i < 2; i++) { const nx = wx + (Math.random() * 3 | 0) - 1, ny = y + (Math.random() * 3 | 0) - 1, nz = wz + (Math.random() * 3 | 0) - 1; if (w.get(nx, ny, nz) === ID.dirt && w.get(nx, ny + 1, nz) === 0 && w.light(nx, ny + 1, nz)[0] >= 9) w.set(nx, ny, nz, ID.grass_block); } }
     else if (d.leaves && !(w.getMeta(wx, y, wz) & 1)) { let found = false; for (let dx = -4; dx <= 4 && !found; dx++) for (let dy = -4; dy <= 4 && !found; dy++) for (let dz = -4; dz <= 4 && !found; dz++) { const o = w.get(wx + dx, y + dy, wz + dz); if (o > 0 && REG[o].log) found = true; } if (!found) { w.set(wx, y, wz, 0); dropBlockItems(w, wx, y, wz, b, null, true); } }
@@ -483,7 +486,7 @@ function furnaceTick() {
   }
 }
 // ------------------------------------------------------------ comandos
-function runCommand(cmd) {
+function runCommandBase(cmd) { // los comandos de siempre; runCommand (u_cmds.js) atiende antes /tp, /weather, /tick y /kill
   const a = cmd.trim().slice(1).split(/\s+/); const c = a[0].toLowerCase(); const p = G.player;
   const allowed = G.cheats !== false || (G.net && G.net.role === 'host');
   if (!allowed && c !== 'help' && c !== 'seed') return chatMsg('Los trucos no están activados en este mundo.', '#f88');

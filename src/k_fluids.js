@@ -229,7 +229,7 @@ function waterSurfaceAt(w, x, y, z) {
   return by + liquidSurface(w, bx, by, bz);
 }
 // ---- cubos con capacidad: 10 L (10000 ml) = un bloque de líquido; cada partícula del fluido continuo son 0,08 L
-const BUCKET_ML = 10000, ML_PER_PART = 80, ML_PER_EIGHTH = 1250; // un cubo (10 L) = un bloque = 125 partículas
+const BUCKET_ML = 10000, ML_PER_EIGHTH = 1250; const ML_PER_PART = BUCKET_ML / 216; // (216 = FL_PPB, que se define después) un cubo (10 L) = un bloque = 216 partículas
 function bucketLabel(s) { const d = s && REG[s.id]; if (!d || d.bucket === undefined || !d.bucket) return ''; return ' (' + (((s.ml ?? BUCKET_ML)) / 1000).toFixed(1) + ' L)'; }
 const BKT_ACC = new Map();
 // recoge hasta `room` ml del líquido que hay en una caja pequeña e invisible alrededor de donde apunta el jugador
@@ -246,7 +246,7 @@ function bucketCollect(w, p, dir, cont, room) {
   }
   if (!c || (cont && cont !== liq)) return { liq: cont, ml: 0 };
   if (!isStatic) { // partículas dentro de la caja (de la última lectura de la GPU)
-    const rb = FL.rb, o = rb.orgNow; if (!rb.ready) return { liq, ml: 0 }; const want = Math.min(15, Math.floor(room / ML_PER_PART)); let n = 0;
+    const rb = FL.rb, o = rb.orgNow; if (!rb.ready) return { liq, ml: 0 }; const want = Math.min(26, Math.floor(room / ML_PER_PART)); let n = 0;
     const bx = Math.floor(c[0]), by = Math.floor(c[1]), bz = Math.floor(c[2]);
     for (let dy = -1; dy <= 1 && n < want; dy++) for (let dz = -1; dz <= 1 && n < want; dz++) for (let dx = -1; dx <= 1 && n < want; dx++) {
       const cell = FL.occ.get(FLK(bx + dx, by + dy, bz + dz)); if (!cell) continue;
