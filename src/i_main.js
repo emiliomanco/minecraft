@@ -374,7 +374,7 @@ function gameFrame(dt) {
   if (typeof wdTick === 'function' && G.mode === 'game') wdTick(); // distancia a la costa para la dirección del oleaje
   if (typeof flUpdate === 'function') flUpdate(wdt, w); // fluido continuo (partículas en GPU)
   if (typeof flamerTick === 'function') flamerTick(w, wdt);
-  if (typeof rainPuddleTick === 'function') rainPuddleTick(w, wdt); // charcos de lluvia (partículas) // calor del lanzallamas y de los conductores: evapora el agua
+  if (typeof rainPuddleTick === 'function') rainPuddleTick(w, wdt); // la lluvia ya no crea partículas: evapora las gotas que quedaran // calor del lanzallamas y de los conductores: evapora el agua
   renderWorld(w, eye, yaw, pitch, {
     fov: G.fovCur, under, roll, bob, biome: w.biomeAt(Math.floor(p.x), Math.floor(p.z)),
     drawEntities: () => { drawAllEntities(p.dim, alphaW, perspective > 0 && G.gameMode !== 'spectator', perspective === 0 && G.gameMode !== 'spectator' && !p.ragdoll && !p.boat && !p.sleeping && !p.gliding && !p.spy); },

@@ -9810,18 +9810,44 @@ function flOceanFillTick() {
 // ---------------------------------------------------------------- lo que hacen las partículas (tras cada lectura)
 const FLK = (x, y, z) => ((x + 32768) * 65536 + (z + 32768)) * 512 + (y + 64);
 FL.frame = 0; FL.spawnFrame = null; FL.calm = new Map(); FL.acc2 = new Map(); FL.occ = new Map();
+// Partículas que entran en agua (o lava) quieta: se suman a ese líquido. El recuento es global por líquido (FL_PPB/8
+// partículas = 1/8 de bloque), no por celda: un cubo que se reparte entre muchas celdas de un lago antes se quedaba en
+// recuentos sueltos por debajo del octavo y desaparecía sin subir el nivel
+FL.absAcc = [0, 0, 0]; FL.absAt = [null, null, null];
 function flAbsorb(w, x, y, z, base, flag) {
-  const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z); const b = w.get(bx, by, bz);
+  const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z);
   const lavaP = base === 2; const into = flag === 1 ? 1 : 2; // líquido quieto en el que entró
-  if (b <= 0 || !REG[b] || (REG[b].liquid !== into && !(into === 1 && REG[b].inWater))) return;
-  if (into === 1 && (w.getMeta(bx, by, bz) & LIQ_OCEAN)) { if (lavaP) flQuenchAcc(w, bx, by, bz, true); return; } // el mar se lo traga
-  if (lavaP !== (into === 2)) { flQuenchAcc(w, bx, by, bz, lavaP); return; }
-  // sumar 1/8 de bloque cada 8 partículas, en lo más alto de la columna de ese líquido
-  const k = FLK(bx, by, bz); const v = (FL.acc2.get(k) || 0) + 1; if (v < FL_PPB / 8) { FL.acc2.set(k, v); return; } FL.acc2.set(k, v - FL_PPB / 8);
-  let ty = by; while (ty < by + 8 && w.get(bx, ty + 1, bz) === b) ty++;
-  const m = w.getMeta(bx, ty, bz); const a = liqAmt(m); const placed = (m & LIQ_PLACED) !== 0 || base === 3;
-  if (a < 8) flSetStatic(w, bx, ty, bz, into, a + 1, placed);
-  else if (cellVol(w, bx, ty + 1, bz, into) === 0) flSetStatic(w, bx, ty + 1, bz, into, 1, placed);
+  const isInto = b => b > 0 && REG[b] && (REG[b].liquid === into || (into === 1 && REG[b].inWater));
+  // la celda donde quedó (o una vecina, si la lectura llegó un poco desfasada)
+  let cx = bx, cy = by, cz = bz;
+  if (!isInto(w.get(cx, cy, cz))) { let f = false; for (const [dx, dy, dz] of [[0, -1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0]]) if (isInto(w.get(bx + dx, by + dy, bz + dz))) { cx = bx + dx; cy = by + dy; cz = bz + dz; f = true; break; }
+    if (!f) { flExitVol(w, bx, by, bz, base); return; } } // ya no hay líquido ahí: se guarda como volumen donde está
+  if (into === 1 && (w.getMeta(cx, cy, cz) & LIQ_OCEAN)) { if (lavaP) flQuenchAcc(w, cx, cy, cz, true); return; } // el mar se lo traga
+  if (lavaP !== (into === 2)) { flQuenchAcc(w, cx, cy, cz, lavaP); return; }
+  FL.absAt[into] = [w, cx, cy, cz]; FL.absAcc[into]++;
+  while (FL.absAcc[into] >= FL_PPB / 8) { const [ww, ax, ay, az] = FL.absAt[into]; if (!flAddOctave(ww, ax, ay, az, into)) break; FL.absAcc[into] -= FL_PPB / 8; }
+}
+// suma 1/8 al cuerpo de líquido de la celda: arriba de su columna, o en la columna de una vecina si esa está tapada
+function flAddOctave(w, x, y, z, liq) {
+  const id = liq === 1 ? ID.water : ID.lava;
+  const tryCol = (cx, cy, cz) => {
+    const b = w.get(cx, cy, cz); if (!(b > 0 && REG[b] && (REG[b].liquid === liq || (liq === 1 && REG[b].inWater)))) return false;
+    let ty = cy; while (ty < cy + 12) { const u = w.get(cx, ty + 1, cz); if (u > 0 && REG[u] && (REG[u].liquid === liq || (liq === 1 && REG[u].inWater))) ty++; else break; }
+    if (w.get(cx, ty, cz) === id) { const m = w.getMeta(cx, ty, cz); const a = liqAmt(m); if (a < 8) { flSetStatic(w, cx, ty, cz, liq, a + 1, (m & LIQ_PLACED) !== 0); return true; } }
+    if (cellVol(w, cx, ty + 1, cz, liq) === 0) { flSetStatic(w, cx, ty + 1, cz, liq, 1, (w.getMeta(cx, ty, cz) & LIQ_PLACED) !== 0); return true; }
+    return false;
+  };
+  if (tryCol(x, y, z)) return true;
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) if (tryCol(x + dx, y, z + dz)) return true;
+  return false;
+}
+// partícula que se guarda como volumen en su sitio (salió de la región o el líquido al que iba ya no está):
+// recuento global por líquido y el octavo va a la celda (o a la de encima si está llena)
+FL.exitAcc = [0, 0, 0];
+function flExitVol(w, bx, by, bz, base) {
+  const liq = base === 2 ? 2 : 1; if (++FL.exitAcc[liq] < FL_PPB / 8) return;
+  for (let k = 0; k < 4; k++) { const cv = cellVol(w, bx, by + k, bz, liq); if (cv >= 0 && cv < 8) { flSetStatic(w, bx, by + k, bz, liq, cv + 1, base === 3); FL.exitAcc[liq] -= FL_PPB / 8; return; } if (cv < 0) break; }
+  // sin sitio: el recuento se conserva y se reintenta con la siguiente partícula
 }
 // celdas de aire ya llenas de partículas: en la textura de vóxeles valen 50 (para chocar siguen siendo aire), así el
 // shader no manda más líquido hacia un hueco que ya está lleno (la búsqueda de "lo más bajo" las ve como suelo)
@@ -9852,10 +9878,7 @@ function flAfterReadback() {
     const flag = Math.floor(pw / 10 + 1e-4); const base = Math.round(pw - flag * 10);
     const x = P[k4] + o[0], y = P[k4 + 1] + o[1], z = P[k4 + 2] + o[2];
     if (flag === 1 || flag === 2) { flAbsorb(w, x, y, z, base, flag); flKill(i); if (flag === 1 && Math.random() < 0.3 && typeof ripImpulse === 'function') { const sp = Math.hypot(V[k4], V[k4 + 1], V[k4 + 2]); ripImpulse(x, z, 0.3 + sp * 0.04, Math.min(1.4, 0.15 + sp * 0.18)); } continue; }
-    if (flag >= 3) { // salió de la región: guardarla como volumen donde esté (cada 8, un octavo)
-      const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z); const liq = base === 2 ? 2 : 1; const k = FLK(bx, by, bz) + 0.25; const v = (FL.acc2.get(k) || 0) + 1;
-      if (v >= FL_PPB / 8) { FL.acc2.set(k, v - FL_PPB / 8); const cv = cellVol(w, bx, by, bz, liq); if (cv >= 0 && cv < 8) flSetStatic(w, bx, by, bz, liq, cv + 1, base === 3); } else FL.acc2.set(k, v);
-      flKill(i); continue; }
+    if (flag >= 3) { flExitVol(w, Math.floor(x), Math.floor(y), Math.floor(z), base); flKill(i); continue; } // salió de la región: guardarla como volumen donde esté
     const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z); const key = FLK(bx, by, bz);
     let c = occ.get(key); if (!c) { c = { x: bx, y: by, z: bz, nw: 0, nl: 0, np: 0, top: -1e9, vx: 0, vy: 0, vz: 0, vmax: 0, idx: [] }; occ.set(key, c); }
     const vx = V[k4], vy = V[k4 + 1], vz = V[k4 + 2]; const sp = Math.hypot(vx, vy, vz);
@@ -9988,43 +10011,15 @@ function flBucketTake(w, ox, oy, oz, d, maxT) {
   }
   return 0;
 }
-// ---------------------------------------------------------------- charcos de lluvia
-// Con lluvia, en los huecos del suelo que ven el cielo (cerca del jugador) y en algunas manchas del suelo llano van
-// cayendo partículas de agua que forman charcos; cuando deja de llover se evaporan poco a poco (no dependen de
-// /gamerule doWaterDespawn: es agua de lluvia). Solo con el fluido continuo activo.
-const RAINP = { sites: [], siteT: 0, n: 0, countT: 0, acc: 0 };
-function rainSurf(w, x, z, y0) { // bloque sólido más alto bajo el cielo abierto en la columna (o NaN)
-  for (let y = y0 + 16; y > y0 - 14; y--) { const b = w.get(x, y, z); if (b === 0) continue; const d = b > 0 ? REG[b] : null; if (!d || d.liquid || !d.solid || d.leaves || !T_FULL[b]) return NaN; return w.light(x, y + 1, z)[0] >= 15 ? y : NaN; }
-  return NaN;
-}
+// ---------------------------------------------------------------- lluvia
+// La lluvia ya no crea partículas (los charcos de partículas se veían mal e inundaban todo); solo moja el suelo (G.wet).
+// Las gotas de lluvia que pudieran quedar marcadas se evaporan poco a poco, encogiéndose.
+const RAINP = { n: 0, countT: 0, acc: 0 };
 function rainPuddleTick(w, dt) {
-  if (!dt || !FL.rainTag || w.dim !== 'overworld' || !flCanSim(w)) return;
-  const p = G.player; const rl = G.rainLevel || 0; const px = Math.floor(p.x), py = Math.floor(p.y), pz = Math.floor(p.z);
-  // cuántas hay (cada 2 s)
+  if (!dt || !FL.rainTag || !flCanSim(w)) return;
   if ((RAINP.countT -= dt) <= 0) { RAINP.countT = 2; let n = 0; for (let i = 0; i < FL.hi; i++) if (FL.rainTag[i]) n++; RAINP.n = n; }
-  if (rl < 0.15) { // sin lluvia: se evaporan (un 2,5 % por segundo, encogiéndose)
-    if (!RAINP.n) return; RAINP.acc += dt * 0.025 * RAINP.n; let k = Math.floor(RAINP.acc); if (k <= 0) return; RAINP.acc -= k; const now = (G.wclock ?? performance.now() / 1000) * 1000;
-    for (let i = 0; i < FL.hi && k > 0; i++) if (FL.rainTag[i] && FL.phase[i] && !FL.dying.has(i)) { FL.dying.set(i, now); FL.rainTag[i] = 0; RAINP.n--; k--; }
-    return;
-  }
-  // sitios para charcos (cada 2 s): huecos (dos o más vecinos más altos) y manchas fijas del suelo llano
-  if ((RAINP.siteT -= dt) <= 0) { RAINP.siteT = 2; const out = [];
-    for (let t = 0; t < 70 && out.length < 24; t++) {
-      const x = px + ((Math.random() * 29) | 0) - 14, z = pz + ((Math.random() * 29) | 0) - 14; const y = rainSurf(w, x, z, py); if (y !== y) continue;
-      if (!flCanSim(w, x, y + 1, z)) continue; const bio = BIOMES[w.biomeAt(x, z)]; if (!bio || bio.snow || bio.id === BI.desert || bio.id === BI.savanna) continue;
-      let hi = 0, lo = 0; for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const b = w.get(x + dx, y + 1, z + dz); if (b > 0 && REG[b].solid) hi++; else if (rainSurf(w, x + dx, z + dz, py) < y) lo++; }
-      if (lo > 0) continue; // el agua se escurriría
-      if (hi >= 2 || (hashStr(x + ':' + z) % 19) === 0) out.push([x, y + 1, z]);
-    }
-    if (out.length) RAINP.sites = out.concat(RAINP.sites.filter(s => Math.abs(s[0] - px) < 16 && Math.abs(s[2] - pz) < 16)).slice(0, 32);
-  }
-  if (!RAINP.sites.length || RAINP.n > 9000 || flFree() < 20000) return;
-  // gotas que caen en los sitios (hasta unas 150 por charco)
-  RAINP.acc += dt * rl * 260; let k = Math.floor(RAINP.acc); RAINP.acc -= k;
-  while (k-- > 0) {
-    const s = RAINP.sites[(Math.random() * RAINP.sites.length) | 0]; const c = FL.occ.get(FLK(s[0], s[1], s[2])); if (c && c.idx.length > 150) continue;
-    const i = flSpawn(s[0] + 0.12 + Math.random() * 0.76, s[1] + 0.08 + Math.random() * 0.25, s[2] + 0.12 + Math.random() * 0.76, 0, -2, 0, 1); if (i < 0) break; FL.rainTag[i] = 1; RAINP.n++;
-  }
+  if (!RAINP.n) return; RAINP.acc += dt * 0.1 * RAINP.n; let k = Math.floor(RAINP.acc); if (k <= 0) return; RAINP.acc -= k; const now = (G.wclock ?? performance.now() / 1000) * 1000;
+  for (let i = 0; i < FL.hi && k > 0; i++) if (FL.rainTag[i] && FL.phase[i] && !FL.dying.has(i)) { FL.dying.set(i, now); FL.rainTag[i] = 0; RAINP.n--; k--; }
 }
 
 
@@ -11400,7 +11395,7 @@ function gameFrame(dt) {
   if (typeof wdTick === 'function' && G.mode === 'game') wdTick(); // distancia a la costa para la dirección del oleaje
   if (typeof flUpdate === 'function') flUpdate(wdt, w); // fluido continuo (partículas en GPU)
   if (typeof flamerTick === 'function') flamerTick(w, wdt);
-  if (typeof rainPuddleTick === 'function') rainPuddleTick(w, wdt); // charcos de lluvia (partículas) // calor del lanzallamas y de los conductores: evapora el agua
+  if (typeof rainPuddleTick === 'function') rainPuddleTick(w, wdt); // la lluvia ya no crea partículas: evapora las gotas que quedaran // calor del lanzallamas y de los conductores: evapora el agua
   renderWorld(w, eye, yaw, pitch, {
     fov: G.fovCur, under, roll, bob, biome: w.biomeAt(Math.floor(p.x), Math.floor(p.z)),
     drawEntities: () => { drawAllEntities(p.dim, alphaW, perspective > 0 && G.gameMode !== 'spectator', perspective === 0 && G.gameMode !== 'spectator' && !p.ragdoll && !p.boat && !p.sleeping && !p.gliding && !p.spy); },
