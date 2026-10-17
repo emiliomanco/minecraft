@@ -72,9 +72,8 @@ function skinBind(P) {
   if (SKIN.upVer !== SKIN.ver) {
     SKIN.upVer = SKIN.ver; gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, SKIN.W, SKIN.H, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(SKIN.data.buffer));
-    gl.generateMipmap(gl.TEXTURE_2D);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST_MIPMAP_NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, 2); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); // sin mipmaps: las regiones van pegadas y se mezclaban de lejos
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, 0); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   }
   if (P && P.u.u_skin) gl.uniform1i(P.u.u_skin, 13);
   gl.activeTexture(gl.TEXTURE0);

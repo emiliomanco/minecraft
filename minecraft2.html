@@ -1370,6 +1370,58 @@ for (const [c, , , wc, tc] of DYE16) {
 }
 TEXGEN.terracotta = p => { const n = tnoise(hashStr('terracotta') + 1, 4); for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, stepTone([152, 94, 67], n(x, y) * 0.4 + p.r() * 0.6, 4, 0.9, 1.07)); };
 
+// ---- iconos de objetos renovados (esferas con luz y contorno, montoncitos de polvo, piezas dibujadas a mano)
+function orbIcon(p, cx, cy, r, c, o = {}) {
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    const dx = (x + 0.5 - cx) / r, dy = (y + 0.5 - cy) / (r * (o.sy || 1)); const d2 = dx * dx + dy * dy; if (d2 > 1) continue;
+    const nz = Math.sqrt(1 - d2); const l = Math.max(0, -dx * 0.5 - dy * 0.6 + nz * 0.65); p.set(x, y, stepTone(c, l / 1.1 + (d2 > 0.75 ? -0.15 : 0), 5, 0.55, 1.22));
+  }
+  if (o.hl !== false) { const hx = Math.floor(cx - r * 0.45), hy = Math.floor(cy - r * 0.5 * (o.sy || 1)); p.set(hx, hy, o.hlc || [255, 255, 255]); if (r > 4) p.set(hx + 1, hy, (o.hlc || [255, 255, 255]).map(v => v * 0.85 + c[0] * 0)); }
+}
+function dustIcon(p, c, c2, light) {
+  for (let y = 5; y < 15; y++) for (let x = 1; x < 15; x++) { const dx = (x + 0.5 - 8) / 6.5, dy = (y + 0.5 - 14.5) / 9; if (dx * dx + dy * dy > 1) continue; const dens = 1 - (dx * dx + dy * dy); if (p.r() > 0.35 + dens * 0.6) continue; const r = p.r(); p.set(x, y, r < 0.18 && light ? light : r < 0.6 ? c : c2); }
+  outline(p);
+}
+function mapIcon(p, rows, pal) { rows.forEach((row, y) => { for (let x = 0; x < row.length; x++) { const c = row[x] === '#' ? [24, 22, 26] : pal[row[x]]; if (c) p.set(x, y, c); } }); }
+const LUMP = ['', '', '.....####.......', '....#bbaa##.....', '...#bbaaaaa#....', '...#baaacaa##...', '..#baaaccaaac#..', '..#baacccaacc#..', '..#aaaccaaacc#..', '...#aacaaaacc#..', '...#acaaaccc#...', '....#acccc##....', '.....#####......'];
+const lump = (p, a, b, c) => mapIcon(p, LUMP, { a, b, c });
+const SHARD = ['', '..........##....', '.........#bb#...', '........#bba#...', '.......#bbaa#...', '......#bbaac#...', '.....#bbaacc#...', '....#bbaacc#....', '....#baacc#.....', '...#baacc#......', '...#bacc#.......', '..#bacc#........', '..#acc#.........', '..#cc#..........', '...##...........'];
+Object.assign(TEXGEN, {
+  ender_pearl: p => { orbIcon(p, 8, 8, 6, [24, 94, 84]); for (let a = 0; a < 5.2; a += 0.35) { const x = Math.round(8 + Math.cos(a) * 3.4), y = Math.round(8 + Math.sin(a) * 3.4); p.set(x, y, [70, 168, 148]); } p.set(8, 8, [10, 44, 40]); p.set(7, 8, [14, 56, 50]); outline(p); },
+  eye_of_ender: p => { orbIcon(p, 8, 8, 6, [58, 128, 72], { hl: false }); for (let a = 0; a < 6.3; a += 0.3) p.set(Math.round(8 + Math.cos(a) * 3), Math.round(8 + Math.sin(a) * 3), [150, 214, 120]); p.rect(7, 6, 8, 10, [18, 34, 22]); p.set(7, 5, [40, 70, 44]); p.set(8, 11, [40, 70, 44]); p.set(5, 4, [235, 255, 235]); outline(p); },
+  snowball: p => { orbIcon(p, 8, 8.5, 5.5, [226, 238, 250], { hlc: [255, 255, 255] }); outline(p); },
+  slime_ball: p => { orbIcon(p, 8, 8.5, 5.5, [104, 188, 88]); p.rect(7, 8, 8, 9, [150, 226, 132]); outline(p); },
+  magma_cream: p => { orbIcon(p, 8, 8.5, 5.5, [190, 82, 26]); for (let i = 0; i < 6; i++) p.set(5 + ((p.r() * 7) | 0), 6 + ((p.r() * 6) | 0), [255, 200, 70]); outline(p); },
+  heart_of_the_sea: p => { orbIcon(p, 8, 8, 6, [32, 98, 182]); for (let a = 0; a < 6.3; a += 0.4) p.set(Math.round(8 + Math.cos(a) * 3.6), Math.round(8 + Math.sin(a) * 3.6), [116, 196, 232]); p.rect(7, 7, 8, 8, [190, 240, 255]); outline(p); },
+  spider_eye: p => { orbIcon(p, 8, 8.5, 5.5, [150, 30, 46], { sy: 1.1 }); p.rect(7, 7, 8, 9, [30, 8, 12]); p.set(9, 7, [255, 220, 220]); p.set(4, 9, [200, 60, 70]); p.set(12, 10, [200, 60, 70]); outline(p); },
+  fermented_spider_eye: p => { orbIcon(p, 8, 10, 5, [110, 44, 60], { sy: 1.0 }); p.rect(7, 9, 8, 10, [30, 10, 14]); for (let x = 3; x < 13; x++) { const h = 2 + Math.round(Math.sin((x - 3) / 9 * Math.PI) * 2.5); for (let y = 6 - h; y < 6; y++) p.set(x, y, y === 6 - h ? [196, 150, 110] : [150, 108, 74]); } outline(p); },
+  clay_ball: p => { orbIcon(p, 8, 9, 5, [160, 166, 180]); outline(p); },
+  ink_sac: p => { orbIcon(p, 8, 9.5, 5, [40, 40, 52], { sy: 1.0 }); p.rect(7, 3, 8, 5, [56, 56, 70]); outline(p); },
+  glow_ink_sac: p => { orbIcon(p, 8, 9.5, 5, [40, 150, 140]); p.rect(7, 3, 8, 5, [60, 190, 170]); p.set(8, 10, [180, 255, 240]); outline(p); },
+  ghast_tear: p => { orbIcon(p, 8, 10, 4.5, [196, 226, 240]); for (let y = 3; y < 7; y++) { const w = y < 5 ? 0 : 1; for (let x = 8 - w; x <= 8 + w; x++) p.set(x, y, [214, 238, 250]); } outline(p); },
+  gunpowder: p => dustIcon(p, [96, 96, 98], [62, 62, 64], [140, 140, 142]),
+  glowstone_dust: p => dustIcon(p, [246, 206, 90], [196, 148, 40], [255, 246, 190]),
+  redstone: p => dustIcon(p, [204, 22, 18], [122, 4, 4], [255, 90, 70]),
+  sugar: p => dustIcon(p, [244, 244, 246], [206, 206, 214], [255, 255, 255]),
+  blaze_powder: p => dustIcon(p, [250, 180, 40], [216, 96, 20], [255, 236, 120]),
+  bone_meal: p => dustIcon(p, [240, 236, 224], [198, 194, 182], [255, 255, 250]),
+  coal: p => lump(p, [48, 48, 50], [86, 86, 90], [26, 26, 28]), charcoal: p => lump(p, [64, 48, 38], [100, 80, 62], [36, 26, 20]),
+  flint: p => lump(p, [74, 72, 72], [130, 128, 126], [40, 38, 38]), netherite_scrap: p => lump(p, [92, 70, 64], [128, 104, 96], [58, 42, 38]),
+  raw_iron: p => lump(p, [202, 166, 136], [232, 204, 180], [150, 116, 92]), raw_gold: p => lump(p, [236, 196, 60], [255, 238, 140], [184, 132, 30]), raw_copper: p => lump(p, [206, 118, 82], [236, 160, 124], [150, 76, 50]),
+  amethyst_shard: p => mapIcon(p, SHARD, { a: [160, 110, 220], b: [216, 178, 255], c: [104, 62, 160] }),
+  prismarine_shard: p => mapIcon(p, SHARD, { a: [96, 170, 156], b: [160, 220, 206], c: [56, 110, 100] }),
+  echo_shard: p => mapIcon(p, SHARD, { a: [20, 70, 84], b: [80, 210, 220], c: [10, 36, 44] }),
+  gold_nugget: p => { orbIcon(p, 6.5, 9.5, 2.6, [246, 206, 60]); orbIcon(p, 10, 7.5, 2.4, [246, 206, 60]); orbIcon(p, 9.5, 11, 2, [230, 186, 50], { hl: false }); outline(p); },
+  iron_nugget: p => { orbIcon(p, 6.5, 9.5, 2.6, [212, 212, 214]); orbIcon(p, 10, 7.5, 2.4, [212, 212, 214]); orbIcon(p, 9.5, 11, 2, [190, 190, 194], { hl: false }); outline(p); },
+  feather: p => mapIcon(p, ['..........####..', '.........#bbbb#.', '........#bbaab#.', '.......#bbaaac#.', '......#bbaaac#..', '.....#bbaaac#...', '....#bbaaac#....', '...#bbaaac#.....', '...#baaac#......', '..#baaac#.......', '..#bacc#........', '..#ccc#.........', '.#h##...........', '#h#.............', '##..............', '................'], { a: [226, 226, 232], b: [255, 255, 255], c: [180, 180, 192], h: [150, 140, 120] }),
+  bone: p => mapIcon(p, ['................', '..........##....', '.........#bb#...', '.........#bab##.', '........##baab#.', '.......#baaa##..', '......#baa#.....', '.....#baa#......', '....#baa#.......', '..##baa#........', '.#baaab#........', '.#bab##.........', '..#bb#..........', '...##...........', '................', '................'], { a: [226, 222, 206], b: [250, 248, 236], c: [180, 176, 160] }),
+  string: p => { const pts = [[3, 12], [4, 11], [5, 11], [6, 10], [6, 9], [5, 8], [5, 7], [6, 6], [7, 5], [8, 5], [9, 6], [9, 7], [8, 8], [9, 9], [10, 9], [11, 8], [12, 7], [12, 6], [12, 5]]; for (const [x, y] of pts) p.set(x, y, [236, 236, 240]); p.set(4, 12, [200, 200, 206]); p.set(11, 5, [200, 200, 206]); outline(p); },
+  leather: p => mapIcon(p, ['', '', '...###....###...', '..#baa####aac#..', '..#baaaaaaaac#..', '...#baaaaaac#...', '...#baaaaaac#...', '..#baaaaaaaac#..', '..#baaaaaaaacc#.', '..#baaaaaaaacc#.', '...#aaaccaacc#..', '...##cc##ccc#...', '.....##..###....'], { a: [150, 88, 52], b: [190, 124, 80], c: [104, 58, 32] }),
+  rotten_flesh: p => mapIcon(p, ['', '', '.....####.......', '....#gaab##.....', '...#gaaaagab#...', '..#aaggaaaaab#..', '..#aagaaaggaa#..', '..#gaaaagaaac#..', '...#aaaaaagcc#..', '...#agaaaaacc#..', '....#acggacc#...', '.....##cccc#....', '.......####.....'], { a: [150, 70, 60], b: [196, 110, 96], c: [100, 44, 38], g: [96, 128, 60] }),
+  paper: p => mapIcon(p, ['', '...##########...', '...#aaaaaaab#...', '...#accccccb#...', '...#aaaaaaab#...', '...#acccccab#...', '...#aaaaaaab#...', '...#accccccb#...', '...#aaaaaaab#...', '...#acccccab#...', '...#aaaaaaab#...', '...#accccaab#...', '...#aaaaaab##...', '...#aaaaaab#....', '...########.....'], { a: [244, 244, 236], b: [210, 210, 200], c: [196, 196, 210] }),
+  book: p => mapIcon(p, ['', '...##########...', '..#bbaaaaaaaa#..', '..#baaaaaaaaa#..', '..#baaddddaaa#..', '..#baaaaaaaaa#..', '..#baaaaaaaaa#..', '..#baaaaaaaaa#..', '..#baaaaaaaaa#..', '..#baaaaaaaaa#..', '..#bccccccccc#..', '..#pppppppppp#..', '..#cccccccccc#..', '...##########...'], { a: [120, 54, 40], b: [160, 80, 60], c: [80, 34, 26], d: [214, 180, 90], p: [240, 236, 220] }),
+  bread: p => mapIcon(p, ['', '', '', '', '.....######.....', '...##bbbbbba##..', '..#bbaabaabaac#.', '.#baacaacaacacc#', '.#baaaaaaaaaacc#', '.#aaaaaaaaaaacc#', '..#aaaaaaaaccc#.', '...##cccccccc#..', '.....#######....'], { a: [196, 136, 62], b: [226, 176, 96], c: [150, 96, 40] })
+});
 
 // ===== c_world.js
 // ============================================================================
@@ -5424,9 +5476,8 @@ function skinBind(P) {
   if (SKIN.upVer !== SKIN.ver) {
     SKIN.upVer = SKIN.ver; gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, SKIN.W, SKIN.H, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(SKIN.data.buffer));
-    gl.generateMipmap(gl.TEXTURE_2D);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST_MIPMAP_NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, 2); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); // sin mipmaps: las regiones van pegadas y se mezclaban de lejos
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, 0); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   }
   if (P && P.u.u_skin) gl.uniform1i(P.u.u_skin, 13);
   gl.activeTexture(gl.TEXTURE0);
@@ -5462,6 +5513,9 @@ function skHair(P, x, y, w, h, f, c, front = 2, side = 3) { if (f === 2) P.rect(
 const skBand = (c, y0, n) => (P, x, y, w) => P.rect(x, y + y0, w, n, c, 6);                       // franja horizontal
 const skBottom = (c, n) => (P, x, y, w, h) => P.rect(x, y + h - n, w, n, c, 6);                    // pezuñas, zapatos
 const skDots = (c, n, size = 2) => (P, x, y, w, h) => P.blot(x, y, w, h, c, n, size);
+// ruido suave por celdas (para manchas y mechones): f(i, j) en 0..1
+function skNoise(seed, cell) { const h = (i, j) => (hashStr(seed + ':' + i + ',' + j) % 1000) / 1000, sm = t => t * t * (3 - 2 * t);
+  return (x, y) => { const fx = x / cell, fy = y / cell, i = Math.floor(fx), j = Math.floor(fy), tx = sm(fx - i), ty = sm(fy - j); const a = h(i, j) + (h(i + 1, j) - h(i, j)) * tx, b = h(i, j + 1) + (h(i + 1, j + 1) - h(i, j + 1)) * tx; return a + (b - a) * ty; }; }
 function skMouth(P, x, y, w, row, c, mw = 4) { P.rect(x + Math.floor((w - mw) / 2), row, mw, 1, c); }
 function skHumanoid(name, o) {
   const P = new SkinP(name, o.sw || 64, o.shh || 64);
@@ -5617,31 +5671,34 @@ function skinModels() {
       ...P.same([4, 6, 4], [[[3, 6, -5], [-2, -6, -2], 'legFR'], [[-3, 6, -5], [-2, -6, -2], 'legFL'], [[3, 6, 6], [-2, -6, -2], 'legBR'], [[-3, 6, 6], [-2, -6, -2], 'legBL']], { base: pink, v: 6, sides: skBottom(hoof, 1), bottom: hoof })
     ];
   }
-  // ------------------------------------------------------------ vaca
+  // ------------------------------------------------------------ vaca (manchas blancas irregulares, hocico claro, patas con calcetín)
   {
-    const brown = [70, 50, 38], white = [232, 230, 224], hoof = [56, 46, 40];
+    const brown = [62, 45, 35], white = [234, 232, 226], hoof = [58, 50, 46], muzzle = [226, 212, 204];
     const P = new SkinP('cow');
-    const patches = (P, x, y, w, h) => { for (let i = 0; i < Math.max(1, (w * h / 40) | 0); i++) { const cx = x + P.r() * w, cy = y + P.r() * h, r = 1.5 + P.r() * 2.5; for (let j = -4; j <= 4; j++) for (let k = -4; k <= 4; k++) if (j * j + k * k < r * r && cx + k >= x && cx + k < x + w && cy + j >= y && cy + j < y + h) P.set(cx + k, cy + j, white); } };
+    const patches = (P, x, y, w, h, f) => { const n = skNoise('cow' + f, 4); for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) { const v = n(i, j); if (v > 0.6) P.set(x + i, y + j, mix3(white, [214, 212, 206], P.r() * 0.4)); else if (v > 0.56) P.set(x + i, y + j, mix3(brown, white, 0.25)); } };
     M.cow = [
-      P.bp([12, 10, 18], [0, 12, 0], [-6, 0, -9], null, 'body', { base: brown, v: 8, all: patches }),
-      P.bp([4, 1, 6], [0, 12, 0], [-2, -1, 3], null, 'body', { base: [236, 170, 170], v: 4 }),
-      P.bp([8, 8, 6], [0, 20, -9], [-4, -4, -6], null, 'head', { base: brown, v: 8, front: (P, x, y, w, h) => { P.rect(x + 2, y, 4, h, white, 5); P.set(x + 1, y + 3, SKC.black); P.set(x + 6, y + 3, SKC.black); P.rect(x + 2, y + 5, 4, 3, [210, 150, 140], 4); P.set(x + 2, y + 6, [120, 70, 70]); P.set(x + 5, y + 6, [120, 70, 70]); } }),
-      ...P.same([1, 3, 1], [[[0, 20, -9], [4, 3, -5], 'head'], [[0, 20, -9], [-5, 3, -5], 'head']], { base: [214, 204, 180], v: 6 }),
-      ...P.same([4, 12, 4], [[[4, 12, -6], [-2, -12, -2], 'legFR'], [[-4, 12, -6], [-2, -12, -2], 'legFL'], [[4, 12, 7], [-2, -12, -2], 'legBR'], [[-4, 12, 7], [-2, -12, -2], 'legBL']], { base: brown, v: 8, sides: (P, x, y, w, h) => { P.rect(x, y + 3, w, 4, white, 6); P.rect(x, y + h - 2, w, 2, hoof); }, bottom: hoof })
+      P.bp([12, 10, 18], [0, 12, 0], [-6, 0, -9], null, 'body', { base: brown, v: 5, all: (P, x, y, w, h, f) => { if (f !== 3) patches(P, x, y, w, h, f); } }),
+      P.bp([4, 2, 5], [0, 12, 0], [-2, -2, 3], null, 'body', { base: [234, 168, 168], v: 4, bottom: (P, x, y, w, h) => { P.set(x, y + 1, [214, 140, 140]); P.set(x + 3, y + 1, [214, 140, 140]); P.set(x, y + 3, [214, 140, 140]); P.set(x + 3, y + 3, [214, 140, 140]); } }),
+      P.bp([8, 8, 6], [0, 20, -9], [-4, -4, -6], null, 'head', { base: brown, v: 5, top: (P, x, y, w) => P.rect(x + 3, y, 2, 3, white, 4), front: (P, x, y, w, h) => {
+        P.rect(x + 3, y, 2, 2, white, 4); P.rect(x + 2, y + 2, 4, 3, white, 4); P.rect(x + 1, y + 5, 6, 3, muzzle, 4);
+        P.set(x + 2, y + 6, [150, 104, 100]); P.set(x + 5, y + 6, [150, 104, 100]); P.rect(x + 3, y + 7, 2, 1, [196, 160, 150]);
+        P.set(x + 1, y + 3, SKC.black); P.set(x + 6, y + 3, SKC.black); P.set(x + 1, y + 2, [40, 30, 24]); P.set(x + 6, y + 2, [40, 30, 24]); } }),
+      ...P.same([1, 3, 1], [[[0, 20, -9], [4, 3, -5], 'head'], [[0, 20, -9], [-5, 3, -5], 'head']], { base: [222, 214, 196], v: 4, top: [150, 140, 120], sides: (P, x, y) => P.set(x, y, [170, 160, 140]) }),
+      ...P.same([4, 12, 4], [[[4, 12, -6], [-2, -12, -2], 'legFR'], [[-4, 12, -6], [-2, -12, -2], 'legFL'], [[4, 12, 7], [-2, -12, -2], 'legBR'], [[-4, 12, 7], [-2, -12, -2], 'legBL']], { base: brown, v: 5, sides: (P, x, y, w, h) => { P.rect(x, y + 6, w, 4, white, 4); P.rect(x, y + h - 2, w, 2, hoof, 3); }, bottom: hoof })
     ];
   }
-  // ------------------------------------------------------------ oveja (la lana se tiñe y desaparece al esquilarla)
+  // ------------------------------------------------------------ oveja (lana suave que se tiñe y desaparece al esquilarla; la cara asoma de la lana)
   {
-    const face = [222, 194, 170], wool = [236, 236, 232];
+    const face = [218, 186, 166], wool = [236, 236, 232], skin = [222, 198, 180];
     const P = new SkinP('sheep', 128, 64);
-    const fluff = (P, x, y, w, h) => { P.speck(x, y, w, h, [214, 214, 210], (w * h / 6) | 0); P.speck(x, y, w, h, [250, 250, 248], (w * h / 10) | 0); };
+    const fluff = (P, x, y, w, h, f) => { const n = skNoise('wool' + f + w, 3); for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) { const v = n(i, j) + (P.r() - 0.5) * 0.18; P.set(x + i, y + j, v > 0.66 ? [247, 247, 245] : v < 0.32 ? [220, 220, 216] : [236, 236, 232]); } };
     M.sheep = [
-      P.bp([8, 6, 14], [0, 12, 0], [-4, 0, -7], null, 'body', { base: face, v: 6 }),
-      P.bp([11, 9, 17], [0, 12, 0], [-5.5, -1.5, -8.5], null, 'body', { base: wool, v: 6, all: fluff }, 0, { wool: true }),
-      P.bp([6, 6, 8], [0, 18, -7], [-3, -2, -6], null, 'head', { base: face, v: 5, front: (P, x, y) => { P.set(x + 1, y + 2, SKC.white); P.set(x + 2, y + 2, SKC.black); P.set(x + 3, y + 2, SKC.black); P.set(x + 4, y + 2, SKC.white); P.rect(x + 2, y + 4, 2, 1, [200, 140, 130]); } }),
-      P.bp([7, 4, 6], [0, 18, -7], [-3.5, 1, -4.5], null, 'head', { base: wool, v: 6, all: fluff }, 0, { wool: true }),
-      ...P.same([4, 12, 4], [[[3, 12, -5], [-2, -12, -2], 'legFR'], [[-3, 12, -5], [-2, -12, -2], 'legFL'], [[3, 12, 5], [-2, -12, -2], 'legBR'], [[-3, 12, 5], [-2, -12, -2], 'legBL']], { base: face, v: 6, sides: skBottom([120, 96, 80], 1) }),
-      ...P.same([5, 5, 5], [[[3, 12, -5], [-2.5, -5, -2.5], 'legFR', 0, { wool: true }], [[-3, 12, -5], [-2.5, -5, -2.5], 'legFL', 0, { wool: true }], [[3, 12, 5], [-2.5, -5, -2.5], 'legBR', 0, { wool: true }], [[-3, 12, 5], [-2.5, -5, -2.5], 'legBL', 0, { wool: true }]], { base: wool, v: 6, all: fluff })
+      P.bp([8, 6, 14], [0, 12, 0], [-4, 0, -7], null, 'body', { base: skin, v: 5, all: (P, x, y, w, h) => P.speck(x, y, w, h, [236, 236, 230], (w * h / 12) | 0) }),
+      P.bp([11, 9, 17], [0, 12, 0], [-5.5, -1.5, -8.5], null, 'body', { all: fluff }, 0, { wool: true }),
+      P.bp([6, 6, 8], [0, 18, -7], [-3, -2, -6], null, 'head', { base: face, v: 4, front: (P, x, y) => { P.set(x, y + 2, SKC.white); P.set(x + 1, y + 2, [24, 22, 22]); P.set(x + 4, y + 2, [24, 22, 22]); P.set(x + 5, y + 2, SKC.white); P.rect(x + 2, y + 4, 2, 1, [212, 146, 146]); P.rect(x + 2, y + 5, 2, 1, shd(face, 0.86)); P.rect(x + 1, y, 4, 1, shd(face, 0.94)); } }),
+      P.bp([7, 7, 7], [0, 18, -7], [-3.5, -2.5, -4.5], null, 'head', { all: fluff }, 0, { wool: true }),
+      ...P.same([4, 12, 4], [[[3, 12, -5], [-2, -12, -2], 'legFR'], [[-3, 12, -5], [-2, -12, -2], 'legFL'], [[3, 12, 5], [-2, -12, -2], 'legBR'], [[-3, 12, 5], [-2, -12, -2], 'legBL']], { base: face, v: 4, sides: skBottom([128, 104, 88], 1), bottom: [128, 104, 88] }),
+      ...P.same([5, 6, 5], [[[3, 12, -5], [-2.5, -6, -2.5], 'legFR', 0, { wool: true }], [[-3, 12, -5], [-2.5, -6, -2.5], 'legFL', 0, { wool: true }], [[3, 12, 5], [-2.5, -6, -2.5], 'legBR', 0, { wool: true }], [[-3, 12, 5], [-2.5, -6, -2.5], 'legBL', 0, { wool: true }]], { all: fluff })
     ];
   }
   // ------------------------------------------------------------ cabra
@@ -5894,12 +5951,14 @@ function playerArmorParts(e) {
   if (mats[3]) { overlay.push(Object.assign({}, base[4], { s: [4.8, 4.5, 4.8], o: [-2.4, -12.2, -2.4], t: L(mats[3]) })); overlay.push(Object.assign({}, base[5], { s: [4.8, 4.5, 4.8], o: [-2.4, -12.2, -2.4], t: L(mats[3]) })); }
   return overlay;
 }
-function drawPlayerModel(e, x, y, z, yaw, light, flash, t) {
+const FP_KEEP = pt => pt.r !== 'head' && !pt.r.startsWith('arm'); // primera persona: sin cabeza ni brazos
+function drawPlayerModel(e, x, y, z, yaw, light, flash, t, fp) {
   e.headRel = 0; const sneak = e.sneaking; const yy = y - (sneak ? 0.12 : 0);
-  drawModel(MODELS.steve, e, x, yy, z, yaw, 0.9375, light, [1, 1, 1, 1], flash, t);
+  drawModel(fp ? MODELS.steve.filter(FP_KEEP) : MODELS.steve, e, x, yy, z, yaw, 0.9375, light, [1, 1, 1, 1], flash, t);
   // armadura
-  const overlay = playerArmorParts(e);
+  let overlay = playerArmorParts(e); if (fp) overlay = overlay.filter(FP_KEEP);
   if (overlay.length) drawModel(overlay, e, x, yy, z, yaw, 0.9375, light, [1, 1, 1, 1], flash, t);
+  if (fp) return;
   const arm = e.armor || [];
   if (arm[1] && arm[1].id === ID.elytra) drawModel([part([10, 20, 2], [0, 22, 2], [-5, -20, 0], 'elytra_tex', e.gliding ? 'none' : 'none')], e, x, yy, z, yaw, 0.9375, light, [1, 1, 1, 1], null, t);
   // objeto en mano
@@ -5927,7 +5986,7 @@ function drawProj(e, x, y, z, yaw, light, t) {
   if (ty === 'shulker_bullet' || ty === 'wind_charge') { const s = 0.3; M4.rotY(m, t * 4); M4.translate(m, -s / 2, -s / 2, -s / 2); M4.scale(m, s, s, s); drawBox(m, ty === 'wind_charge' ? TEX.breeze_skin : TEX.white, [15, 15], null, null, 1); return; }
   const id = { pearl: ID.ender_pearl, eye: ID.eye_of_ender, snowball: ID.snowball }[ty]; if (id) { M4.rotY(m, R.yawCam || 0); M4.scale(m, 1 / 16, 1 / 16, 1 / 16); drawItemModel(id, m, light, 5); }
 }
-function drawAllEntities(dim, alpha, selfView) {
+function drawAllEntities(dim, alpha, selfView, fpBody) {
   const t = G.wclock ?? performance.now() / 1000; const cam = R.cam; const rd2 = (SETTINGS.rd * 16) ** 2;
   for (const e of G.entities.values()) {
     if (e.dim !== dim || e.removed) continue; if ((e.x - cam[0]) ** 2 + (e.z - cam[2]) ** 2 > rd2) continue;
@@ -5938,6 +5997,10 @@ function drawAllEntities(dim, alpha, selfView) {
   if (typeof drawDebris === 'function') drawDebris(dim);
   if (typeof drawFallingTrees === 'function') drawFallingTrees(dim);
   if (selfView && G.player) drawEntity(Object.assign(Object.create(Object.getPrototypeOf(G.player)), G.player, { px: G.player.px, heldItem: G.player.held(), pitch: G.player.pitch }), 1, t);
+  // primera persona: el propio cuerpo (torso y piernas, sin cabeza ni brazos: el brazo lo dibuja la mano) un poco por detrás
+  // de la cámara, así al mirar abajo se ve el pecho y las piernas en vez de atravesarlos
+  else if (fpBody && G.player && G.player.dim === dim) { const p = G.player; const fx = -Math.sin(p.yaw), fz = -Math.cos(p.yaw);
+    drawPlayerModel(p, p.x - fx * 0.24, p.y, p.z - fz * 0.24, p.yaw, entLight(p), p.hurtTime > 0 ? [0.7, 0, 0, 0.45] : null, t, true); }
 }
 // rayos (guardián, curación del dragón)
 function entityBeams(dim) {
@@ -11046,7 +11109,7 @@ function gameFrame(dt) {
   if (typeof rainPuddleTick === 'function') rainPuddleTick(w, wdt); // charcos de lluvia (partículas) // calor del lanzallamas y de los conductores: evapora el agua
   renderWorld(w, eye, yaw, pitch, {
     fov: G.fovCur, under, roll, bob, biome: w.biomeAt(Math.floor(p.x), Math.floor(p.z)),
-    drawEntities: () => { drawAllEntities(p.dim, alphaW, perspective > 0 && G.gameMode !== 'spectator'); },
+    drawEntities: () => { drawAllEntities(p.dim, alphaW, perspective > 0 && G.gameMode !== 'spectator', perspective === 0 && G.gameMode !== 'spectator' && !p.ragdoll && !p.boat && !p.sleeping && !p.gliding && !p.spy); },
     particles: G.particles, flames: G._flames, fireCells: G._fireCells, drawOverlay: tr => drawOverlays(tr), drawHand: perspective === 0 && !hudHidden && G.gameMode !== 'spectator' && !p.spy && !p.ragdoll && (G.zoomCur || 1) < 1.3 ? drawHand : null,
     exposure: p.effects.night ? 1.6 : 1
   });
@@ -11165,8 +11228,13 @@ function drawHand() {
     if (d.isBlock && d.render !== 'cross' && d.render !== 'fire') { M4.rotY(m, 0.785); M4.scale(m, 0.4, 0.4, 0.4); M4.translate(m, -0.5, -0.3, -0.5); const b = d.box; if (b && b[4] < 12) { M4.translate(m, b[0] / 16, 0, b[2] / 16); M4.scale(m, (b[3] - b[0]) / 16, (b[4] - b[1]) / 16, (b[5] - b[2]) / 16); } drawBox(m, d.faces, light, (d.tint || d.tintTop) ? [0.55, 0.78, 0.35, 1] : null, null, d.emissive ? 0.6 : 0); }
     else { M4.rotY(m, -1.2); M4.rotZ(m, 0.25); if (d.tool || d.bow || d.trident) { M4.rotZ(m, 0.4); } M4.translate(m, -0.3, -0.15, 0); M4.scale(m, 0.62, 0.62, 0.04); drawBox(m, d.isBlock ? d.faces[0] : d.icon, light, d.tint ? [0.55, 0.78, 0.35, 1] : null, null, 0, ITEM_UVR); }
   } else {
-    M4.translate(m, 0.08, -0.12, 0); M4.rotX(m, 0.75 - s * 1.2); M4.rotY(m, -0.35 - s * 0.3); M4.rotZ(m, -0.15); M4.translate(m, -0.07, -0.35, -0.07); M4.scale(m, 0.15, 0.55, 0.15);
-    drawBox(m, MODELS.steve[2].t, light); // brazo derecho con la piel del jugador
+    // brazo derecho como en el clásico: el hombro queda fuera de la pantalla abajo a la derecha y la mano asoma hacia el centro
+    // (antes quedaba entero por debajo del borde y no se veía)
+    // la caja va de la mano (y = 0) al hombro (arriba de la piel = manga), así lo que se ve es la mano y el antebrazo
+    const a = M4.create(); M4.translate(a, 0.44 + bx - s2 * 0.32, -0.44 + by + Math.sin(s2 * Math.PI) * 0.14, -0.74 - s * 0.22);
+    M4.rotX(a, 2.5 + s * 0.5); M4.rotZ(a, -0.46 - s * 0.3); M4.rotY(a, 0.35);
+    M4.translate(a, -0.125, 0, -0.125); M4.scale(a, 0.25, 0.85, 0.25);
+    drawBox(a, MODELS.steve[2].t, light); // con la piel del jugador
   }
 }
 // ------------------------------------------------------------ MENÚS

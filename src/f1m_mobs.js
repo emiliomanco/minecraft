@@ -7,6 +7,9 @@
 const skBand = (c, y0, n) => (P, x, y, w) => P.rect(x, y + y0, w, n, c, 6);                       // franja horizontal
 const skBottom = (c, n) => (P, x, y, w, h) => P.rect(x, y + h - n, w, n, c, 6);                    // pezuñas, zapatos
 const skDots = (c, n, size = 2) => (P, x, y, w, h) => P.blot(x, y, w, h, c, n, size);
+// ruido suave por celdas (para manchas y mechones): f(i, j) en 0..1
+function skNoise(seed, cell) { const h = (i, j) => (hashStr(seed + ':' + i + ',' + j) % 1000) / 1000, sm = t => t * t * (3 - 2 * t);
+  return (x, y) => { const fx = x / cell, fy = y / cell, i = Math.floor(fx), j = Math.floor(fy), tx = sm(fx - i), ty = sm(fy - j); const a = h(i, j) + (h(i + 1, j) - h(i, j)) * tx, b = h(i, j + 1) + (h(i + 1, j + 1) - h(i, j + 1)) * tx; return a + (b - a) * ty; }; }
 function skMouth(P, x, y, w, row, c, mw = 4) { P.rect(x + Math.floor((w - mw) / 2), row, mw, 1, c); }
 function skHumanoid(name, o) {
   const P = new SkinP(name, o.sw || 64, o.shh || 64);
@@ -162,31 +165,34 @@ function skinModels() {
       ...P.same([4, 6, 4], [[[3, 6, -5], [-2, -6, -2], 'legFR'], [[-3, 6, -5], [-2, -6, -2], 'legFL'], [[3, 6, 6], [-2, -6, -2], 'legBR'], [[-3, 6, 6], [-2, -6, -2], 'legBL']], { base: pink, v: 6, sides: skBottom(hoof, 1), bottom: hoof })
     ];
   }
-  // ------------------------------------------------------------ vaca
+  // ------------------------------------------------------------ vaca (manchas blancas irregulares, hocico claro, patas con calcetín)
   {
-    const brown = [70, 50, 38], white = [232, 230, 224], hoof = [56, 46, 40];
+    const brown = [62, 45, 35], white = [234, 232, 226], hoof = [58, 50, 46], muzzle = [226, 212, 204];
     const P = new SkinP('cow');
-    const patches = (P, x, y, w, h) => { for (let i = 0; i < Math.max(1, (w * h / 40) | 0); i++) { const cx = x + P.r() * w, cy = y + P.r() * h, r = 1.5 + P.r() * 2.5; for (let j = -4; j <= 4; j++) for (let k = -4; k <= 4; k++) if (j * j + k * k < r * r && cx + k >= x && cx + k < x + w && cy + j >= y && cy + j < y + h) P.set(cx + k, cy + j, white); } };
+    const patches = (P, x, y, w, h, f) => { const n = skNoise('cow' + f, 4); for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) { const v = n(i, j); if (v > 0.6) P.set(x + i, y + j, mix3(white, [214, 212, 206], P.r() * 0.4)); else if (v > 0.56) P.set(x + i, y + j, mix3(brown, white, 0.25)); } };
     M.cow = [
-      P.bp([12, 10, 18], [0, 12, 0], [-6, 0, -9], null, 'body', { base: brown, v: 8, all: patches }),
-      P.bp([4, 1, 6], [0, 12, 0], [-2, -1, 3], null, 'body', { base: [236, 170, 170], v: 4 }),
-      P.bp([8, 8, 6], [0, 20, -9], [-4, -4, -6], null, 'head', { base: brown, v: 8, front: (P, x, y, w, h) => { P.rect(x + 2, y, 4, h, white, 5); P.set(x + 1, y + 3, SKC.black); P.set(x + 6, y + 3, SKC.black); P.rect(x + 2, y + 5, 4, 3, [210, 150, 140], 4); P.set(x + 2, y + 6, [120, 70, 70]); P.set(x + 5, y + 6, [120, 70, 70]); } }),
-      ...P.same([1, 3, 1], [[[0, 20, -9], [4, 3, -5], 'head'], [[0, 20, -9], [-5, 3, -5], 'head']], { base: [214, 204, 180], v: 6 }),
-      ...P.same([4, 12, 4], [[[4, 12, -6], [-2, -12, -2], 'legFR'], [[-4, 12, -6], [-2, -12, -2], 'legFL'], [[4, 12, 7], [-2, -12, -2], 'legBR'], [[-4, 12, 7], [-2, -12, -2], 'legBL']], { base: brown, v: 8, sides: (P, x, y, w, h) => { P.rect(x, y + 3, w, 4, white, 6); P.rect(x, y + h - 2, w, 2, hoof); }, bottom: hoof })
+      P.bp([12, 10, 18], [0, 12, 0], [-6, 0, -9], null, 'body', { base: brown, v: 5, all: (P, x, y, w, h, f) => { if (f !== 3) patches(P, x, y, w, h, f); } }),
+      P.bp([4, 2, 5], [0, 12, 0], [-2, -2, 3], null, 'body', { base: [234, 168, 168], v: 4, bottom: (P, x, y, w, h) => { P.set(x, y + 1, [214, 140, 140]); P.set(x + 3, y + 1, [214, 140, 140]); P.set(x, y + 3, [214, 140, 140]); P.set(x + 3, y + 3, [214, 140, 140]); } }),
+      P.bp([8, 8, 6], [0, 20, -9], [-4, -4, -6], null, 'head', { base: brown, v: 5, top: (P, x, y, w) => P.rect(x + 3, y, 2, 3, white, 4), front: (P, x, y, w, h) => {
+        P.rect(x + 3, y, 2, 2, white, 4); P.rect(x + 2, y + 2, 4, 3, white, 4); P.rect(x + 1, y + 5, 6, 3, muzzle, 4);
+        P.set(x + 2, y + 6, [150, 104, 100]); P.set(x + 5, y + 6, [150, 104, 100]); P.rect(x + 3, y + 7, 2, 1, [196, 160, 150]);
+        P.set(x + 1, y + 3, SKC.black); P.set(x + 6, y + 3, SKC.black); P.set(x + 1, y + 2, [40, 30, 24]); P.set(x + 6, y + 2, [40, 30, 24]); } }),
+      ...P.same([1, 3, 1], [[[0, 20, -9], [4, 3, -5], 'head'], [[0, 20, -9], [-5, 3, -5], 'head']], { base: [222, 214, 196], v: 4, top: [150, 140, 120], sides: (P, x, y) => P.set(x, y, [170, 160, 140]) }),
+      ...P.same([4, 12, 4], [[[4, 12, -6], [-2, -12, -2], 'legFR'], [[-4, 12, -6], [-2, -12, -2], 'legFL'], [[4, 12, 7], [-2, -12, -2], 'legBR'], [[-4, 12, 7], [-2, -12, -2], 'legBL']], { base: brown, v: 5, sides: (P, x, y, w, h) => { P.rect(x, y + 6, w, 4, white, 4); P.rect(x, y + h - 2, w, 2, hoof, 3); }, bottom: hoof })
     ];
   }
-  // ------------------------------------------------------------ oveja (la lana se tiñe y desaparece al esquilarla)
+  // ------------------------------------------------------------ oveja (lana suave que se tiñe y desaparece al esquilarla; la cara asoma de la lana)
   {
-    const face = [222, 194, 170], wool = [236, 236, 232];
+    const face = [218, 186, 166], wool = [236, 236, 232], skin = [222, 198, 180];
     const P = new SkinP('sheep', 128, 64);
-    const fluff = (P, x, y, w, h) => { P.speck(x, y, w, h, [214, 214, 210], (w * h / 6) | 0); P.speck(x, y, w, h, [250, 250, 248], (w * h / 10) | 0); };
+    const fluff = (P, x, y, w, h, f) => { const n = skNoise('wool' + f + w, 3); for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) { const v = n(i, j) + (P.r() - 0.5) * 0.18; P.set(x + i, y + j, v > 0.66 ? [247, 247, 245] : v < 0.32 ? [220, 220, 216] : [236, 236, 232]); } };
     M.sheep = [
-      P.bp([8, 6, 14], [0, 12, 0], [-4, 0, -7], null, 'body', { base: face, v: 6 }),
-      P.bp([11, 9, 17], [0, 12, 0], [-5.5, -1.5, -8.5], null, 'body', { base: wool, v: 6, all: fluff }, 0, { wool: true }),
-      P.bp([6, 6, 8], [0, 18, -7], [-3, -2, -6], null, 'head', { base: face, v: 5, front: (P, x, y) => { P.set(x + 1, y + 2, SKC.white); P.set(x + 2, y + 2, SKC.black); P.set(x + 3, y + 2, SKC.black); P.set(x + 4, y + 2, SKC.white); P.rect(x + 2, y + 4, 2, 1, [200, 140, 130]); } }),
-      P.bp([7, 4, 6], [0, 18, -7], [-3.5, 1, -4.5], null, 'head', { base: wool, v: 6, all: fluff }, 0, { wool: true }),
-      ...P.same([4, 12, 4], [[[3, 12, -5], [-2, -12, -2], 'legFR'], [[-3, 12, -5], [-2, -12, -2], 'legFL'], [[3, 12, 5], [-2, -12, -2], 'legBR'], [[-3, 12, 5], [-2, -12, -2], 'legBL']], { base: face, v: 6, sides: skBottom([120, 96, 80], 1) }),
-      ...P.same([5, 5, 5], [[[3, 12, -5], [-2.5, -5, -2.5], 'legFR', 0, { wool: true }], [[-3, 12, -5], [-2.5, -5, -2.5], 'legFL', 0, { wool: true }], [[3, 12, 5], [-2.5, -5, -2.5], 'legBR', 0, { wool: true }], [[-3, 12, 5], [-2.5, -5, -2.5], 'legBL', 0, { wool: true }]], { base: wool, v: 6, all: fluff })
+      P.bp([8, 6, 14], [0, 12, 0], [-4, 0, -7], null, 'body', { base: skin, v: 5, all: (P, x, y, w, h) => P.speck(x, y, w, h, [236, 236, 230], (w * h / 12) | 0) }),
+      P.bp([11, 9, 17], [0, 12, 0], [-5.5, -1.5, -8.5], null, 'body', { all: fluff }, 0, { wool: true }),
+      P.bp([6, 6, 8], [0, 18, -7], [-3, -2, -6], null, 'head', { base: face, v: 4, front: (P, x, y) => { P.set(x, y + 2, SKC.white); P.set(x + 1, y + 2, [24, 22, 22]); P.set(x + 4, y + 2, [24, 22, 22]); P.set(x + 5, y + 2, SKC.white); P.rect(x + 2, y + 4, 2, 1, [212, 146, 146]); P.rect(x + 2, y + 5, 2, 1, shd(face, 0.86)); P.rect(x + 1, y, 4, 1, shd(face, 0.94)); } }),
+      P.bp([7, 7, 7], [0, 18, -7], [-3.5, -2.5, -4.5], null, 'head', { all: fluff }, 0, { wool: true }),
+      ...P.same([4, 12, 4], [[[3, 12, -5], [-2, -12, -2], 'legFR'], [[-3, 12, -5], [-2, -12, -2], 'legFL'], [[3, 12, 5], [-2, -12, -2], 'legBR'], [[-3, 12, 5], [-2, -12, -2], 'legBL']], { base: face, v: 4, sides: skBottom([128, 104, 88], 1), bottom: [128, 104, 88] }),
+      ...P.same([5, 6, 5], [[[3, 12, -5], [-2.5, -6, -2.5], 'legFR', 0, { wool: true }], [[-3, 12, -5], [-2.5, -6, -2.5], 'legFL', 0, { wool: true }], [[3, 12, 5], [-2.5, -6, -2.5], 'legBR', 0, { wool: true }], [[-3, 12, 5], [-2.5, -6, -2.5], 'legBL', 0, { wool: true }]], { all: fluff })
     ];
   }
   // ------------------------------------------------------------ cabra

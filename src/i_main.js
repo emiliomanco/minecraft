@@ -375,7 +375,7 @@ function gameFrame(dt) {
   if (typeof rainPuddleTick === 'function') rainPuddleTick(w, wdt); // charcos de lluvia (partículas) // calor del lanzallamas y de los conductores: evapora el agua
   renderWorld(w, eye, yaw, pitch, {
     fov: G.fovCur, under, roll, bob, biome: w.biomeAt(Math.floor(p.x), Math.floor(p.z)),
-    drawEntities: () => { drawAllEntities(p.dim, alphaW, perspective > 0 && G.gameMode !== 'spectator'); },
+    drawEntities: () => { drawAllEntities(p.dim, alphaW, perspective > 0 && G.gameMode !== 'spectator', perspective === 0 && G.gameMode !== 'spectator' && !p.ragdoll && !p.boat && !p.sleeping && !p.gliding && !p.spy); },
     particles: G.particles, flames: G._flames, fireCells: G._fireCells, drawOverlay: tr => drawOverlays(tr), drawHand: perspective === 0 && !hudHidden && G.gameMode !== 'spectator' && !p.spy && !p.ragdoll && (G.zoomCur || 1) < 1.3 ? drawHand : null,
     exposure: p.effects.night ? 1.6 : 1
   });
@@ -494,8 +494,13 @@ function drawHand() {
     if (d.isBlock && d.render !== 'cross' && d.render !== 'fire') { M4.rotY(m, 0.785); M4.scale(m, 0.4, 0.4, 0.4); M4.translate(m, -0.5, -0.3, -0.5); const b = d.box; if (b && b[4] < 12) { M4.translate(m, b[0] / 16, 0, b[2] / 16); M4.scale(m, (b[3] - b[0]) / 16, (b[4] - b[1]) / 16, (b[5] - b[2]) / 16); } drawBox(m, d.faces, light, (d.tint || d.tintTop) ? [0.55, 0.78, 0.35, 1] : null, null, d.emissive ? 0.6 : 0); }
     else { M4.rotY(m, -1.2); M4.rotZ(m, 0.25); if (d.tool || d.bow || d.trident) { M4.rotZ(m, 0.4); } M4.translate(m, -0.3, -0.15, 0); M4.scale(m, 0.62, 0.62, 0.04); drawBox(m, d.isBlock ? d.faces[0] : d.icon, light, d.tint ? [0.55, 0.78, 0.35, 1] : null, null, 0, ITEM_UVR); }
   } else {
-    M4.translate(m, 0.08, -0.12, 0); M4.rotX(m, 0.75 - s * 1.2); M4.rotY(m, -0.35 - s * 0.3); M4.rotZ(m, -0.15); M4.translate(m, -0.07, -0.35, -0.07); M4.scale(m, 0.15, 0.55, 0.15);
-    drawBox(m, MODELS.steve[2].t, light); // brazo derecho con la piel del jugador
+    // brazo derecho como en el clásico: el hombro queda fuera de la pantalla abajo a la derecha y la mano asoma hacia el centro
+    // (antes quedaba entero por debajo del borde y no se veía)
+    // la caja va de la mano (y = 0) al hombro (arriba de la piel = manga), así lo que se ve es la mano y el antebrazo
+    const a = M4.create(); M4.translate(a, 0.44 + bx - s2 * 0.32, -0.44 + by + Math.sin(s2 * Math.PI) * 0.14, -0.74 - s * 0.22);
+    M4.rotX(a, 2.5 + s * 0.5); M4.rotZ(a, -0.46 - s * 0.3); M4.rotY(a, 0.35);
+    M4.translate(a, -0.125, 0, -0.125); M4.scale(a, 0.25, 0.85, 0.25);
+    drawBox(a, MODELS.steve[2].t, light); // con la piel del jugador
   }
 }
 // ------------------------------------------------------------ MENÚS

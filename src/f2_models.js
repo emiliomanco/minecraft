@@ -96,12 +96,14 @@ function playerArmorParts(e) {
   if (mats[3]) { overlay.push(Object.assign({}, base[4], { s: [4.8, 4.5, 4.8], o: [-2.4, -12.2, -2.4], t: L(mats[3]) })); overlay.push(Object.assign({}, base[5], { s: [4.8, 4.5, 4.8], o: [-2.4, -12.2, -2.4], t: L(mats[3]) })); }
   return overlay;
 }
-function drawPlayerModel(e, x, y, z, yaw, light, flash, t) {
+const FP_KEEP = pt => pt.r !== 'head' && !pt.r.startsWith('arm'); // primera persona: sin cabeza ni brazos
+function drawPlayerModel(e, x, y, z, yaw, light, flash, t, fp) {
   e.headRel = 0; const sneak = e.sneaking; const yy = y - (sneak ? 0.12 : 0);
-  drawModel(MODELS.steve, e, x, yy, z, yaw, 0.9375, light, [1, 1, 1, 1], flash, t);
+  drawModel(fp ? MODELS.steve.filter(FP_KEEP) : MODELS.steve, e, x, yy, z, yaw, 0.9375, light, [1, 1, 1, 1], flash, t);
   // armadura
-  const overlay = playerArmorParts(e);
+  let overlay = playerArmorParts(e); if (fp) overlay = overlay.filter(FP_KEEP);
   if (overlay.length) drawModel(overlay, e, x, yy, z, yaw, 0.9375, light, [1, 1, 1, 1], flash, t);
+  if (fp) return;
   const arm = e.armor || [];
   if (arm[1] && arm[1].id === ID.elytra) drawModel([part([10, 20, 2], [0, 22, 2], [-5, -20, 0], 'elytra_tex', e.gliding ? 'none' : 'none')], e, x, yy, z, yaw, 0.9375, light, [1, 1, 1, 1], null, t);
   // objeto en mano
@@ -129,7 +131,7 @@ function drawProj(e, x, y, z, yaw, light, t) {
   if (ty === 'shulker_bullet' || ty === 'wind_charge') { const s = 0.3; M4.rotY(m, t * 4); M4.translate(m, -s / 2, -s / 2, -s / 2); M4.scale(m, s, s, s); drawBox(m, ty === 'wind_charge' ? TEX.breeze_skin : TEX.white, [15, 15], null, null, 1); return; }
   const id = { pearl: ID.ender_pearl, eye: ID.eye_of_ender, snowball: ID.snowball }[ty]; if (id) { M4.rotY(m, R.yawCam || 0); M4.scale(m, 1 / 16, 1 / 16, 1 / 16); drawItemModel(id, m, light, 5); }
 }
-function drawAllEntities(dim, alpha, selfView) {
+function drawAllEntities(dim, alpha, selfView, fpBody) {
   const t = G.wclock ?? performance.now() / 1000; const cam = R.cam; const rd2 = (SETTINGS.rd * 16) ** 2;
   for (const e of G.entities.values()) {
     if (e.dim !== dim || e.removed) continue; if ((e.x - cam[0]) ** 2 + (e.z - cam[2]) ** 2 > rd2) continue;
@@ -140,6 +142,10 @@ function drawAllEntities(dim, alpha, selfView) {
   if (typeof drawDebris === 'function') drawDebris(dim);
   if (typeof drawFallingTrees === 'function') drawFallingTrees(dim);
   if (selfView && G.player) drawEntity(Object.assign(Object.create(Object.getPrototypeOf(G.player)), G.player, { px: G.player.px, heldItem: G.player.held(), pitch: G.player.pitch }), 1, t);
+  // primera persona: el propio cuerpo (torso y piernas, sin cabeza ni brazos: el brazo lo dibuja la mano) un poco por detrás
+  // de la cámara, así al mirar abajo se ve el pecho y las piernas en vez de atravesarlos
+  else if (fpBody && G.player && G.player.dim === dim) { const p = G.player; const fx = -Math.sin(p.yaw), fz = -Math.cos(p.yaw);
+    drawPlayerModel(p, p.x - fx * 0.24, p.y, p.z - fz * 0.24, p.yaw, entLight(p), p.hurtTime > 0 ? [0.7, 0, 0, 0.45] : null, t, true); }
 }
 // rayos (guardián, curación del dragón)
 function entityBeams(dim) {

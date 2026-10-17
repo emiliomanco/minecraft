@@ -939,3 +939,55 @@ for (const [c, , , wc, tc] of DYE16) {
 }
 TEXGEN.terracotta = p => { const n = tnoise(hashStr('terracotta') + 1, 4); for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, stepTone([152, 94, 67], n(x, y) * 0.4 + p.r() * 0.6, 4, 0.9, 1.07)); };
 
+// ---- iconos de objetos renovados (esferas con luz y contorno, montoncitos de polvo, piezas dibujadas a mano)
+function orbIcon(p, cx, cy, r, c, o = {}) {
+  for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+    const dx = (x + 0.5 - cx) / r, dy = (y + 0.5 - cy) / (r * (o.sy || 1)); const d2 = dx * dx + dy * dy; if (d2 > 1) continue;
+    const nz = Math.sqrt(1 - d2); const l = Math.max(0, -dx * 0.5 - dy * 0.6 + nz * 0.65); p.set(x, y, stepTone(c, l / 1.1 + (d2 > 0.75 ? -0.15 : 0), 5, 0.55, 1.22));
+  }
+  if (o.hl !== false) { const hx = Math.floor(cx - r * 0.45), hy = Math.floor(cy - r * 0.5 * (o.sy || 1)); p.set(hx, hy, o.hlc || [255, 255, 255]); if (r > 4) p.set(hx + 1, hy, (o.hlc || [255, 255, 255]).map(v => v * 0.85 + c[0] * 0)); }
+}
+function dustIcon(p, c, c2, light) {
+  for (let y = 5; y < 15; y++) for (let x = 1; x < 15; x++) { const dx = (x + 0.5 - 8) / 6.5, dy = (y + 0.5 - 14.5) / 9; if (dx * dx + dy * dy > 1) continue; const dens = 1 - (dx * dx + dy * dy); if (p.r() > 0.35 + dens * 0.6) continue; const r = p.r(); p.set(x, y, r < 0.18 && light ? light : r < 0.6 ? c : c2); }
+  outline(p);
+}
+function mapIcon(p, rows, pal) { rows.forEach((row, y) => { for (let x = 0; x < row.length; x++) { const c = row[x] === '#' ? [24, 22, 26] : pal[row[x]]; if (c) p.set(x, y, c); } }); }
+const LUMP = ['', '', '.....####.......', '....#bbaa##.....', '...#bbaaaaa#....', '...#baaacaa##...', '..#baaaccaaac#..', '..#baacccaacc#..', '..#aaaccaaacc#..', '...#aacaaaacc#..', '...#acaaaccc#...', '....#acccc##....', '.....#####......'];
+const lump = (p, a, b, c) => mapIcon(p, LUMP, { a, b, c });
+const SHARD = ['', '..........##....', '.........#bb#...', '........#bba#...', '.......#bbaa#...', '......#bbaac#...', '.....#bbaacc#...', '....#bbaacc#....', '....#baacc#.....', '...#baacc#......', '...#bacc#.......', '..#bacc#........', '..#acc#.........', '..#cc#..........', '...##...........'];
+Object.assign(TEXGEN, {
+  ender_pearl: p => { orbIcon(p, 8, 8, 6, [24, 94, 84]); for (let a = 0; a < 5.2; a += 0.35) { const x = Math.round(8 + Math.cos(a) * 3.4), y = Math.round(8 + Math.sin(a) * 3.4); p.set(x, y, [70, 168, 148]); } p.set(8, 8, [10, 44, 40]); p.set(7, 8, [14, 56, 50]); outline(p); },
+  eye_of_ender: p => { orbIcon(p, 8, 8, 6, [58, 128, 72], { hl: false }); for (let a = 0; a < 6.3; a += 0.3) p.set(Math.round(8 + Math.cos(a) * 3), Math.round(8 + Math.sin(a) * 3), [150, 214, 120]); p.rect(7, 6, 8, 10, [18, 34, 22]); p.set(7, 5, [40, 70, 44]); p.set(8, 11, [40, 70, 44]); p.set(5, 4, [235, 255, 235]); outline(p); },
+  snowball: p => { orbIcon(p, 8, 8.5, 5.5, [226, 238, 250], { hlc: [255, 255, 255] }); outline(p); },
+  slime_ball: p => { orbIcon(p, 8, 8.5, 5.5, [104, 188, 88]); p.rect(7, 8, 8, 9, [150, 226, 132]); outline(p); },
+  magma_cream: p => { orbIcon(p, 8, 8.5, 5.5, [190, 82, 26]); for (let i = 0; i < 6; i++) p.set(5 + ((p.r() * 7) | 0), 6 + ((p.r() * 6) | 0), [255, 200, 70]); outline(p); },
+  heart_of_the_sea: p => { orbIcon(p, 8, 8, 6, [32, 98, 182]); for (let a = 0; a < 6.3; a += 0.4) p.set(Math.round(8 + Math.cos(a) * 3.6), Math.round(8 + Math.sin(a) * 3.6), [116, 196, 232]); p.rect(7, 7, 8, 8, [190, 240, 255]); outline(p); },
+  spider_eye: p => { orbIcon(p, 8, 8.5, 5.5, [150, 30, 46], { sy: 1.1 }); p.rect(7, 7, 8, 9, [30, 8, 12]); p.set(9, 7, [255, 220, 220]); p.set(4, 9, [200, 60, 70]); p.set(12, 10, [200, 60, 70]); outline(p); },
+  fermented_spider_eye: p => { orbIcon(p, 8, 10, 5, [110, 44, 60], { sy: 1.0 }); p.rect(7, 9, 8, 10, [30, 10, 14]); for (let x = 3; x < 13; x++) { const h = 2 + Math.round(Math.sin((x - 3) / 9 * Math.PI) * 2.5); for (let y = 6 - h; y < 6; y++) p.set(x, y, y === 6 - h ? [196, 150, 110] : [150, 108, 74]); } outline(p); },
+  clay_ball: p => { orbIcon(p, 8, 9, 5, [160, 166, 180]); outline(p); },
+  ink_sac: p => { orbIcon(p, 8, 9.5, 5, [40, 40, 52], { sy: 1.0 }); p.rect(7, 3, 8, 5, [56, 56, 70]); outline(p); },
+  glow_ink_sac: p => { orbIcon(p, 8, 9.5, 5, [40, 150, 140]); p.rect(7, 3, 8, 5, [60, 190, 170]); p.set(8, 10, [180, 255, 240]); outline(p); },
+  ghast_tear: p => { orbIcon(p, 8, 10, 4.5, [196, 226, 240]); for (let y = 3; y < 7; y++) { const w = y < 5 ? 0 : 1; for (let x = 8 - w; x <= 8 + w; x++) p.set(x, y, [214, 238, 250]); } outline(p); },
+  gunpowder: p => dustIcon(p, [96, 96, 98], [62, 62, 64], [140, 140, 142]),
+  glowstone_dust: p => dustIcon(p, [246, 206, 90], [196, 148, 40], [255, 246, 190]),
+  redstone: p => dustIcon(p, [204, 22, 18], [122, 4, 4], [255, 90, 70]),
+  sugar: p => dustIcon(p, [244, 244, 246], [206, 206, 214], [255, 255, 255]),
+  blaze_powder: p => dustIcon(p, [250, 180, 40], [216, 96, 20], [255, 236, 120]),
+  bone_meal: p => dustIcon(p, [240, 236, 224], [198, 194, 182], [255, 255, 250]),
+  coal: p => lump(p, [48, 48, 50], [86, 86, 90], [26, 26, 28]), charcoal: p => lump(p, [64, 48, 38], [100, 80, 62], [36, 26, 20]),
+  flint: p => lump(p, [74, 72, 72], [130, 128, 126], [40, 38, 38]), netherite_scrap: p => lump(p, [92, 70, 64], [128, 104, 96], [58, 42, 38]),
+  raw_iron: p => lump(p, [202, 166, 136], [232, 204, 180], [150, 116, 92]), raw_gold: p => lump(p, [236, 196, 60], [255, 238, 140], [184, 132, 30]), raw_copper: p => lump(p, [206, 118, 82], [236, 160, 124], [150, 76, 50]),
+  amethyst_shard: p => mapIcon(p, SHARD, { a: [160, 110, 220], b: [216, 178, 255], c: [104, 62, 160] }),
+  prismarine_shard: p => mapIcon(p, SHARD, { a: [96, 170, 156], b: [160, 220, 206], c: [56, 110, 100] }),
+  echo_shard: p => mapIcon(p, SHARD, { a: [20, 70, 84], b: [80, 210, 220], c: [10, 36, 44] }),
+  gold_nugget: p => { orbIcon(p, 6.5, 9.5, 2.6, [246, 206, 60]); orbIcon(p, 10, 7.5, 2.4, [246, 206, 60]); orbIcon(p, 9.5, 11, 2, [230, 186, 50], { hl: false }); outline(p); },
+  iron_nugget: p => { orbIcon(p, 6.5, 9.5, 2.6, [212, 212, 214]); orbIcon(p, 10, 7.5, 2.4, [212, 212, 214]); orbIcon(p, 9.5, 11, 2, [190, 190, 194], { hl: false }); outline(p); },
+  feather: p => mapIcon(p, ['..........####..', '.........#bbbb#.', '........#bbaab#.', '.......#bbaaac#.', '......#bbaaac#..', '.....#bbaaac#...', '....#bbaaac#....', '...#bbaaac#.....', '...#baaac#......', '..#baaac#.......', '..#bacc#........', '..#ccc#.........', '.#h##...........', '#h#.............', '##..............', '................'], { a: [226, 226, 232], b: [255, 255, 255], c: [180, 180, 192], h: [150, 140, 120] }),
+  bone: p => mapIcon(p, ['................', '..........##....', '.........#bb#...', '.........#bab##.', '........##baab#.', '.......#baaa##..', '......#baa#.....', '.....#baa#......', '....#baa#.......', '..##baa#........', '.#baaab#........', '.#bab##.........', '..#bb#..........', '...##...........', '................', '................'], { a: [226, 222, 206], b: [250, 248, 236], c: [180, 176, 160] }),
+  string: p => { const pts = [[3, 12], [4, 11], [5, 11], [6, 10], [6, 9], [5, 8], [5, 7], [6, 6], [7, 5], [8, 5], [9, 6], [9, 7], [8, 8], [9, 9], [10, 9], [11, 8], [12, 7], [12, 6], [12, 5]]; for (const [x, y] of pts) p.set(x, y, [236, 236, 240]); p.set(4, 12, [200, 200, 206]); p.set(11, 5, [200, 200, 206]); outline(p); },
+  leather: p => mapIcon(p, ['', '', '...###....###...', '..#baa####aac#..', '..#baaaaaaaac#..', '...#baaaaaac#...', '...#baaaaaac#...', '..#baaaaaaaac#..', '..#baaaaaaaacc#.', '..#baaaaaaaacc#.', '...#aaaccaacc#..', '...##cc##ccc#...', '.....##..###....'], { a: [150, 88, 52], b: [190, 124, 80], c: [104, 58, 32] }),
+  rotten_flesh: p => mapIcon(p, ['', '', '.....####.......', '....#gaab##.....', '...#gaaaagab#...', '..#aaggaaaaab#..', '..#aagaaaggaa#..', '..#gaaaagaaac#..', '...#aaaaaagcc#..', '...#agaaaaacc#..', '....#acggacc#...', '.....##cccc#....', '.......####.....'], { a: [150, 70, 60], b: [196, 110, 96], c: [100, 44, 38], g: [96, 128, 60] }),
+  paper: p => mapIcon(p, ['', '...##########...', '...#aaaaaaab#...', '...#accccccb#...', '...#aaaaaaab#...', '...#acccccab#...', '...#aaaaaaab#...', '...#accccccb#...', '...#aaaaaaab#...', '...#acccccab#...', '...#aaaaaaab#...', '...#accccaab#...', '...#aaaaaab##...', '...#aaaaaab#....', '...########.....'], { a: [244, 244, 236], b: [210, 210, 200], c: [196, 196, 210] }),
+  book: p => mapIcon(p, ['', '...##########...', '..#bbaaaaaaaa#..', '..#baaaaaaaaa#..', '..#baaddddaaa#..', '..#baaaaaaaaa#..', '..#baaaaaaaaa#..', '..#baaaaaaaaa#..', '..#baaaaaaaaa#..', '..#baaaaaaaaa#..', '..#bccccccccc#..', '..#pppppppppp#..', '..#cccccccccc#..', '...##########...'], { a: [120, 54, 40], b: [160, 80, 60], c: [80, 34, 26], d: [214, 180, 90], p: [240, 236, 220] }),
+  bread: p => mapIcon(p, ['', '', '', '', '.....######.....', '...##bbbbbba##..', '..#bbaabaabaac#.', '.#baacaacaacacc#', '.#baaaaaaaaaacc#', '.#aaaaaaaaaaacc#', '..#aaaaaaaaccc#.', '...##cccccccc#..', '.....#######....'], { a: [196, 136, 62], b: [226, 176, 96], c: [150, 96, 40] })
+});
