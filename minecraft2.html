@@ -4447,7 +4447,7 @@ function computeEnv(dim, camY, under, biome) {
     ENV.sunDir = [0, 1, 0]; ENV.sunCol = [0, 0, 0]; ENV.fogCol = [0.04, 0.03, 0.06]; ENV.amb = [0.32, 0.28, 0.4]; ENV.fog = [60, SETTINGS.rd * 16];
   }
   // dentro de un líquido: niebla y tinte según cuál (agua azulada, miel ámbar, leche blanca)
-  const UK = { 1: [[0.015, 0.07, 0.1], [0.47, 0.105, 0.09], [0.106, 0.62, 0.74], [0.5, 0.85, 1.1]], 4: [[0.36, 0.17, 0.02], [0.9, 1.7, 3.2], [1.0, 0.52, 0.1], [1.25, 0.78, 0.32]], 5: [[0.88, 0.88, 0.85], [2.4, 2.4, 2.5], [1.15, 1.15, 1.12], [1.12, 1.12, 1.1]] };
+  const UK = { 1: [[0.015, 0.07, 0.1], [0.47, 0.105, 0.09], [0.106, 0.62, 0.74], [0.5, 0.85, 1.1]], 4: [[0.36, 0.17, 0.02], [0.7, 1.35, 2.6], [1.0, 0.52, 0.1], [1.25, 0.78, 0.32]], 5: [[0.88, 0.88, 0.85], [2.15, 2.15, 2.25], [1.15, 1.15, 1.12], [1.12, 1.12, 1.1]] };
   const uk = UK[R.underKind || 1]; ENV.uT = uk[1]; ENV.uS = uk[2]; ENV.uCol = uk[3];
   if (under) { ENV.fogCol = uk[0]; }
 }
@@ -9197,7 +9197,7 @@ const FL = {
 // partículas para que una celda cuente como líquido de verdad
 let FL_K = 6, FL_S = 1 / FL_K, FL_H = 0.34, FL_R = 0.066, FL_PPB = FL_K * FL_K * FL_K, FL_PS = 1, FL_MIN = 5;
 function flSizeCfg() { const o = SETTINGS.physics && SETTINGS.physics.liquids; return o && o.pbfSize === 2 ? 2 : 1; }
-function flApplySize(sz) { FL_K = sz === 2 ? 6 : 12; FL_PS = 6 / FL_K; FL_S = 1 / FL_K; FL_H = 0.34 * FL_PS; FL_R = 0.066 * FL_PS; FL_PPB = FL_K * FL_K * FL_K; FL_MIN = Math.max(5, Math.round(FL_PPB * 0.023)); FL.size = sz; }
+function flApplySize(sz) { FL.iters = sz === 2 ? 3 : 5; /* con partículas pequeñas el cuerpo es más profundo en partículas: más iteraciones para que no se comprima y escupa gotas */ FL_K = sz === 2 ? 6 : 12; FL_PS = 6 / FL_K; FL_S = 1 / FL_K; FL_H = 0.34 * FL_PS; FL_R = 0.066 * FL_PS; FL_PPB = FL_K * FL_K * FL_K; FL_MIN = Math.max(5, Math.round(FL_PPB * 0.023)); FL.size = sz; }
 // constantes de los shaders según el tamaño (sustituye la línea de constantes de GLSL_FLHEAD al compilar)
 function flSub(src) { return src.replace('const float H=0.34, H2=0.1156, RAD=0.066;', `const float H=${FL_H.toFixed(6)}, H2=${(FL_H * FL_H).toFixed(8)}, RAD=${FL_R.toFixed(6)}, PS=${FL_PS.toFixed(4)};`); }
 const GLSL_FLHEAD = `#version 300 es
@@ -9372,6 +9372,10 @@ void main(){ int i=idx(); vec4 Pi=texelFetch(u_pred,tc(i),0); vec4 Xi=texelFetch
   else { float sp=length(vi); T=max(T*0.96,clamp((sp-3.0)*0.12,0.0,1.0)*clamp(1.0-cn/22.0,0.0,1.0)); }
   float sp=length(vi); if(sp>20.0) vi*=20.0/sp;
   if(sp<0.45) vi*=mix(0.82,1.0,sp/0.45); // temblor del solver en reposo: se apaga (el líquido quieto queda quieto)
+  // «géiseres»: en un cuerpo casi quieto, una partícula que sale disparada hacia arriba (la presión del solver al
+  // comprimirse el fondo) se frena hasta la velocidad media de sus vecinas; las salpicaduras de verdad (todo el
+  // grupo moviéndose) no se tocan
+  if(!lava && ws>0.0){ vec3 vm=vi+acc/ws; if(length(vm)<0.8 && vi.y>vm.y+0.25) vi.y=vm.y+(vi.y-vm.y)*0.25; }
   oP=vec4(Pi.xyz,Pi.w); oV=vec4(vi,T); }`;
 // altas y bajas: puntos escritos directamente en POS/VEL
 const VS_FLSPAWN = `#version 300 es
@@ -9743,13 +9747,13 @@ void main(){
     vec3 R=reflect(V,N); if(R.y<0.02) R.y=0.02+abs(R.y)*0.2; R=normalize(R); float fres=0.03+0.97*pow(1.0-NdV,5.0);
     col=mix(dif,skyColor(R)*mix(0.03,1.0,u_camSky*u_camSky),fres*0.35);
     vec3 Hm=normalize(u_sunDir-V); col+=Lsun*pow(max(dot(N,Hm),0.0),60.0)*0.25;
-    alpha=smoothstep(0.004,0.03,tw); col=mix(texture(u_sceneCopy,gl_FragCoord.xy/u_res).rgb,col,alpha);
+    alpha=smoothstep(0.004,0.03,tw)*0.9; col=mix(texture(u_sceneCopy,gl_FragCoord.xy/u_res).rgb,col,alpha); // no del todo opaca: deja ver un 10 % de lo de detrás
   } else if(!lava){
     vec2 suv=gl_FragCoord.xy/u_res; vec2 off=Ne.xy*clamp(tw,0.0,1.2)*(honey?0.055:0.035); // refracción (IOR 1,333; la miel desvía más): según la normal y el grosor
     vec3 behind=texture(u_sceneCopy,clamp(suv+off,0.001,0.999)).rgb;
     // agua: absorbe sobre todo el rojo; miel: absorbe mucho el azul y dispersa ámbar (dorada y espesa)
-    vec3 sA=honey?vec3(0.22,0.7,2.3):vec3(0.60,0.16,0.19), sS=honey?vec3(0.32,0.2,0.05):vec3(0.014,0.024,0.017), sT=sA+sS;
-    vec3 Tv=exp(-sT*tw*(honey?2.4:1.3));
+    vec3 sA=honey?vec3(0.18,0.55,1.8):vec3(0.60,0.16,0.19), sS=honey?vec3(0.32,0.2,0.05):vec3(0.014,0.024,0.017), sT=sA+sS;
+    vec3 Tv=exp(-sT*tw*(honey?1.7:1.0)); // algo más transparentes (agua y miel)
     vec3 lightIn=u_amb*0.9*u_camSky+Lsun*0.8+dynLights(wp)*0.3;
     vec3 refr=behind*Tv+lightIn*(sS/sT)*(1.0-Tv)*1.15;
     vec3 R=reflect(V,N); if(R.y<0.02) R.y=0.02+abs(R.y)*0.2; R=normalize(R);
