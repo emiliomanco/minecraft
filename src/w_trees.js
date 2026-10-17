@@ -30,6 +30,7 @@ function dynGrowTick(w, x, y, z, b) {
   if (dynIsLog(w.get(x, y - 1, z))) return; // solo la raíz decide
   if (!dynGround(w.get(x, y - 1, z))) return;
   const m = w.getMeta(x, y, z), stage = (m >> 3) & 3, stump = m & 32, sp = REG[b].dynLog;
+  if ((m & 64) && !stump) return; // raíz secundaria de un tronco grueso: crece desde la principal
   if (w.light(x, y + 1, z)[0] < 8 && !stump) return;
   if (stump) { // el tocón rebrota: quita lo que quedó del tronco viejo y nace un árbol joven
     if (Math.random() > 0.35) return;
@@ -62,8 +63,12 @@ function dynFell(w, x, y, z, old) {
   // el corte todavía presente; después, lo de cada raíz que ya no llega a ella cae
   const roots = []; for (const [k, [a, b, c]] of comp) if (dynGround(w.get(a, b - 1, c))) roots.push(k);
   const cutK = K(x, y, z); const cutRoot = dynGround(w.get(x, y - 1, z)); if (cutRoot) roots.push(cutK);
-  const owner = new Map(); const oq = []; for (const k of roots) { owner.set(k, k); oq.push(k); }
   const pos = k => k === cutK ? [x, y, z] : comp.get(k);
+  // las raíces juntas (la base de un tronco 2x2 o 3x3) son un mismo árbol: solo cae si se corta del todo
+  const grp = new Map(); const rs = new Set(roots); const find = k => { while (grp.get(k) !== k) k = grp.get(k); return k; };
+  for (const k of roots) grp.set(k, k);
+  for (const k of roots) { const [a, b, c] = pos(k); for (const [dx, dz] of [[1, 0], [0, 1]]) { const nk = K(a + dx, b, c + dz); if (rs.has(nk)) { const p1 = find(k), p2 = find(nk); if (p1 !== p2) grp.set(p1, p2); } } }
+  const owner = new Map(); const oq = []; for (const k of roots) { owner.set(k, find(k)); oq.push(k); }
   for (let qi = 0; qi < oq.length; qi++) { const k = oq[qi]; const [a, b, c] = pos(k); const o = owner.get(k);
     for (const [dx, dy, dz] of N6) { const nk = K(a + dx, b + dy, c + dz); if (owner.has(nk) || !(comp.has(nk) || nk === cutK)) continue; owner.set(nk, o); oq.push(nk); } }
   const kept = new Set(); const st2 = [];

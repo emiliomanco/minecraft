@@ -27,11 +27,20 @@ const float H=0.34, H2=0.1156, RAD=0.066;
 uniform float u_time, u_rain, u_tide; uniform vec3 u_org;
 // oleaje del mar (el mismo que dibuja VS_CHUNK): x = desplazamiento de la superficie, yz = velocidad orbital horizontal
 uniform float u_waveK;
+uniform highp sampler2D u_wdist; uniform vec4 u_wdRect; // distancia a la costa (k_fluids/WD): las olas largas van hacia ella
+vec3 seaShore(vec2 p){ if(u_wdRect.w<0.5) return vec3(1e4,0.0,0.0); vec2 q=(p-u_wdRect.xy)*u_wdRect.z; ivec2 b=ivec2(floor(q)); vec2 f=q-vec2(b);
+  if(b.x<0||b.y<0||b.x>=63||b.y>=63) return vec3(1e4,0.0,0.0);
+  float a=texelFetch(u_wdist,b,0).r, c=texelFetch(u_wdist,b+ivec2(1,0),0).r, d=texelFetch(u_wdist,b+ivec2(0,1),0).r, e=texelFetch(u_wdist,b+ivec2(1,1),0).r;
+  return vec3(mix(mix(a,c,f.x),mix(d,e,f.x),f.y), mix(c-a,e-d,f.y)*u_wdRect.z, mix(d-a,e-c,f.x)*u_wdRect.z); }
 vec3 seaWave(vec2 p){ float A=(0.16+u_rain*0.55)*u_waveK; float h=0.0; vec2 u=vec2(0.0);
   const vec4 W[5]=vec4[5](vec4(0.81,0.59,22.0,0.42),vec4(0.97,-0.24,13.0,0.26),vec4(0.45,0.89,8.5,0.16),vec4(-0.2,0.98,5.2,0.09),vec4(0.7,-0.71,3.4,0.05));
-  for(int i=0;i<5;i++){ vec2 d=W[i].xy; float k=6.2832/W[i].z; float c=sqrt(9.8/k); float ph=k*(dot(d,p)-c*u_time*0.55)+float(i)*1.7; float a=A*W[i].w*2.2; float s=sin(ph);
-    h+=a*(pow(s*0.5+0.5,1.6)*2.0-1.0); u+=a*k*c*0.55*s*d; }
-  return vec3(h*0.85-A*1.1-0.05+u_tide,u); }
+  vec3 sd=seaShore(p); float wf=smoothstep(100.0,150.0,sd.x); vec2 gs=length(sd.yz)>1e-4?-normalize(sd.yz):vec2(0.81,0.59);
+  float Sp=sd.x+2.5*sin(p.x*0.045+p.y*0.02)*sin(p.y*0.05-p.x*0.015);
+  for(int i=0;i<5;i++){ float k=6.2832/W[i].z; float c=sqrt(9.8/k); float a=A*W[i].w*2.2; float gw=i<3?wf:1.0;
+    if(gw>0.001){ vec2 d=W[i].xy; float s=sin(k*(dot(d,p)-c*u_time*0.55)+float(i)*1.7); h+=a*gw*(pow(s*0.5+0.5,1.6)*2.0-1.0); u+=a*gw*k*c*0.55*s*d; }
+    if(gw<0.999){ float s=sin(k*(-Sp-c*u_time*0.55)+float(i)*1.7); h+=a*(1.0-gw)*(pow(s*0.5+0.5,1.6)*2.0-1.0); u+=a*(1.0-gw)*k*c*0.55*s*gs; } }
+  float v=h*0.85+A*0.2; v=(v<0.0?v*0.5:v)-0.05;
+  return vec3(v+u_tide,u); }
 ivec2 tc(int i){ return ivec2(i&255, i>>8); }
 int idx(){ ivec2 f=ivec2(gl_FragCoord.xy); return f.y*256+f.x; }
 uint hashc(ivec3 c){ uvec3 u=uvec3(c+ivec3(4096)); return ((u.x*73856093u)^(u.y*19349663u)^(u.z*83492791u))&262143u; }
@@ -333,7 +342,7 @@ function flCommon(P) { const gl = R.gl; const u = P.u;
   if (u.u_waveK) gl.uniform1f(u.u_waveK, R.gfxU ? R.gfxU[0] : 1);
   if (u.u_org) gl.uniform3f(u.u_org, FL.org[0], FL.org[1], FL.org[2]);
   if (u.u_kp) gl.uniform1f(u.u_kp, FL.kp); if (u.u_ks) gl.uniform1f(u.u_ks, FL.ks); if (u.u_eps) gl.uniform1f(u.u_eps, FL.eps);
-  flBindTex(P, 'u_vox', 8, FL.vox, gl.TEXTURE_3D); }
+  flBindTex(P, 'u_vox', 8, FL.vox, gl.TEXTURE_3D); if (u.u_wdist) wdBind(P); }
 function flPass(P, fb, rows) { const gl = R.gl; gl.bindFramebuffer(gl.FRAMEBUFFER, fb); gl.viewport(0, 0, FL.W, rows); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
 function flStep() {
   const gl = R.gl; const rows = FL.M / FL.W; const T = FL.pos, V = FL.vel;

@@ -1559,7 +1559,7 @@ class Generator {
     this.nC = n('cont'); this.nE = n('ero'); this.nP = n('peaks'); this.nD = n('detail'); this.nT = n('temp'); this.nHm = n('hum');
     this.nR = n('river'); this.nL = n('lake'); this.nC1 = n('cave1'); this.nC2 = n('cave2'); this.nC3 = n('cave3'); this.nCB = n('cavebiome'); this.nCB2 = n('cavebiome2');
     this.nV = n('variety'); this.nS = n('snow'); this.nDS = n('deepslate'); this.nW = n('weird'); this.nWX = n('warpx'); this.nWZ = n('warpz');
-    this.structCache = new Map(); this.colCache = new Map();
+    this.structCache = new Map(); this.colCache = new Map(); this.preCache = new Map(); this.lakeCache = new Map();
   }
   // ------------------------------------------------------------ overworld columna
   rawHeight(x, z) {
@@ -1605,9 +1605,10 @@ class Generator {
     const det = d * (2.2 * coast + 9 * (1 - flat) * (1 - mf)) + this.nD.n2(x * 0.045, z * 0.045) * 0.8 * (1 - flat);
     return { h: base + det + mh, c, e, d, mountain: mh };
   }
-  col(x, z) {
-    const key = x * 100003 + z; let r = this.colCache.get(key); if (r) return r;
-    if (this.colCache.size > 60000) this.colCache.clear();
+  // altura antes de los lagos (relieve + ríos + pantanos); la usan las columnas y el cálculo del nivel de cada lago
+  preLake(x, z) {
+    const key = x * 100003 + z; let P = this.preCache.get(key); if (P) return P;
+    if (this.preCache.size > 80000) this.preCache.clear();
     const R = this.rawHeight(x, z); let h = R.h; const c = R.c;
     const v2 = this.climate >= 2; let T, Hm;
     if (v2) { const cl = this.climateAt(x, z); T = cl[0]; Hm = cl[1]; }
@@ -1619,7 +1620,7 @@ class Generator {
       // entre montañas (el valle se estrecha y encaja según sube el relieve)
       const rv = Math.abs(this.nR.fbm2(x * 0.00055, z * 0.00055, 3)), mt = clamp(R.mountain / 120, 0, 1);
       const vw = 0.1 - 0.05 * mt, cw = 0.007 + 0.004 * (1 - mt), bw = cw * 1.5;
-      if (c > -0.12 && rv < vw) {
+      if (c > -0.12 && rv < vw && R.h > SEA - 1) { // solo en tierra: en el mar no hay ríos (antes cruzaban el océano como una franja sin olas)
         if (rv < bw) { // cauce y orillas
           const t = smooth(clamp((rv - cw * 0.4) / (bw - cw * 0.4), 0, 1)), rh = SEA - 4 + t * 5;
           if (h > rh) h = rh; if (rv < cw) river = true;
@@ -1629,19 +1630,42 @@ class Generator {
         }
       }
     } else { const rv = Math.abs(this.nR.fbm2(x * 0.0013, z * 0.0013, 3));
-    if (c > -0.18 && rv < 0.065 && R.mountain < 40) { const t = smooth(clamp((rv - 0.018) / 0.047, 0, 1)); const rh = SEA - 3 - (1 - t) * 2.5; if (h > rh) h = lerp(rh, h, t * t); if (rv < 0.032) river = true; } }
+    if (c > -0.18 && rv < 0.065 && R.mountain < 40 && R.h > SEA - 1) { const t = smooth(clamp((rv - 0.018) / 0.047, 0, 1)); const rh = SEA - 3 - (1 - t) * 2.5; if (h > rh) h = lerp(rh, h, t * t); if (rv < 0.032) river = true; } }
     // pantano de manglares: aplanar
     let swamp = (v2 ? Hm >= CLH[3] && T >= CLT[2] && T < CLT[4] : Hm > 0.32 && T > 0.05 && T < 0.5) && h > SEA - 4 && h < SEA + 9 && R.mountain < 2;
     if (swamp) h = lerp(h, SEA - 0.6 + R.d * 3, 0.85);
+    P = { R, h, c, T, Hm, v2, river, swamp }; this.preCache.set(key, P); return P;
+  }
+  // lago de una celda de 96x96 (o null): el agua llega como mucho hasta un bloque por debajo del punto más bajo del borde,
+  // así nunca flota ni se queda sin orillas; si un río o un pantano lo corta, no hay lago
+  lakeAt(cx, cz) {
+    const key = cx * 7919 + cz; if (this.lakeCache.has(key)) return this.lakeCache.get(key);
+    if (this.lakeCache.size > 4000) this.lakeCache.clear();
+    let L = null; const rr = rngFor(this.seed, cx, cz, 77);
+    if (rr() <= 0.38) {
+      const lx = cx * 96 + 20 + rr() * 56, lz = cz * 96 + 20 + rr() * 56, rad = 7 + rr() * 9; const R2 = rad * 1.25;
+      let lo = 1e9, bad = false;
+      for (let dz = -R2; dz <= R2 && !bad; dz += 2) for (let dx = -R2; dx <= R2; dx += 2) {
+        if (dx * dx + dz * dz > R2 * R2) continue; const P = this.preLake(Math.floor(lx + dx), Math.floor(lz + dz));
+        if (P.river || P.swamp) { bad = true; break; } if (P.h < lo) lo = P.h;
+      }
+      const lvl = Math.floor(lo) - 2;
+      if (!bad && lvl > SEA + 1 && lvl < SEA + 40) L = { lx, lz, rad, lvl };
+    }
+    this.lakeCache.set(key, L); return L;
+  }
+  col(x, z) {
+    const key = x * 100003 + z; let r = this.colCache.get(key); if (r) return r;
+    if (this.colCache.size > 60000) this.colCache.clear();
+    const P = this.preLake(x, z); const R = P.R, c = P.c, T = P.T, Hm = P.Hm, v2 = P.v2, river = P.river, swamp = P.swamp; let h = P.h;
     // lagos
     let lake = 0; if (!river && R.mountain < 6 && c > -0.04) {
       const gx = Math.floor(x / 96), gz = Math.floor(z / 96);
       for (let ox = 0; ox <= 1 && !lake; ox++) for (let oz = 0; oz <= 1 && !lake; oz++) {
         const cx = gx + (((x % 96) + 96) % 96 < 48 ? ox - 1 : ox), cz = gz + (((z % 96) + 96) % 96 < 48 ? oz - 1 : oz);
-        const rr = rngFor(this.seed, cx, cz, 77); if (rr() > 0.38) continue;
-        const lx = cx * 96 + 20 + rr() * 56, lz = cz * 96 + 20 + rr() * 56, rad = 7 + rr() * 9;
-        const dist = Math.hypot(x - lx, z - lz) / (rad * (0.85 + this.nL.n2(x * 0.08, z * 0.08) * 0.25));
-        if (dist < 1) { const lvl = Math.floor(this.rawHeight(lx | 0, lz | 0).h) - 1; if (lvl > SEA + 1 && lvl < SEA + 40) { const dep = (1 - dist) * 7 + 1; if (h > lvl - dep) h = lvl - dep; lake = lvl; } }
+        const Lk = this.lakeAt(cx, cz); if (!Lk) continue;
+        const dist = Math.hypot(x - Lk.lx, z - Lk.lz) / (Lk.rad * (0.85 + this.nL.n2(x * 0.08, z * 0.08) * 0.25));
+        if (dist < 1) { const dep = (1 - dist) * 6 + 1; if (h > Lk.lvl - dep) h = Lk.lvl - dep; lake = Lk.lvl; }
       }
     }
     h = Math.floor(clamp(h, 8, this.H - 20));
@@ -1841,6 +1865,9 @@ class Generator {
         }
       }
       if (ci.biome === BI.mangrove_swamp && h === SEA - 1 && r() < 0.05 && B[x | z << 4 | (h + 2) << 8] === 0) B[x | z << 4 | (h + 2) << 8] = ID.lily_pad;
+      // agua finita (lagos, ríos, pantanos): las celdas sumergidas nacen con la marca de «cubierta» que les pondría la simulación;
+      // sin ella, al despertar una celda la corrección se propagaba por todo el lago (lag y mallas rehechas sin parar)
+      if (!oceanCol) for (let y = h + 1; y < waterTop; y++) { const i = x | z << 4 | y << 8; if (B[i] === ID.water && B[i + 256] === ID.water) M[i] |= LIQ_FALL; }
     }
     // biomas de cueva y decoración subterránea
     for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
@@ -2130,50 +2157,65 @@ function dynTreePlan(sp, x, y, z, stage, seed) {
     if (tipLeaves) tipLeaves(cx, cy, cz);
     return [cx, cy, cz];
   };
-  const trunk = (H, T0, Tt) => { for (let i = 0; i < H; i++) addLog(x, y + i, z, T0 + (Tt - T0) * Math.pow(i / Math.max(1, H - 1), 0.8)); };
-  const tAt = (H, T0, Tt, yy) => T0 + (Tt - T0) * Math.pow(clamp((yy - y) / Math.max(1, H - 1), 0, 1), 0.8);
   const a0 = r() * Math.PI * 2;
+  // grosor del tronco: 1x1, 2x2 o 3x3 bloques según la especie (los árboles jóvenes empiezan más finos)
+  const nW = { oak: [0.6, 0.88], dark_oak: [0.25, 0.75], jungle: [0.4, 0.8], spruce: [0.6, 0.9], birch: [0.85, 1], cherry: [0.7, 1], acacia: [0.8, 1] }[sp] || [1, 1];
+  const rn = r(); const nFull = rn < nW[0] ? 1 : rn < nW[1] ? 2 : 3; const n = stage >= 2 ? nFull : stage === 1 ? Math.min(nFull, 2) : 1;
+  const o0 = n === 3 ? -1 : 0, gN = 1 + 0.2 * (n - 1), wN = (n - 1) * 0.9 * s; const base = new Set(), trunkSet = new Set();
+  // tronco grueso: bloques enteros en la base (el 3x3 se queda en cruz más arriba) y una sola columna que se afina hasta la copa
+  const trunk = (H, T0, Tt) => {
+    const Hb = n === 1 ? 0 : Math.max(1, Math.round(H * (n === 3 ? 0.7 : 0.55))), Hp = n === 3 ? Math.round(Hb * 0.5) : Hb;
+    for (let i = 0; i < Hb; i++) for (let dz = 0; dz < n; dz++) for (let dx = 0; dx < n; dx++) {
+      if (i >= Hp && dx !== 1 && dz !== 1) continue;
+      const a = x + o0 + dx, c = z + o0 + dz; addLog(a, y + i, c, 7); trunkSet.add(K(a, y + i, c)); if (!i) base.add(K(a, y, c));
+    }
+    const t0 = n > 1 ? 7 : T0, tt = n > 1 ? Math.max(Tt, n === 3 ? 5 : 4) : Tt;
+    for (let i = Hb; i < H; i++) { addLog(x, y + i, z, t0 + (tt - t0) * Math.pow((i - Hb) / Math.max(1, H - 1 - Hb), 0.8)); trunkSet.add(K(x, y + i, z)); }
+    base.add(K(x, y, z));
+  };
+  const tAt = (H, T0, Tt, yy) => n > 1 ? 7 : T0 + (Tt - T0) * Math.pow(clamp((yy - y) / Math.max(1, H - 1), 0, 1), 0.8);
   switch (sp) {
     case 'oak': case 'cherry': case 'dark_oak': {
       const big = sp === 'dark_oak', ch = sp === 'cherry';
-      const H = Math.max(2, Math.round(((big ? 7 : ch ? 5 : 6) + r() * 2) * s)), T0 = Math.round((big ? 7 : 6.5) * s + 0.3), Tt = Math.max(0, Math.round(T0 * 0.35));
+      const H = Math.max(2, Math.round(((big ? 7 : ch ? 5 : 6) + r() * 2) * s * gN)), T0 = Math.round((big ? 7 : 6.5) * s + 0.3), Tt = Math.max(0, Math.round(T0 * 0.35));
       trunk(H, T0, Tt);
-      const nb = Math.max(1, Math.round(((big ? 5 : ch ? 4 : 4) + r() * 1.5) * s));
-      const cl = (cx, cy, cz) => blob(cx, cy + 1, cz, ((big ? 3 : ch ? 3.2 : 2.6) + r() * 0.6) * s + 0.4, (big ? 1.8 : 1.6) * s + 0.4, true);
+      // pocas ramas, cortas y dentro de la copa (antes salían muchas y largas, peladas)
+      const nb = Math.max(1, Math.round(((big ? 2.5 : 2) + r() * 1.5) * s)) + (n - 1);
+      const cl = (cx, cy, cz) => blob(cx, cy, cz, ((big ? 2.8 : ch ? 3 : 2.5) + r() * 0.6) * s + 0.5 + wN * 0.5, (big ? 1.8 : 1.6) * s + 0.5, true);
       for (let i = 0; i < nb; i++) {
-        const hy = y + Math.max(1, Math.floor(H * (0.42 + 0.48 * (i + r() * 0.6) / nb)));
-        const ang = a0 + i * (Math.PI * 2 / nb) + (r() - 0.5) * 0.8; const len = Math.max(1, Math.round(((big ? 4 : ch ? 4.5 : 3.6) + r() * 1.5) * s));
-        branch(x, hy, z, ang, len, Math.max(0, tAt(H, T0, Tt, hy) - 2), ch ? 0.35 : 0.5, cl, s > 0.6);
+        const hy = y + Math.max(1, Math.floor(H * (0.55 + 0.4 * (i + r() * 0.6) / nb)));
+        const ang = a0 + i * (Math.PI * 2 / nb) + (r() - 0.5) * 0.8; const len = Math.max(1, Math.round(((big ? 3 : ch ? 3.4 : 2.6) + r()) * s + wN));
+        branch(x, hy, z, ang, len, Math.max(0, tAt(H, T0, Tt, hy) - 2), ch ? 0.45 : 0.6, cl, big && s > 0.9);
       }
-      blob(x, y + H, z, ((big ? 3.6 : ch ? 3.4 : 3) + r() * 0.5) * s + 0.5, 2.2 * s + 0.4, true);
+      blob(x, y + H, z, ((big ? 3.6 : ch ? 3.4 : 3) + r() * 0.5) * s + 0.5 + wN, 2.2 * s + 0.4 + wN * 0.4, true);
       break;
     }
     case 'birch': {
-      const H = Math.max(3, Math.round((8 + r() * 3) * s)), T0 = Math.round(4.5 * s + 0.3); trunk(H, T0, Math.max(0, T0 - 3));
-      const nb = Math.max(1, Math.round((5 + r() * 2) * s));
-      for (let i = 0; i < nb; i++) { const hy = y + Math.floor(H * (0.45 + 0.5 * r())); branch(x, hy, z, a0 + i * 2.4, Math.max(1, Math.round((1.5 + r() * 1.5) * s)), 0.8, 0.8, (cx, cy, cz) => blob(cx, cy, cz, 1.6 * s + 0.4, 1.2 * s + 0.3), false); }
-      blob(x, y + Math.round(H * 0.72), z, 2.2 * s + 0.5, H * 0.33 + 0.5);
+      const H = Math.max(3, Math.round((8 + r() * 3) * s * gN)), T0 = Math.round(4.5 * s + 0.3); trunk(H, T0, Math.max(0, T0 - 3));
+      const nb = Math.max(1, Math.round((2.5 + r() * 1.5) * s)) + (n - 1);
+      for (let i = 0; i < nb; i++) { const hy = y + Math.floor(H * (0.55 + 0.4 * r())); branch(x, hy, z, a0 + i * 2.4, Math.max(1, Math.round((1 + r()) * s + wN)), 0.8, 0.8, (cx, cy, cz) => blob(cx, cy, cz, 1.6 * s + 0.4, 1.2 * s + 0.3), false); }
+      blob(x, y + Math.round(H * 0.72), z, 2.2 * s + 0.5 + wN, H * 0.33 + 0.5);
       break;
     }
     case 'spruce': {
-      const H = Math.max(3, Math.round((10 + r() * 5) * s) + 1), T0 = Math.round(5.5 * s + 0.3); trunk(H, T0, 0);
+      const H = Math.max(3, Math.round((10 + r() * 5) * s * gN) + 1), T0 = Math.round(5.5 * s + 0.3); trunk(H, T0, 0);
       for (let yy = y + 2; yy < y + H; yy++) {
-        const k = (yy - y - 2) / Math.max(1, H - 2); const rr = (1 - k) * 3.6 * s + 0.8; const layer = ((yy - y) % 2) === 0;
-        if (layer && rr >= 1.8) { const nb = 3 + ((r() * 2) | 0); for (let i = 0; i < nb; i++) branch(x, yy, z, a0 + yy + i * (Math.PI * 2 / nb), Math.max(1, Math.round(rr - 0.8)), 0.6, -0.15, null, false); }
+        const k = (yy - y - 2) / Math.max(1, H - 2); const rr = (1 - k) * (3.6 * s + wN) + 0.8; const layer = ((yy - y) % 2) === 0;
+        if (layer && rr >= 2.2 && ((yy - y) % 4) === 0) { const nb = 2 + ((r() * 2) | 0); for (let i = 0; i < nb; i++) branch(x, yy, z, a0 + yy + i * (Math.PI * 2 / nb), Math.max(1, Math.round(rr - 0.8)), 0.6, -0.15, null, false); }
         blob(x, yy, z, layer ? rr : Math.max(1, rr - 1.1), 0);
       }
       leaf(x, y + H, z); leaf(x, y + H + 1, z);
       break;
     }
     case 'jungle': {
-      const H = Math.max(4, Math.round((13 + r() * 6) * s) + 1), T0 = Math.round(7 * s + 0.3), Tt = Math.max(1, Math.round(T0 * 0.4)); trunk(H, T0, Tt);
-      const nb = Math.max(1, Math.round(4 * s));
-      for (let i = 0; i < nb; i++) { const hy = y + Math.floor(H * (0.68 + 0.27 * r())); branch(x, hy, z, a0 + i * (Math.PI * 2 / nb), Math.max(1, Math.round((3.5 + r() * 2) * s)), Math.max(0, tAt(H, T0, Tt, hy) - 2), 0.45, (cx, cy, cz) => blob(cx, cy + 1, cz, 3 * s + 0.5, 1.6 * s + 0.4, true), s > 0.6); }
-      blob(x, y + H, z, 3.6 * s + 0.5, 2 * s + 0.4, true);
+      const H = Math.max(4, Math.round((13 + r() * 6) * s * gN) + 1), T0 = Math.round(7 * s + 0.3), Tt = Math.max(1, Math.round(T0 * 0.4)); trunk(H, T0, Tt);
+      const nb = Math.max(1, Math.round(3 * s)) + (n - 1);
+      for (let i = 0; i < nb; i++) { const hy = y + Math.floor(H * (0.72 + 0.23 * r())); branch(x, hy, z, a0 + i * (Math.PI * 2 / nb), Math.max(1, Math.round((3 + r() * 1.5) * s + wN)), Math.max(0, tAt(H, T0, Tt, hy) - 2), 0.55, (cx, cy, cz) => blob(cx, cy, cz, 3 * s + 0.5 + wN * 0.5, 1.8 * s + 0.5, true), false); }
+      blob(x, y + H, z, 3.6 * s + 0.5 + wN, 2 * s + 0.4 + wN * 0.4, true);
       break;
     }
     case 'acacia': {
-      const h1 = Math.max(1, Math.round(3.5 * s) + 1), T0 = Math.round(5.5 * s + 0.3); trunk(h1, T0, T0 - 1);
+      const h1 = Math.max(1, Math.round(3.5 * s * gN) + 1), T0 = Math.round(5.5 * s + 0.3); trunk(h1, T0, T0 - 1);
       const limbs = s > 0.5 ? 2 + (r() < 0.4 ? 1 : 0) : 1;
       for (let i = 0; i < limbs; i++) {
         const ang = a0 + i * (Math.PI * 2 / limbs) + (r() - 0.5) * 0.6;
@@ -2183,7 +2225,13 @@ function dynTreePlan(sp, x, y, z, stage, seed) {
       break;
     }
   }
-  return { logs, leaves, leafId: sp + '_leaves', logId: 'dyn_' + sp + '_log' };
+  // ramas tapadas: la parte de cada rama que se aleja del tronco va envuelta en hojas (no quedan palos pelados asomando)
+  if (sp !== 'acacia') for (const [k, [a, b, c]] of [...logs]) {
+    if (trunkSet.has(k) || b < y + 2) continue; const lx = a - x, lz = c - z;
+    const ex = Math.max(o0 - lx, lx - (o0 + n - 1), 0), ez = Math.max(o0 - lz, lz - (o0 + n - 1), 0); if (Math.max(ex, ez) < 2) continue;
+    leaf(a + 1, b, c); leaf(a - 1, b, c); leaf(a, b, c + 1); leaf(a, b, c - 1); leaf(a, b + 1, c); if (r() < 0.6) leaf(a, b - 1, c);
+  }
+  return { logs, leaves, base, n, leafId: sp + '_leaves', logId: 'dyn_' + sp + '_log' };
 }
 // coloca (o hace crecer) el árbol: las ramas solo ocupan aire, plantas, hojas o ramas del mismo árbol; las hojas solo aire
 function dynTreePlace(S, x, y, z, sp, stage, seed, stumpKeep) {
@@ -2197,14 +2245,14 @@ function dynTreePlace(S, x, y, z, sp, stage, seed, stumpKeep) {
   if (live) {
     const comp = new Map(), st = [[x, y, z]]; comp.set(K(x, y, z), [x, y, z]);
     while (st.length && comp.size < 800) { const [a, b, c] = st.pop(); for (const [dx, dy, dz] of N6) { const p = a + dx, q = b + dy, t = c + dz; const k = K(p, q, t); if (comp.has(k) || Math.abs(p - x) > 12 || Math.abs(t - z) > 12) continue; const nb = S.get(p, q, t); if (nb > 0 && REG[nb].dynLog) { comp.set(k, [p, q, t]); st.push([p, q, t]); } } }
-    const ow = new Map(), oq = []; for (const [k, [a, b, c]] of comp) if (k === K(x, y, z) || ground(S.get(a, b - 1, c))) { ow.set(k, k); oq.push(k); }
+    const ow = new Map(), oq = []; for (const [k, [a, b, c]] of comp) if (k === K(x, y, z) || P.base.has(k) || ground(S.get(a, b - 1, c))) { ow.set(k, P.base.has(k) ? K(x, y, z) : k); oq.push(k); }
     for (let i = 0; i < oq.length; i++) { const k = oq[i]; const [a, b, c] = comp.get(k); for (const [dx, dy, dz] of N6) { const nk = K(a + dx, b + dy, c + dz); if (comp.has(nk) && !ow.has(nk)) { ow.set(nk, ow.get(k)); oq.push(nk); } } }
     own = new Set(); for (const [k, o] of ow) if (o === K(x, y, z)) own.add(k);
   }
   const ok = (a, b, c, root) => {
     const cur = S.get(a, b, c); if (cur < 0) return false; const cd = cur > 0 ? REG[cur] : null;
     if (cur !== 0 && cur !== ID.water && !(cd && (cd.replace || cd.leaves || cur === logId))) return false;
-    if (!root && !P.logs.has(K(a, b - 1, c)) && ground(S.get(a, b - 1, c))) return false;
+    if (!root && !P.logs.has(K(a, b - 1, c)) && ground(S.get(a, b - 1, c))) return false; // solo la base del tronco (1x1, 2x2 o 3x3) toca el suelo
     for (const [dx, dy, dz] of N6) { const k = K(a + dx, b + dy, c + dz); if (P.logs.has(k)) continue; const nb = S.get(a + dx, b + dy, c + dz); if (nb > 0 && REG[nb].dynLog && !(own && own.has(k))) return false; }
     return true;
   };
@@ -2212,8 +2260,9 @@ function dynTreePlace(S, x, y, z, sp, stage, seed, stumpKeep) {
   const seen = new Set([rk]), q = [P.logs.get(rk)];
   while (q.length) {
     const [a, b, c, t] = q.pop(); let tt = t; if (live && S.get(a, b, c) === logId) tt = Math.max(t, S.getMeta(a, b, c) & 7);
-    const root = a === x && b === y && c === z; S.set(a, b, c, logId, tt | (root ? (stage & 3) << 3 : 0));
-    for (const [dx, dy, dz] of N6) { const k = K(a + dx, b + dy, c + dz); if (seen.has(k) || !P.logs.has(k)) continue; seen.add(k); const L = P.logs.get(k); if (ok(L[0], L[1], L[2], false)) q.push(L); }
+    // la raíz principal guarda la fase; el resto de la base de un tronco grueso se marca (64) como raíz secundaria
+    const root = a === x && b === y && c === z; S.set(a, b, c, logId, tt | (root ? (stage & 3) << 3 : P.base.has(K(a, b, c)) ? 64 : 0));
+    for (const [dx, dy, dz] of N6) { const k = K(a + dx, b + dy, c + dz); if (seen.has(k) || !P.logs.has(k)) continue; seen.add(k); const L = P.logs.get(k); if (ok(L[0], L[1], L[2], P.base.has(k))) q.push(L); }
   }
   for (const [a, b, c] of P.leaves.values()) S.setIfAir(a, b, c, leafId);
 }
@@ -2594,17 +2643,21 @@ defStruct({
   build(S, c, r) {
     const y = S.colH(c.x, c.z); const R = 10;
     for (let x = c.x - R; x <= c.x + R; x++) for (let z = c.z - R; z <= c.z + R; z++) S.foundation(x, z, y, ID.sandstone);
-    for (let k = 0; k <= R; k++) S.fillFn(c.x - R + k, y + k, c.z - R + k, c.x + R - k, y + k, c.z + R - k, (x, yy, z) => (Math.abs(x - c.x) === R - k || Math.abs(z - c.z) === R - k || k === 0 || k === R) ? (k % 4 === 2 ? ID.orange_terracotta : ID.sandstone) : 0);
-    S.fill(c.x - R + 1, y + 1, c.z - R + 1, c.x + R - 1, y + 6, c.z + R - 1, 0);
-    S.fill(c.x - R + 1, y + 1, c.z - R + 1, c.x + R - 1, y + 1, c.z + R - 1, ID.sandstone);
+    // cuerpo escalonado: paredes en cada capa, hueco por dentro hasta la 6.ª (la sala) y macizo por encima
+    // (antes el vaciado de la sala se comía las paredes de las 6 primeras capas y la pirámide salía cortada)
+    for (let k = 0; k <= R; k++) S.fillFn(c.x - R + k, y + k, c.z - R + k, c.x + R - k, y + k, c.z + R - k, (x, yy, z) => {
+      const m = Math.max(Math.abs(x - c.x), Math.abs(z - c.z)); const edge = m === R - k;
+      if (edge || k === 0 || k === 1 || k > 6) return edge && k % 4 === 2 ? ID.orange_terracotta : ID.sandstone; return 0; });
     for (const [tx, tz] of [[c.x - R, c.z - R], [c.x + R - 4, c.z - R]]) S.fill(tx, y, tz, tx + 4, y + 10, tz + 4, ID.cut_sandstone);
-    S.fill(c.x - 1, y + 1, c.z - R, c.x + 1, y + 3, c.z - R + 1, 0);
+    S.fill(c.x - 1, y + 1, c.z - R, c.x + 1, y + 3, c.z - R + 3, 0); // entrada: atraviesa todas las capas de la fachada
     S.set(c.x, y + 1, c.z, ID.blue_terracotta); for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) S.set(c.x + dx, y + 1, c.z + dz, ID.orange_terracotta);
+    // cámara del tesoro bajo el suelo, con el pozo escondido bajo la terracota azul
     S.fill(c.x - 4, y - 12, c.z - 4, c.x + 4, y - 1, c.z + 4, ID.sandstone); S.fill(c.x - 3, y - 11, c.z - 3, c.x + 3, y - 2, c.z + 3, 0);
-    S.fill(c.x - 1, y - 2, c.z - 1, c.x + 1, y, c.z + 1, 0); S.set(c.x, y + 1, c.z, 0);
+    S.fill(c.x - 1, y - 2, c.z - 1, c.x + 1, y, c.z + 1, 0);
     S.chest(c.x, y - 11, c.z - 3, 'desert_pyramid'); S.chest(c.x, y - 11, c.z + 3, 'desert_pyramid'); S.chest(c.x - 3, y - 11, c.z, 'desert_pyramid'); S.chest(c.x + 3, y - 11, c.z, 'desert_pyramid');
+    // trampa: placa de presión en el centro y 9 dinamitas debajo del suelo (pisarla las prende)
     S.fill(c.x - 1, y - 13, c.z - 1, c.x + 1, y - 13, c.z + 1, ID.tnt);
-    S.set(c.x, y - 11, c.z, ID.stone_slab);
+    S.set(c.x, y - 11, c.z, ID.stone_pressure_plate);
   }
 });
 // 8. PUESTO DE SAQUEADORES ----------------------------------------
@@ -2644,20 +2697,85 @@ defStruct({
   }
 });
 // 10. BARCOS NAUFRAGADOS -------------------------------------------
+// casco común: eslora 2L+1, manga que se estrecha en proa y popa
+const shipHalfW = (a, L) => 3 - Math.max(0, Math.abs(a) - (L - 4));
+const OCEAN_SHIP = [BI.ocean, BI.deep_ocean, BI.warm_ocean, BI.frozen_ocean];
 defStruct({
-  name: 'shipwreck', dim: 'overworld', spacing: 16, radius: 14, sep: 4, chance: 0.6,
-  place(gen, x, z) { const c = gen.col(x, z); if (![BI.ocean, BI.deep_ocean, BI.warm_ocean, BI.beach, BI.frozen_ocean].includes(c.biome)) return null; return { water: true, rot: hash2(gen.seed, x, z) < 0.5 }; },
+  name: 'shipwreck', dim: 'overworld', spacing: 16, radius: 16, sep: 4, chance: 0.6,
+  // solo en mar con fondo suficiente para quedar del todo bajo el agua
+  place(gen, x, z) { const c = gen.col(x, z); if (!OCEAN_SHIP.includes(c.biome) || c.h > SEA - 9) return null; const h = hash2(gen.seed + 3, x, z); return { water: true, rot: hash2(gen.seed, x, z) < 0.5, roll: (h - 0.5) * 0.9, pitch: (hash2(gen.seed + 4, x, z) - 0.5) * 0.25, breach: 2 + ((h * 97) % 1) * 12 | 0 }; },
   build(S, c, r) {
-    const y = S.colH(c.x, c.z); const L = 11; const P = ID.spruce_planks, P2 = ID.oak_planks, LOG = ID.spruce_log;
-    const put = (a, h, b, id) => { if (c.rot) S.set(c.x + b, y + h, c.z + a, id); else S.set(c.x + a, y + h, c.z + b, id); };
-    const broken = (a, h, b) => hash3(c.seed, a, h, b) < 0.18;
+    // hundido de verdad: semienterrado en la arena, escorado y cabeceado, con medio casco destrozado y el mástil partido
+    const y = S.colH(c.x, c.z) - 1; const L = 11; const P = ID.spruce_planks, P2 = ID.oak_planks, LOG = ID.spruce_log || ID.oak_log;
+    const W = (a, b) => c.rot ? [c.x + b, c.z + a] : [c.x + a, c.z + b];
+    const yAt = (a, h, b) => y + h + Math.round(b * c.roll + a * c.pitch);
+    const put = (a, h, b, id) => { const [wx, wz] = W(a, b); const yy = yAt(a, h, b); if (id === 0 && yy <= S.colH(wx, wz)) id = hash3(c.seed, wx, yy, wz) < 0.3 ? ID.gravel : ID.sand; S.set(wx, yy, wz, id); };
+    const rot = (a, h, b) => { const q = hash3(c.seed, a, h, b); const hole = b > 0 && a >= c.breach - L && a < c.breach - L + 4 && h >= 1; return hole || q < (h >= 3 ? 0.55 : 0.3); };
     for (let a = -L; a <= L; a++) {
-      const taper = Math.max(0, Math.abs(a) - (L - 4)); const w = 3 - taper;
-      for (let h = 0; h <= 4; h++) { const ww = h === 0 ? w - 1 : w; for (let b = -ww; b <= ww; b++) { const shell = h === 0 || Math.abs(b) === ww || (h === 2 && Math.abs(a) < L - 2); if (shell) { if (!broken(a, h, b)) put(a, h, b, h === 2 ? P2 : P); } else put(a, h, b, 0); } }
+      const w = shipHalfW(a, L);
+      for (let h = 0; h <= 4; h++) { const ww = h === 0 ? w - 1 : w; for (let b = -ww; b <= ww; b++) {
+        const shell = h === 0 || Math.abs(b) === ww || (h === 2 && Math.abs(a) < L - 2);
+        if (shell) { if (!rot(a, h, b)) put(a, h, b, h === 2 ? P2 : P); else if (h > 0) put(a, h, b, 0); } else put(a, h, b, 0);
+      } }
     }
-    for (let h = 3; h < 12; h++) if (!broken(0, h, 99)) put(0, h, 0, LOG); for (let b = -3; b <= 3; b++) put(0, 9, b, LOG);
-    put(-L + 3, 1, 0, ID.chest); const cx = c.rot ? c.x : c.x - L + 3, cz = c.rot ? c.z - L + 3 : c.z; S.chest(cx, y + 1, cz, 'shipwreck');
-    const cx2 = c.rot ? c.x : c.x + L - 3, cz2 = c.rot ? c.z + L - 3 : c.z; S.chest(cx2, y + 1, cz2, 'shipwreck_treasure');
+    // mástil: un tocón en cubierta y el resto tirado en el fondo junto al barco
+    const stump = 2 + (r() * 2 | 0); for (let h = 3; h < 3 + stump; h++) put(0, h, 0, LOG);
+    const side = r() < 0.5 ? -1 : 1; for (let k = 0; k < 7; k++) { const [wx, wz] = W(-2 + k, side * 5); S.set(wx, S.colH(wx, wz) + 1, wz, LOG); }
+    for (let k = -2; k <= 2; k++) { const [wx, wz] = W(3, side * 5 + k); S.set(wx, S.colH(wx, wz) + 1, wz, LOG); }
+    for (let i = 0; i < 6; i++) { const [wx, wz] = W(Math.round((r() - 0.5) * 2 * (L + 3)), Math.round((r() - 0.5) * 12)); S.set(wx, S.colH(wx, wz) + 1, wz, r() < 0.5 ? P : P2); } // tablas sueltas
+    const [cx, cz] = W(-L + 3, 0); S.chest(cx, yAt(-L + 3, 1, 0), cz, 'shipwreck');
+    const [cx2, cz2] = W(L - 3, 0); S.chest(cx2, yAt(L - 3, 1, 0), cz2, 'shipwreck_treasure');
+  }
+});
+// 10b. BARCOS PIRATA -----------------------------------------------
+// el barco entero, flotando y en perfecto estado: bodega seca bajo cubierta, dos mástiles con velas, camarote del capitán,
+// cofres con botín y saqueadores (los piratas) a bordo
+defStruct({
+  name: 'pirate_ship', dim: 'overworld', spacing: 28, radius: 18, sep: 6, chance: 0.45,
+  place(gen, x, z) { const c = gen.col(x, z); if (!OCEAN_SHIP.includes(c.biome) || c.h > SEA - 6 || c.biome === BI.frozen_ocean) return null; return { water: true, rot: hash2(gen.seed + 7, x, z) < 0.5 }; },
+  build(S, c, r) {
+    const L = 12, y0 = SEA - 2; const HULL = ID.dark_oak_planks, DECK = ID.spruce_planks, LOG = ID.dark_oak_log || ID.oak_log, SAIL = ID.white_wool, RAIL = ID.dark_oak_fence;
+    const W = (a, b) => c.rot ? [c.x + b, c.z + a] : [c.x + a, c.z + b];
+    const put = (a, yy, b, id) => { const [wx, wz] = W(a, b); S.set(wx, yy, wz, id); };
+    const air = (a, yy, b) => { const [wx, wz] = W(a, b); if (S.inside(wx, yy, wz)) { S.c.blocks[(wx - S.x0) | (wz - S.z0) << 4 | yy << 8] = 0; S.c.meta[(wx - S.x0) | (wz - S.z0) << 4 | yy << 8] = 0; } };
+    for (let a = -L; a <= L; a++) {
+      const w = shipHalfW(a, L); const keel = Math.abs(a) > L - 3 ? 1 : 0; // proa y popa algo más altas
+      for (let yy = y0 + keel; yy <= y0 + 4; yy++) { const h = yy - y0; const ww = h === keel ? w - 1 : w;
+        for (let b = -w; b <= w; b++) {
+          if (Math.abs(b) > ww) { if (yy <= SEA) put(a, yy, b, HULL); continue; } // pantoque
+          const edge = Math.abs(b) === ww || Math.abs(a) === L;
+          if (h === keel) put(a, yy, b, HULL);
+          else if (h === 3) put(a, yy, b, edge ? HULL : DECK); // cubierta
+          else if (h === 4) { if (edge) put(a, yy, b, RAIL); else air(a, yy, b); }
+          else if (edge) put(a, yy, b, HULL); else air(a, yy, b); // bodega seca
+        }
+      }
+    }
+    // camarote del capitán en popa
+    for (let a = L - 5; a <= L - 1; a++) for (let yy = y0 + 4; yy <= y0 + 6; yy++) for (let b = -2; b <= 2; b++) {
+      const edge = Math.abs(b) === 2 || a === L - 5 || a === L - 1; if (yy === y0 + 6) put(a, yy, b, HULL); else if (edge) put(a, yy, b, (yy === y0 + 5 && Math.abs(b) === 2 && a === L - 3) ? ID.glass : HULL); else air(a, yy, b);
+    }
+    air(L - 5, y0 + 4, 0); air(L - 5, y0 + 5, 0); // puerta
+    for (let b = -2; b <= 2; b++) put(L - 3, y0 + 7, b, RAIL);
+    // mástiles con verga y vela
+    for (const [ma, mh] of [[-4, 11], [3, 13]]) {
+      for (let yy = y0 + 3; yy <= y0 + 3 + mh; yy++) put(ma, yy, 0, LOG);
+      const top = y0 + 3 + mh; for (let b = -4; b <= 4; b++) { put(ma, top - 1, b, LOG); put(ma, top - 7, b, LOG); }
+      for (let yy = top - 6; yy <= top - 2; yy++) for (let b = -4; b <= 4; b++) if (Math.abs(b) < 4 || yy < top - 2) put(ma - 1, yy, b, SAIL);
+    }
+    put(3, y0 + 17, 1, ID.black_wool || SAIL); put(3, y0 + 17, 2, ID.black_wool || SAIL); put(3, y0 + 16, 1, ID.black_wool || SAIL); put(3, y0 + 16, 2, ID.black_wool || SAIL); // bandera
+    for (let k = 1; k <= 4; k++) put(-L - k, y0 + 3 + (k >> 1), 0, LOG); // bauprés
+    // escotilla y escalera a la bodega
+    air(0, y0 + 3, 1); for (let yy = y0 + 1; yy <= y0 + 3; yy++) put(0, yy, 2, ID.ladder);
+    put(-6, y0 + 4, 2, ID.lantern); put(6, y0 + 4, -2, ID.lantern); put(L - 3, y0 + 5, 0, ID.lantern); put(-2, y0 + 1, -2, ID.lantern);
+    for (const [a, b] of [[-7, -1], [-7, 1], [5, 1]]) put(a, y0 + 1, b, ID.barrel || HULL);
+    // cofres: dos en la bodega y el tesoro en el camarote
+    const ch = (a, yy, b, t) => { const [wx, wz] = W(a, b); S.chest(wx, yy, wz, t); };
+    ch(-5, y0 + 1, -2, 'pirate'); ch(4, y0 + 1, -2, 'pirate'); ch(L - 2, y0 + 4, 0, 'pirate_treasure');
+    // piratas
+    for (let i = 0; i < 4; i++) { const [wx, wz] = W(-8 + i * 4, (i % 2 ? 1 : -1)); S.mob('pillager', wx + 0.5, y0 + 4, wz + 0.5); }
+    { const [wx, wz] = W(-3, 0); S.mob('pillager', wx + 0.5, y0 + 1, wz + 0.5); }
+    { const [wx, wz] = W(L - 3, 1); S.mob(r() < 0.5 ? 'vindicator' : 'pillager', wx + 0.5, y0 + 4, wz + 0.5); } // el capitán
   }
 });
 // 11. TEMPLO DE LA JUNGLA -----------------------------------------
@@ -2771,6 +2889,8 @@ const LOOT = {
   outpost: [['arrow', 2, 7, 3], ['wheat', 3, 5, 3], ['iron_ingot', 1, 3, 2], ['bow', 1, 1, 2], ['dark_oak_log', 2, 3, 2], ['emerald', 1, 2, 1]],
   mineshaft: [['rail', 4, 8, 4], ['torch', 1, 16, 4], ['iron_ingot', 1, 5, 4], ['gold_ingot', 1, 3, 3], ['redstone', 4, 9, 3], ['lapis_lazuli', 4, 9, 3], ['diamond', 1, 2, 1], ['coal', 3, 8, 4], ['bread', 1, 3, 3]],
   shipwreck: [['paper', 1, 10, 4], ['coal', 2, 8, 3], ['wheat', 4, 10, 3], ['rotten_flesh', 2, 10, 3], ['leather_helmet', 1, 1, 1], ['bread', 1, 3, 2]],
+  pirate: [['gold_nugget', 3, 12, 4], ['gold_ingot', 1, 4, 3], ['iron_ingot', 2, 6, 3], ['emerald', 1, 4, 3], ['arrow', 6, 18, 3], ['crossbow', 1, 1, 1], ['gunpowder', 2, 6, 2], ['bread', 2, 5, 2], ['cooked_cod', 2, 6, 2], ['map', 1, 1, 1]],
+  pirate_treasure: [['diamond', 1, 4, 3], ['gold_ingot', 3, 9, 4], ['emerald', 2, 8, 3], ['gold_block', 1, 2, 1], ['heart_of_the_sea', 1, 1, 2], ['golden_apple', 1, 2, 2], ['enchanted_golden_apple', 1, 1, 0.3], ['diamond_sword', 1, 1, 1], ['totem_of_undying', 1, 1, 0.5]],
   shipwreck_treasure: [['iron_ingot', 3, 8, 4], ['gold_ingot', 1, 5, 3], ['emerald', 1, 5, 3], ['diamond', 1, 1, 1], ['gold_nugget', 1, 10, 3], ['heart_of_the_sea', 1, 1, 2], ['lapis_lazuli', 1, 10, 3]],
   jungle_temple: [['bone', 4, 8, 4], ['gold_ingot', 2, 7, 3], ['iron_ingot', 1, 5, 3], ['emerald', 1, 3, 2], ['diamond', 1, 3, 2], ['saddle', 1, 1, 1], ['rotten_flesh', 3, 7, 3]],
   dungeon: [['bread', 1, 2, 4], ['saddle', 1, 1, 2], ['iron_ingot', 1, 4, 3], ['gold_ingot', 1, 4, 2], ['string', 1, 4, 3], ['gunpowder', 1, 4, 3], ['golden_apple', 1, 1, 1], ['bucket', 1, 1, 2], ['redstone', 1, 4, 2]],
@@ -2994,14 +3114,22 @@ let MESH_QUALITY = 2;
 // olas lejos de la orilla: a menos de MESH_SHORE bloques de la cara de tierra el mar no tiene oleaje (no deja al aire
 // los bloques de la orilla al bajar); después crece en una rampa de 4 bloques
 let MESH_SHORE = 3; const SHORE_RAMP = 4; let SHORE_C = new Map();
+// lo que frena el oleaje como orilla: solo el terreno natural (arena, tierra, roca, hielo...) y el aire; los barcos hundidos,
+// ruinas y demás estructuras del mar (o lo construido con madera, ladrillo...) no lo calman
+let SHORE_B = null;
+function shoreTable() {
+  SHORE_B = new Uint8Array(REG.length + 1); SHORE_B[0] = 1;
+  const re = /^(sand|red_sand|sandstone|red_sandstone|smooth_sandstone|gravel|dirt|coarse_dirt|rooted_dirt|grass_block|snowy_grass|podzol|mycelium|mud|clay|stone|granite|diorite|andesite|deepslate|tuff|calcite|dripstone_block|ice|packed_ice|blue_ice|snow_block|moss_block|terracotta|[a-z_]+_terracotta|bedrock|netherrack|end_stone)$/;
+  for (let i = 1; i < REG.length; i++) { const d = REG[i]; if (d && d.name && re.test(d.name) && !/glazed/.test(d.name)) SHORE_B[i] = 1; }
+}
 function shoreW(px, y, pz) { // px,pz: coordenadas locales del chunk (pueden ser fraccionarias)
-  if (MESH_SHORE <= 0) return 1;
+  if (MESH_SHORE <= 0) return 1; if (!SHORE_B) shoreTable();
   const key = (y * 512 + Math.round(px * 4) + 64) * 512 + Math.round(pz * 4) + 64; let r = SHORE_C.get(key); if (r !== undefined) return r;
   const R = Math.min(LP - 1, MESH_SHORE + SHORE_RAMP); let best = R + 1;
   const x0 = Math.floor(px - R), x1 = Math.ceil(px + R), z0 = Math.floor(pz - R), z1 = Math.ceil(pz + R);
   for (let b = z0; b < z1; b++) { const dz = Math.max(b - pz, 0, pz - (b + 1)); if (dz >= best) continue;
     for (let a = x0; a < x1; a++) { const dx = Math.max(a - px, 0, px - (a + 1)); if (dx >= best) continue;
-      const c = ((y + 1) * LR + b + LP + 1) * LR + a + LP + 1; if (isLiqB(regB[c], 1)) continue; const d = Math.hypot(dx, dz); if (d < best) best = d; } }
+      const c = ((y + 1) * LR + b + LP + 1) * LR + a + LP + 1; const bb = regB[c]; if (isLiqB(bb, 1) || !SHORE_B[bb]) continue; const d = Math.hypot(dx, dz); if (d < best) best = d; } }
   const t = clamp((best - MESH_SHORE) / SHORE_RAMP, 0, 1); r = t * t * (3 - 2 * t); SHORE_C.set(key, r); return r;
 }
 function buildMesh(world, ch) { buildRegion(world, ch); return meshRegion(world, ch); }
@@ -3526,12 +3654,23 @@ vec3 applyFog(vec3 col, vec3 p, float sv){
 vec3 aces(vec3 x){ return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14),0.0,1.0); }
 // olas de océano (Gerstner, solo altura): devuelve [altura, dh/dx, dh/dz]; amplitud según el tiempo (lluvia = mar picado)
 float waveA(){ return (0.16+u_rain*0.55)*u_gfx.x; }
+// distancia a la costa (textura de k_fluids/WD, bilineal) y su gradiente; fuera de la rejilla, mar abierto
+uniform highp sampler2D u_wdist; uniform vec4 u_wdRect;
+vec3 shoreDist(vec2 p){ if(u_wdRect.w<0.5) return vec3(1e4,0.0,0.0); vec2 q=(p-u_wdRect.xy)*u_wdRect.z; ivec2 b=ivec2(floor(q)); vec2 f=q-vec2(b);
+  if(b.x<0||b.y<0||b.x>=63||b.y>=63) return vec3(1e4,0.0,0.0);
+  float a=texelFetch(u_wdist,b,0).r, c=texelFetch(u_wdist,b+ivec2(1,0),0).r, d=texelFetch(u_wdist,b+ivec2(0,1),0).r, e=texelFetch(u_wdist,b+ivec2(1,1),0).r;
+  return vec3(mix(mix(a,c,f.x),mix(d,e,f.x),f.y), mix(c-a,e-d,f.y)*u_wdRect.z, mix(d-a,e-c,f.x)*u_wdRect.z); }
+// nivel medio casi en el de reposo y valles más planos que las crestas (igual que waveLift en k_fluids)
+float waveLift(float h, float A){ float v=h*0.85+A*0.2; return (v<0.0?v*0.5:v)-0.05; }
+// las 3 olas largas avanzan hacia la costa (fase = -distancia a tierra); mar adentro se funden con el oleaje global
 vec3 oceanWave(vec2 p){
   float A=waveA(); vec3 r=vec3(0.0);
   const vec4 W[5]=vec4[5](vec4(0.81,0.59,22.0,0.42),vec4(0.97,-0.24,13.0,0.26),vec4(0.45,0.89,8.5,0.16),vec4(-0.2,0.98,5.2,0.09),vec4(0.7,-0.71,3.4,0.05));
-  for(int i=0;i<5;i++){ vec2 d=W[i].xy; float k=6.2832/W[i].z; float c=sqrt(9.8/k); float ph=k*(dot(d,p)-c*u_time*0.55)+float(i)*1.7;
-    float a=A*W[i].w*2.2; float s=sin(ph), co=cos(ph); float sh=pow(s*0.5+0.5,1.6)*2.0-1.0; // crestas más agudas que los valles
-    r.x+=a*sh; r.yz+=a*k*co*d*0.9; }
+  vec3 sd=shoreDist(p); float wf=smoothstep(100.0,150.0,sd.x); vec2 gs=length(sd.yz)>1e-4?-normalize(sd.yz):vec2(0.81,0.59);
+  float Sp=sd.x+2.5*sin(p.x*0.045+p.y*0.02)*sin(p.y*0.05-p.x*0.015);
+  for(int i=0;i<5;i++){ float k=6.2832/W[i].z; float c=sqrt(9.8/k); float a=A*W[i].w*2.2; float gw=i<3?wf:1.0;
+    if(gw>0.001){ vec2 d=W[i].xy; float ph=k*(dot(d,p)-c*u_time*0.55)+float(i)*1.7; float s=sin(ph), co=cos(ph); r.x+=a*gw*(pow(s*0.5+0.5,1.6)*2.0-1.0); r.yz+=a*gw*k*co*d*0.9; } // crestas más agudas que los valles
+    if(gw<0.999){ float ph=k*(-Sp-c*u_time*0.55)+float(i)*1.7; float s=sin(ph), co=cos(ph); r.x+=a*(1.0-gw)*(pow(s*0.5+0.5,1.6)*2.0-1.0); r.yz+=a*(1.0-gw)*k*co*gs*0.9; } }
   return r;
 }
 `;
@@ -3557,7 +3696,7 @@ void main(){
   uint tc=uint(a_lit.w*255.0+0.5);
   if((fl&64u)!=0u && (fl&7u)==2u){
     float ow=(fl&32768u)!=0u ? oceanW : (tc<200u?1.0:0.0); // peso del oleaje: 1 en mar abierto, fracción donde el mar toca agua dulce (sin escalones)
-    if(ow>0.0){ float A=waveA(); p.y+=(oceanWave(w.xz).x*0.85 - A*1.1 - 0.05 + u_tide)*ow; } // oleaje + marea
+    if(ow>0.0){ float A=waveA(); p.y+=(waveLift(oceanWave(w.xz).x,A) + u_tide)*ow; } // oleaje + marea
   }
   // chorro que cae: el tubo ondula como un líquido de verdad
   if((fl&32768u)!=0u && tc==201u){ float wv=sin(w.y*2.3-u_time*9.0+w.x*1.7)*0.035+sin(w.y*5.1-u_time*14.0+w.z*2.3)*0.018; p.x+=wv*v_n.x+wv*0.5; p.z+=wv*v_n.z-wv*0.4; }
@@ -4319,6 +4458,7 @@ function setCommon(P) {
   if (u.u_nl !== undefined && u.u_nl) { const n = SETTINGS.gfx.dlights === false ? 0 : Math.min(8, R.plights.length); gl.uniform1i(u.u_nl, n); if (n) { const lp = new Float32Array(32), lc = new Float32Array(24); R.plights.slice(0, 8).forEach((l, i) => { lp.set([l.x - R.cam[0], l.y - R.cam[1], l.z - R.cam[2], l.r], i * 4); lc.set(l.c, i * 3); }); gl.uniform4fv(u.u_lp, lp); gl.uniform3fv(u.u_lc, lc); } }
   if (u.u_grass) { gl.uniform3fv(u.u_grass, GRASS_U); gl.uniform3fv(u.u_foli, FOLI_U); }
   if (u.u_gfx) gl.uniform4fv(u.u_gfx, R.gfxU);
+  if (u.u_wdist) wdBind(P);
   if (u.u_tintTex) { gl.activeTexture(gl.TEXTURE11); gl.bindTexture(gl.TEXTURE_2D_ARRAY, R.tintTex); gl.uniform1i(u.u_tintTex, 11); gl.activeTexture(gl.TEXTURE0); gl.uniform1f(u.u_tintOn, R.tintTex && R.tintWorld ? 1 : 0); }
 }
 function frustumPlanes(m) {
@@ -4407,7 +4547,8 @@ function renderWorld(world, cam, yaw, pitch, opts = {}) {
   { const P = R.progs.chunk; gl.useProgram(P.p); setCommon(P); gl.uniformMatrix4fv(P.u.u_vp, false, R.vp); gl.uniform1f(P.u.u_pass, 0);
     for (const c of vis) { const m = c.mesh.o; if (!m) continue; gl.uniform3f(P.u.u_off, c.cx * 16 - cam[0], -cam[1], c.cz * 16 - cam[2]); gl.bindVertexArray(m.vao); gl.drawElements(gl.TRIANGLES, m.count, gl.UNSIGNED_INT, 0); R.stats.tris += m.count / 3; R.stats.draws++; } }
   // entidades
-  if (opts.drawEntities) { const P = R.progs.box; gl.useProgram(P.p); setCommon(P); gl.uniformMatrix4fv(P.u.u_vp, false, R.vp); gl.bindVertexArray(R.cube); opts.drawEntities(); }
+  if (opts.drawEntities) { const P = R.progs.box; gl.useProgram(P.p); setCommon(P); gl.uniformMatrix4fv(P.u.u_vp, false, R.vp); gl.bindVertexArray(R.cube); R.boatMasks = []; opts.drawEntities();
+    if (R.boatMasks.length) { gl.colorMask(false, false, false, false); for (const m of R.boatMasks) drawBox(m, TEX.boat_wood, null, null, null, 0); gl.colorMask(true, true, true, true); } R.boatMasks = null; } // el agua no entra en los botes
   if (typeof flDrawDebug === 'function') flDrawDebug();
   if (opts.drawOverlay) opts.drawOverlay(false);
   // copia para agua
@@ -5013,9 +5154,9 @@ function updatePlayerPhysics(p, dt, input) {
     if (p.inWater && input.sprint && input.f && p.eyeInWater) { const ly = Math.sin(p.pitch); p.vy = lerp(p.vy, ly * 5, dt * 4); }
     else {
       if (p.inLava) p.vy -= 6 * dt;
-      else { // empuje de Arquímedes según la parte del cuerpo bajo la superficie (el mar sube y baja con las olas)
-        const surf = waterSurfaceAt(w, p.x, p.y + 0.1, p.z); const frac = clamp((surf - p.y) / 1.8, 0, 1);
-        p.vy += clamp(9.8 * (frac / 0.83 - 1), -6, 7) * dt;
+      else { // sin pulsar nada el jugador se hunde despacio (como en el clásico); para quedarse arriba hay que nadar
+        const surf = waterSurfaceAt(w, p.x, p.y + 0.1, p.z);
+        p.vy = lerp(p.vy, -0.75, Math.min(1, dt * 2.5));
         const ow = isOceanTop(w, Math.floor(p.x), Math.floor(surf - 0.92 + 0.001), Math.floor(p.z)) ? oceanWaveAt(p.x, p.z) : null; if (ow && !input.f) { p.vx += ow.ux * dt * 1.5; p.vz += ow.uz * dt * 1.5; }
       }
       if (input.jump) p.vy = lerp(p.vy, p.inLava ? 2 : 3.6, dt * 8); else if (input.sneak) p.vy = lerp(p.vy, -3, dt * 4); p.vy = Math.max(p.vy, -3.5); p.vy *= Math.exp(-2.4 * dt); }
@@ -6436,15 +6577,17 @@ function spawnTick() {
   const counts = {}; for (const e of G.entities.values()) if (e instanceof Mob) { const k = e.dim + (e.def.hostile ? 'h' : 'p'); counts[k] = (counts[k] || 0) + 1; }
   for (const p of players) {
     const w = G.worlds[p.dim]; if (!w) continue;
-    const capH = { overworld: 40, nether: 30, end: 18 }[p.dim];
-    if (G.difficulty > 0 && (counts[p.dim + 'h'] || 0) < capH) for (let a = 0; a < 3; a++) {
+    const capH = { overworld: 18, nether: 20, end: 12 }[p.dim]; // tope de hostiles por dimensión (antes 40: las noches eran imposibles)
+    if (G.difficulty > 0 && (counts[p.dim + 'h'] || 0) < capH) for (let a = 0; a < 2; a++) {
       const ang = Math.random() * 6.28, d = 24 + Math.random() * 36; const x = Math.floor(p.x + Math.cos(ang) * d), z = Math.floor(p.z + Math.sin(ang) * d);
       if (!w.chunk(x >> 4, z >> 4)) continue; let y = Math.floor(p.y + (Math.random() - 0.5) * 40); y = clamp(y, 2, w.H - 3);
-      for (let k = 0; k < 16; k++, y--) { const b = w.get(x, y - 1, z); if (b > 0 && T_FULL[b] && b !== ID.bedrock && w.get(x, y, z) === 0 && w.get(x, y + 1, z) === 0) break; }
-      const b0 = w.get(x, y - 1, z); if (!(b0 > 0 && T_FULL[b0]) || w.get(x, y, z) !== 0 || w.get(x, y + 1, z) !== 0) continue;
+      for (let k = 0; k < 16; k++, y--) { const b = w.get(x, y - 1, z); if (b > 0 && T_FULL[b] && !REG[b].leaves && b !== ID.bedrock && w.get(x, y, z) === 0 && w.get(x, y + 1, z) === 0) break; }
+      const b0 = w.get(x, y - 1, z); if (!(b0 > 0 && T_FULL[b0]) || REG[b0].leaves || w.get(x, y, z) !== 0 || w.get(x, y + 1, z) !== 0) continue; // nunca sobre hojas (copas de los bosques)
       const L = w.light(x, y, z); let type = null;
       if (p.dim === 'overworld') {
-        if (effSkyLight(L) > 7 || L[1] > 0) continue;
+        // solo con oscuridad de verdad: sin luz de bloques, y a cielo abierto ni de día ni al atardecer (si no salen y arden con el sol)
+        const eff = effSkyLight(L); if (L[1] > 0 || eff > 4 || (L[0] > 0 && isDay())) continue;
+        if (Math.random() * 5 < eff) continue; // cuanto más oscuro, más probable
         const cb = w.gen.caveBiome(x, y, z); if (cb === BI.deep_dark) continue;
         const bio = w.biomeAt(x, z); const r = Math.random();
         type = r < 0.32 ? (bio === BI.desert ? 'husk' : 'zombie') : r < 0.58 ? 'skeleton' : r < 0.8 ? 'creeper' : r < 0.96 ? 'spider' : 'enderman';
@@ -6459,24 +6602,51 @@ function spawnTick() {
         else type = r < 0.55 ? 'zombified_piglin' : r < 0.7 ? 'ghast' : r < 0.85 ? 'magma_cube' : r < 0.95 ? 'piglin' : 'enderman';
         if (type === 'ghast') { if (w.get(x, y + 4, z) !== 0 || w.get(x + 2, y + 2, z + 2) !== 0) continue; y += 2; }
       } else { if (b0 !== ID.end_stone) continue; type = 'enderman'; }
-      if (!type) continue; const n = type === 'ghast' || type === 'enderman' ? 1 : 1 + (Math.random() * 3 | 0);
+      if (!type) continue; const n = type === 'ghast' || type === 'enderman' ? 1 : 1 + (Math.random() * 2 | 0);
       for (let i = 0; i < n; i++) { const m = spawnMob(type, p.dim, x + 0.5 + (i ? (Math.random() - 0.5) * 2 : 0), y, z + 0.5 + (i ? (Math.random() - 0.5) * 2 : 0)); if (m && type === 'skeleton' && w.dim === 'overworld' && Math.random() < 0.05) { } }
       counts[p.dim + 'h'] = (counts[p.dim + 'h'] || 0) + n;
     }
     // pasivos
     if (p.dim === 'overworld' && G.tick % 200 === 0 && (counts['overworldp'] || 0) < 16) {
       const ang = Math.random() * 6.28, d = 28 + Math.random() * 30; const x = Math.floor(p.x + Math.cos(ang) * d), z = Math.floor(p.z + Math.sin(ang) * d);
-      if (!w.chunk(x >> 4, z >> 4)) continue; const y = w.surfaceY(x, z) + 1; if (w.get(x, y - 1, z) !== ID.grass_block && w.get(x, y - 1, z) !== ID.snowy_grass) continue; if (w.light(x, y, z)[0] < 9) continue;
+      if (!w.chunk(x >> 4, z >> 4)) continue; const y = spawnGroundY(w, x, z); if (y < 2) continue; if (w.get(x, y - 1, z) !== ID.grass_block && w.get(x, y - 1, z) !== ID.snowy_grass) continue; if (w.light(x, y, z)[0] < 9) continue;
       const bio = w.biomeAt(x, z); const kinds = bio === BI.snowy_plains || bio === BI.mountains ? ['goat', 'sheep'] : ['pig', 'cow', 'sheep', 'chicken'];
       const k = kinds[Math.random() * kinds.length | 0]; for (let i = 0; i < 2 + (Math.random() * 2 | 0); i++) spawnMob(k, 'overworld', x + 0.5 + (Math.random() - 0.5) * 3, y, z + 0.5 + (Math.random() - 0.5) * 3);
     }
   }
 }
+// ---- placas de presión: al pisarlas (jugadores, mobs, objetos) se activan y prenden la dinamita conectada: la que toca la
+// placa o el bloque de debajo, y la que haya hasta 3 bloques más abajo (la trampa de la pirámide del desierto)
+const PLATES = new Map(); // dim:x,y,z → ticks que le quedan pulsada
+function plateTick() {
+  if (G.net && G.net.role === 'client') return;
+  const pressed = new Set();
+  const check = e => {
+    if (!e || e.removed || e.dead || (e.flying && e === G.player) || e.boat) return; const w = G.worlds[e.dim]; if (!w) return;
+    const x = Math.floor(e.x), y = Math.floor(e.y + 0.05), z = Math.floor(e.z); const b = w.get(x, y, z);
+    if (!(b > 0 && REG[b].name.endsWith('_pressure_plate')) || e.y - y > 0.3) return;
+    const k = e.dim + ':' + x + ',' + y + ',' + z; pressed.add(k); if (!PLATES.has(k)) plateActivate(w, x, y, z); PLATES.set(k, 10);
+  };
+  check(G.player); for (const e of G.entities.values()) if (e instanceof Mob || e.remotePlayer || e.type === 'item') check(e);
+  for (const [k, t] of PLATES) if (!pressed.has(k)) { if (t <= 1) PLATES.delete(k); else PLATES.set(k, t - 1); }
+}
+function plateActivate(w, x, y, z) {
+  playSound('hit', x + 0.5, y, z + 0.5, 0.4, ID.stone);
+  const fire = (a, b, c) => { if (w.get(a, b, c) === ID.tnt) { setBlockNet(w, a, b, c, 0); igniteTNT(w, a, b, c); } };
+  for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) { fire(x + dx, y + dy, z + dz); fire(x + dx, y - 1 + dy, z + dz); }
+  for (let dy = 2; dy <= 3; dy++) for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) fire(x + dx, y - dy, z + dz);
+}
+// suelo para aparecer en la columna: baja por las copas y troncos hasta el suelo de verdad (nunca encima de las hojas); -1 si no hay hueco
+function spawnGroundY(w, x, z) {
+  let y = w.surfaceY(x, z);
+  while (y > 1) { const b = w.get(x, y, z); const d = b > 0 && REG[b]; if (d && d.solid && !d.leaves && !d.dynLog && !/_log$|_wood$|_stem$/.test(d.name)) break; y--; }
+  return y > 1 && w.get(x, y + 1, z) === 0 && w.get(x, y + 2, z) === 0 ? y + 1 : -1;
+}
 function onChunkGenerated(w, c) {
   if (typeof tintUpload === 'function') tintUpload(w, c);
   if (G.net && G.net.role === 'client') return; if (G.mode !== 'game') return;
   const k = w.dim + ':' + c.cx + ',' + c.cz; if (G.spawned.has(k)) return; G.spawned.add(k);
-  for (const s of c.spawns || []) { let y = s.y; if (y === undefined) { y = w.surfaceY(Math.floor(s.x), Math.floor(s.z)) + 1; if (y < 2) continue; } const m = spawnMob(s.type, w.dim, s.x, y, s.z); if (m && (MOB[s.type].hostile)) m.persist = true; }
+  for (const s of c.spawns || []) { let y = s.y; if (y === undefined) { y = spawnGroundY(w, Math.floor(s.x), Math.floor(s.z)); if (y < 2) continue; } const m = spawnMob(s.type, w.dim, s.x, y, s.z); if (m && (MOB[s.type].hostile)) m.persist = true; }
 }
 function spawnerTick(w, p) {
   const pcx = Math.floor(p.x) >> 4, pcz = Math.floor(p.z) >> 4;
@@ -7924,7 +8094,9 @@ function fluidTick(w, x, y, z) {
   // 3) presión (solo agua): pasar un octavo a una celda del mismo cuerpo 2 octavos más baja
   if (liq === 1 && a >= 2) { const t = pressureTarget(w, x, y, z, a); if (t) { setVol(w, t[0], y, t[1], 1, t[2] + 1, false); setVol(w, x, y, z, 1, a - 1, fallNow); w.scheduleTick(x, y, z, delay, 0); return; } }
   // celda en reposo: actualizar la marca de chorro si cambió
-  const fallBit = (meta & LIQ_FALL) !== 0; if (fallBit !== fallNow) w.set(x, y, z, id, liqMeta(a, fallNow, false));
+  // (solo cambia la marca, no el volumen: sin despertar a las vecinas, o un lago entero se recalcula en cascada)
+  const fallBit = (meta & LIQ_FALL) !== 0;
+  if (fallBit !== fallNow) { const m2 = liqMeta(a, fallNow, false); w.set(x, y, z, id, m2, true); markDirty(w, x, z, true); if (G.net && G.net.role === 'host' && !G.applyingNet) NETBATCH.push([w.dim, x, y, z, id, m2]); }
   // 4) una celda llena rodeada de océano pasa a ser océano (tapar y destapar un hueco en el mar no deja un parche quieto)
   if (liq === 1 && a === 8 && y <= SEA) { let oc = 0; for (const [dx, dz] of N4) if (isOcean(w, x + dx, y, z + dz)) oc++; if (oc >= 2 || (oc >= 1 && isOcean(w, x, y + 1, z))) w.set(x, y, z, ID.water, LIQ_OCEAN); }
 }
@@ -8017,7 +8189,7 @@ function bucketPour(w, x, y, z, liq) {
 function liquidSurface(world, x, y, z) {
   const b = world.get(x, y, z); const d = b > 0 ? REG[b] : null; if (d && d.inWater) return 1; if (!d || !d.liquid) return typeof flSurfIn === 'function' ? flSurfIn(world, x, y, z) : 0;
   const up = world.get(x, y + 1, z); if (up > 0 && REG[up] && REG[up].liquid === d.liquid) return 1;
-  if (b === ID.water && (world.getMeta(x, y, z) & LIQ_OCEAN)) return clamp(0.92 + oceanWaveAt(x + 0.5, z + 0.5).h * oceanShoreW(world, x + 0.5, y, z + 0.5), 0, 1.6); // mar: con olas y marea
+  if (b === ID.water && (world.getMeta(x, y, z) & LIQ_OCEAN)) return clamp(0.92 + oceanWaveAt(x + 0.5, z + 0.5).h * oceanShoreW(world, x + 0.5, y, z + 0.5), 0, 2.6); // mar: con olas y marea
   const m = world.getMeta(x, y, z); if (m & LIQ_FALL) return 1; return liqAmt(m) / 8 * 0.92; // igual que la superficie dibujada (liqTopH)
 }
 // depuración: suma de volumen (en octavos) de un líquido en una caja
@@ -8033,27 +8205,79 @@ function migrateFluidChunk(w, c) {
     M[i] = nm;
   }
 }
-// ---- océano: oleaje Gerstner y marea, idénticos a los del shader (VS_CHUNK/oceanWave), para flotar con las olas
+// ---- océano: oleaje Gerstner y marea, idénticos a los del shader (COMMON/oceanWave y q_fluid/seaWave), para flotar con las olas
+// Las tres olas largas (mar de fondo) avanzan hacia la costa más cercana: su fase es la distancia a tierra (WD, más abajo),
+// así las crestas van paralelas a la orilla y rompen contra ella. Mar adentro (lejos de cualquier costa) se funden con un
+// oleaje global de dirección fija. Las dos cortas (picado del viento) son siempre globales.
 const OCEAN_W = [[0.81, 0.59, 22.0, 0.42], [0.97, -0.24, 13.0, 0.26], [0.45, 0.89, 8.5, 0.16], [-0.2, 0.98, 5.2, 0.09], [0.7, -0.71, 3.4, 0.05]];
 function oceanTide() { return 0.28 * Math.sin(((G.time || 0) % 24000) / 12000 * Math.PI * 2); } // dos mareas por día
-const _OWV = { h: 0, ux: 0, uz: 0 };
+// ---- distancia a la costa: rejilla de WD.N×WD.N muestras cada WD.S bloques alrededor de la cámara, según el relieve generado
+// (las estructuras y lo construido no cuentan); se recalcula por partes cuando la cámara se aleja y se sube como textura
+const WD = { N: 64, S: 8, D: 160, cur: null, job: null, tex: null, gl: null, up: false };
+function wdTick() {
+  const w = G.worlds && G.worlds.overworld; const p = G.player; if (!w || !w.gen || !p || p.dim !== 'overworld') return;
+  const N = WD.N, S = WD.S, half = N * S / 2;
+  if (!WD.job) {
+    const c = WD.cur; if (c && c.w === w && Math.abs(p.x - (c.ox + half)) < 96 && Math.abs(p.z - (c.oz + half)) < 96) return;
+    const ox = Math.floor((p.x - half) / S) * S, oz = Math.floor((p.z - half) / S) * S;
+    WD.job = { w, ox, oz, land: new Uint8Array(N * N), i: 0 };
+  }
+  const J = WD.job; const t0 = performance.now();
+  while (J.i < N * N && performance.now() - t0 < 4) { const i = J.i++; const x = J.ox + (i % N) * S, z = J.oz + ((i / N) | 0) * S; J.land[i] = J.w.gen.col(x, z).h >= SEA ? 1 : 0; }
+  if (J.i < N * N) return;
+  // transformada de distancia (chaflán 3-4, dos pasadas) en bloques, con tope WD.D
+  const d = new Float32Array(N * N); const INF = 1e9; for (let i = 0; i < N * N; i++) d[i] = J.land[i] ? 0 : INF;
+  const a = S, b = S * Math.SQRT2;
+  for (let z = 0; z < N; z++) for (let x = 0; x < N; x++) { const i = x + z * N; let v = d[i]; if (x > 0) v = Math.min(v, d[i - 1] + a); if (z > 0) { v = Math.min(v, d[i - N] + a); if (x > 0) v = Math.min(v, d[i - N - 1] + b); if (x < N - 1) v = Math.min(v, d[i - N + 1] + b); } d[i] = v; }
+  for (let z = N - 1; z >= 0; z--) for (let x = N - 1; x >= 0; x--) { const i = x + z * N; let v = d[i]; if (x < N - 1) v = Math.min(v, d[i + 1] + a); if (z < N - 1) { v = Math.min(v, d[i + N] + a); if (x < N - 1) v = Math.min(v, d[i + N + 1] + b); if (x > 0) v = Math.min(v, d[i + N - 1] + b); } d[i] = v; }
+  for (let i = 0; i < N * N; i++) d[i] = Math.min(WD.D, d[i]);
+  WD.cur = { w, ox: J.ox, oz: J.oz, d }; WD.job = null; WD.up = true;
+}
+// distancia a tierra (bilineal) y su gradiente: [d, dd/dx, dd/dz]; fuera de la rejilla, mar abierto
+const _WDS = [0, 0, 0];
+function wdSample(x, z) {
+  const c = WD.cur; _WDS[0] = 1e4; _WDS[1] = 0; _WDS[2] = 0; if (!c) return _WDS;
+  const N = WD.N, qx = (x - c.ox) / WD.S, qz = (z - c.oz) / WD.S; const bx = Math.floor(qx), bz = Math.floor(qz);
+  if (bx < 0 || bz < 0 || bx >= N - 1 || bz >= N - 1) return _WDS;
+  const fx = qx - bx, fz = qz - bz, i = bx + bz * N; const a = c.d[i], b = c.d[i + 1], e = c.d[i + N], f = c.d[i + N + 1];
+  _WDS[0] = lerp(lerp(a, b, fx), lerp(e, f, fx), fz); _WDS[1] = lerp(b - a, f - e, fz) / WD.S; _WDS[2] = lerp(e - a, f - b, fx) / WD.S; return _WDS;
+}
+// textura R32F con las distancias (unidad 12) para los shaders del agua y del fluido continuo
+function wdBind(P) {
+  const gl = R.gl; const u = P.u; if (!u.u_wdist) return;
+  if (WD.gl !== gl) { WD.gl = gl; WD.tex = gl.createTexture(); gl.activeTexture(gl.TEXTURE12); gl.bindTexture(gl.TEXTURE_2D, WD.tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, WD.N, WD.N, 0, gl.RED, gl.FLOAT, new Float32Array(WD.N * WD.N).fill(WD.D)); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST); WD.up = !!WD.cur; }
+  gl.activeTexture(gl.TEXTURE12); gl.bindTexture(gl.TEXTURE_2D, WD.tex);
+  if (WD.up && WD.cur) { gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, WD.N, WD.N, gl.RED, gl.FLOAT, WD.cur.d); WD.up = false; }
+  gl.uniform1i(u.u_wdist, 12); gl.activeTexture(gl.TEXTURE0);
+  if (u.u_wdRect) { const c = WD.cur; gl.uniform4f(u.u_wdRect, c ? c.ox : 0, c ? c.oz : 0, 1 / WD.S, c && R.dimIdx === 0 ? 1 : 0); }
+}
+// altura con olas → desplazamiento de la superficie: nivel medio casi en el de reposo y valles más planos que las crestas
+// (antes todo el mar bajaba ~1,5·A y con olas grandes dejaba al aire la arena de la orilla)
+function waveLift(h, A) { const v = h * 0.85 + A * 0.2; return (v < 0 ? v * 0.5 : v) - 0.05; }
+const _OWV = { h: 0, ux: 0, uz: 0, raw: 0 };
 // desplazamiento de la superficie respecto al nivel quieto (h) y velocidad orbital horizontal del agua (ux, uz)
 function oceanWaveAt(x, z) {
   const t = (typeof R !== 'undefined' && R.time) ? R.time : performance.now() / 1000; const A = (0.16 + (G.rainLevel || 0) * 0.55) * (typeof R !== 'undefined' && R.gfxU ? R.gfxU[0] : 1); let h = 0, ux = 0, uz = 0;
-  for (let i = 0; i < 5; i++) { const W = OCEAN_W[i]; const k = 6.2832 / W[2], c = Math.sqrt(9.8 / k); const ph = k * (W[0] * x + W[1] * z - c * t * 0.55) + i * 1.7; const a = A * W[3] * 2.2; const s = Math.sin(ph);
-    h += a * (Math.pow(s * 0.5 + 0.5, 1.6) * 2 - 1); const om = k * c * 0.55; ux += a * om * s * W[0]; uz += a * om * s * W[1]; }
-  _OWV.h = h * 0.85 - A * 1.1 - 0.05 + oceanTide(); _OWV.ux = ux; _OWV.uz = uz; return _OWV;
+  const sd = (typeof R === 'undefined' || R.dimIdx === 0) ? wdSample(x, z) : [1e4, 0, 0];
+  const wf = smooth(clamp((sd[0] - (WD.D - 60)) / 50, 0, 1)); let gx = -sd[1], gz = -sd[2]; const gl = Math.hypot(gx, gz); if (gl > 1e-4) { gx /= gl; gz /= gl; } else { gx = 0.81; gz = 0.59; }
+  const Sp = sd[0] + 2.5 * Math.sin(x * 0.045 + z * 0.02) * Math.sin(z * 0.05 - x * 0.015);
+  const comp = (dx, dz, ph, k, c, a) => { const s = Math.sin(ph); h += a * (Math.pow(s * 0.5 + 0.5, 1.6) * 2 - 1); const om = k * c * 0.55; ux += a * om * s * dx; uz += a * om * s * dz; };
+  for (let i = 0; i < 5; i++) { const W = OCEAN_W[i]; const k = 6.2832 / W[2], c = Math.sqrt(9.8 / k); const a = A * W[3] * 2.2;
+    const gw = i < 3 ? wf : 1;
+    if (gw > 0.001) comp(W[0], W[1], k * (W[0] * x + W[1] * z - c * t * 0.55) + i * 1.7, k, c, a * gw);
+    if (gw < 0.999) comp(gx, gz, k * (-Sp - c * t * 0.55) + i * 1.7, k, c, a * (1 - gw)); }
+  _OWV.raw = h; _OWV.h = waveLift(h, A) + oceanTide(); _OWV.ux = ux; _OWV.uz = uz; return _OWV;
 }
 // lo mismo que shoreW (d_mesh) pero contra el mundo: peso del oleaje (0 junto a la orilla) para flotación y nado
 const OSHORE = new Map();
 function oceanShoreW(w, x, y, z) {
-  if (MESH_SHORE <= 0) return 1;
+  if (MESH_SHORE <= 0) return 1; if (!SHORE_B) shoreTable();
   const key = ((Math.round(x * 4) + 4e5) * 8e5 + Math.round(z * 4) + 4e5) * 512 + y; let r = OSHORE.get(key); if (r !== undefined) return r;
   if (OSHORE.size > 20000) OSHORE.clear();
   const R = Math.min(13, MESH_SHORE + SHORE_RAMP); let best = R + 1;
   for (let b = Math.floor(z - R); b < Math.ceil(z + R); b++) { const dz = Math.max(b - z, 0, z - (b + 1)); if (dz >= best) continue;
     for (let a = Math.floor(x - R); a < Math.ceil(x + R); a++) { const dx = Math.max(a - x, 0, x - (a + 1)); if (dx >= best) continue;
-      const bb = w.get(a, y, b); if (bb < 0 || (bb > 0 && (REG[bb].liquid === 1 || REG[bb].inWater))) continue; const d = Math.hypot(dx, dz); if (d < best) best = d; } }
+      const bb = w.get(a, y, b); if (bb < 0 || (bb > 0 && (REG[bb].liquid === 1 || REG[bb].inWater || !SHORE_B[bb]))) continue; const d = Math.hypot(dx, dz); if (d < best) best = d; } }
   const t = clamp((best - MESH_SHORE) / SHORE_RAMP, 0, 1); r = t * t * (3 - 2 * t); OSHORE.set(key, r); return r;
 }
 // celda de mar con aire (o algo no líquido) encima
@@ -8941,11 +9165,20 @@ const float H=0.34, H2=0.1156, RAD=0.066;
 uniform float u_time, u_rain, u_tide; uniform vec3 u_org;
 // oleaje del mar (el mismo que dibuja VS_CHUNK): x = desplazamiento de la superficie, yz = velocidad orbital horizontal
 uniform float u_waveK;
+uniform highp sampler2D u_wdist; uniform vec4 u_wdRect; // distancia a la costa (k_fluids/WD): las olas largas van hacia ella
+vec3 seaShore(vec2 p){ if(u_wdRect.w<0.5) return vec3(1e4,0.0,0.0); vec2 q=(p-u_wdRect.xy)*u_wdRect.z; ivec2 b=ivec2(floor(q)); vec2 f=q-vec2(b);
+  if(b.x<0||b.y<0||b.x>=63||b.y>=63) return vec3(1e4,0.0,0.0);
+  float a=texelFetch(u_wdist,b,0).r, c=texelFetch(u_wdist,b+ivec2(1,0),0).r, d=texelFetch(u_wdist,b+ivec2(0,1),0).r, e=texelFetch(u_wdist,b+ivec2(1,1),0).r;
+  return vec3(mix(mix(a,c,f.x),mix(d,e,f.x),f.y), mix(c-a,e-d,f.y)*u_wdRect.z, mix(d-a,e-c,f.x)*u_wdRect.z); }
 vec3 seaWave(vec2 p){ float A=(0.16+u_rain*0.55)*u_waveK; float h=0.0; vec2 u=vec2(0.0);
   const vec4 W[5]=vec4[5](vec4(0.81,0.59,22.0,0.42),vec4(0.97,-0.24,13.0,0.26),vec4(0.45,0.89,8.5,0.16),vec4(-0.2,0.98,5.2,0.09),vec4(0.7,-0.71,3.4,0.05));
-  for(int i=0;i<5;i++){ vec2 d=W[i].xy; float k=6.2832/W[i].z; float c=sqrt(9.8/k); float ph=k*(dot(d,p)-c*u_time*0.55)+float(i)*1.7; float a=A*W[i].w*2.2; float s=sin(ph);
-    h+=a*(pow(s*0.5+0.5,1.6)*2.0-1.0); u+=a*k*c*0.55*s*d; }
-  return vec3(h*0.85-A*1.1-0.05+u_tide,u); }
+  vec3 sd=seaShore(p); float wf=smoothstep(100.0,150.0,sd.x); vec2 gs=length(sd.yz)>1e-4?-normalize(sd.yz):vec2(0.81,0.59);
+  float Sp=sd.x+2.5*sin(p.x*0.045+p.y*0.02)*sin(p.y*0.05-p.x*0.015);
+  for(int i=0;i<5;i++){ float k=6.2832/W[i].z; float c=sqrt(9.8/k); float a=A*W[i].w*2.2; float gw=i<3?wf:1.0;
+    if(gw>0.001){ vec2 d=W[i].xy; float s=sin(k*(dot(d,p)-c*u_time*0.55)+float(i)*1.7); h+=a*gw*(pow(s*0.5+0.5,1.6)*2.0-1.0); u+=a*gw*k*c*0.55*s*d; }
+    if(gw<0.999){ float s=sin(k*(-Sp-c*u_time*0.55)+float(i)*1.7); h+=a*(1.0-gw)*(pow(s*0.5+0.5,1.6)*2.0-1.0); u+=a*(1.0-gw)*k*c*0.55*s*gs; } }
+  float v=h*0.85+A*0.2; v=(v<0.0?v*0.5:v)-0.05;
+  return vec3(v+u_tide,u); }
 ivec2 tc(int i){ return ivec2(i&255, i>>8); }
 int idx(){ ivec2 f=ivec2(gl_FragCoord.xy); return f.y*256+f.x; }
 uint hashc(ivec3 c){ uvec3 u=uvec3(c+ivec3(4096)); return ((u.x*73856093u)^(u.y*19349663u)^(u.z*83492791u))&262143u; }
@@ -9247,7 +9480,7 @@ function flCommon(P) { const gl = R.gl; const u = P.u;
   if (u.u_waveK) gl.uniform1f(u.u_waveK, R.gfxU ? R.gfxU[0] : 1);
   if (u.u_org) gl.uniform3f(u.u_org, FL.org[0], FL.org[1], FL.org[2]);
   if (u.u_kp) gl.uniform1f(u.u_kp, FL.kp); if (u.u_ks) gl.uniform1f(u.u_ks, FL.ks); if (u.u_eps) gl.uniform1f(u.u_eps, FL.eps);
-  flBindTex(P, 'u_vox', 8, FL.vox, gl.TEXTURE_3D); }
+  flBindTex(P, 'u_vox', 8, FL.vox, gl.TEXTURE_3D); if (u.u_wdist) wdBind(P); }
 function flPass(P, fb, rows) { const gl = R.gl; gl.bindFramebuffer(gl.FRAMEBUFFER, fb); gl.viewport(0, 0, FL.W, rows); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
 function flStep() {
   const gl = R.gl; const rows = FL.M / FL.W; const T = FL.pos, V = FL.vel;
@@ -10342,7 +10575,7 @@ function boatTick(e, dt, w) {
 }
 function boatStep(e, h, w) {
   const R = e.rot; let fx = 0, fy = -9.8, fz = 0, tx = 0, ty = 0, tz = 0; let wet = 0, ux = 0, uz = 0;
-  const kB = 9.8 / (10 * 0.15); // con unos 10 puntos hundidos 0,15 se equilibra: más reserva de flotación (aguanta olas y peso, pero inundado de lado o volcado sí se hunde más)
+  const kB = 9.8 / (10 * 0.1); // con unos 10 puntos hundidos 0,1 se equilibra: va alto y con reserva de flotación (aguanta olas y al jinete; inundado de lado o volcado sí se hunde más)
   for (const P of BOAT_PTS) {
     const r = bMul(R, P); const px = e.x + r[0], py = e.y + r[1], pz = e.z + r[2];
     // velocidad del punto: v + ω × r
@@ -10358,8 +10591,8 @@ function boatStep(e, h, w) {
   }
   if (wet) { fx += (ux / wet - e.vx) * 0.6; fz += (uz / wet - e.vz) * 0.6; }
   // remos del jinete
-  if (e.rider && !e.capsized && e.ctl) { const c = e.ctl; const fwd = [-R[6], 0, -R[8]]; const th = (c.f ? 24 : 0) - (c.b ? 12 : 0); /* 4 veces el empuje inicial (se pidió el doble dos veces) */ fx += fwd[0] * th * (wet ? 1 : 0.04); fz += fwd[2] * th * (wet ? 1 : 0.04); ty += ((c.l ? 1 : 0) - (c.r ? 1 : 0)) * 5 * (wet ? 1 : 0.3); }
-  if (e.rider) fy -= 2.5; // peso del jinete (centro de masa más alto: vuelca antes)
+  if (e.rider && !e.capsized && e.ctl) { const c = e.ctl; const fwd = [-R[6], 0, -R[8]]; const th = (c.f ? 48 : 0) - (c.b ? 24 : 0); /* 8 veces el empuje inicial (se pidió el doble tres veces) */ fx += fwd[0] * th * (wet ? 1 : 0.04); fz += fwd[2] * th * (wet ? 1 : 0.04); ty += ((c.l ? 1 : 0) - (c.r ? 1 : 0)) * 5 * (wet ? 1 : 0.3); }
+  if (e.rider) fy -= 1.8; // peso del jinete (centro de masa más alto: vuelca antes)
   const I = [1.1, 1.6, 0.55]; // inercia: cabeceo (x) cuesta más que el balanceo (z)
   e.vx += fx * h; e.vy += fy * h; e.vz += fz * h;
   e.wx += tx / I[0] * h; e.wy += ty / I[1] * h; e.wz += tz / I[2] * h;
@@ -10429,10 +10662,16 @@ function drawBoat(e, x, y, z, light, alpha) {
   const cam = R.cam; const r0 = e.prot || e.rot, r1 = e.rot; const r = r1.map((v, i) => lerp(r0[i], v, alpha));
   const flash = e.hurtTime > 0 ? [0.7, 0, 0, 0.35] : null; const L = TEX.boat_wood;
   for (const [ox, oy, oz, sx, sy, sz] of BOAT_BOXES) {
-    const S = [sx * BOAT_W, sy * BOAT_H / 0.6, sz * BOAT_L]; const o = [ox * BOAT_W, oy * BOAT_H / 0.6 - 0.12, oz * BOAT_L];
+    const S = [sx * BOAT_W, sy * BOAT_H / 0.6, sz * BOAT_L]; const o = [ox * BOAT_W, oy * BOAT_H / 0.6 - 0.04, oz * BOAT_L];
     const m = _bm; for (let c = 0; c < 3; c++) { m[c * 4] = r[c * 3] * S[c]; m[c * 4 + 1] = r[c * 3 + 1] * S[c]; m[c * 4 + 2] = r[c * 3 + 2] * S[c]; m[c * 4 + 3] = 0; }
     const t = bMul(r, o); m[12] = x + t[0] - cam[0]; m[13] = y + t[1] - cam[1]; m[14] = z + t[2] - cam[2]; m[15] = 1;
     drawBox(m, L, light, null, flash, 0);
+  }
+  // hueco del casco: caja invisible que solo escribe profundidad (se dibuja al final de las entidades) para que el agua no se vea dentro del bote
+  if (!e.capsized && R.boatMasks) {
+    const S = [0.8 * BOAT_W, 0.46 * BOAT_H / 0.6, 0.86 * BOAT_L], o = [-0.4 * BOAT_W, 0.12 * BOAT_H / 0.6 - 0.04, -0.43 * BOAT_L]; const m = new Float32Array(16);
+    for (let c = 0; c < 3; c++) { m[c * 4] = r[c * 3] * S[c]; m[c * 4 + 1] = r[c * 3 + 1] * S[c]; m[c * 4 + 2] = r[c * 3 + 2] * S[c]; }
+    const t = bMul(r, o); m[12] = x + t[0] - cam[0]; m[13] = y + t[1] - cam[1]; m[14] = z + t[2] - cam[2]; m[15] = 1; R.boatMasks.push(m);
   }
 }
 // ---- multijugador: el anfitrión simula; los clientes ven réplicas y mandan sus acciones
@@ -10649,6 +10888,7 @@ function dynGrowTick(w, x, y, z, b) {
   if (dynIsLog(w.get(x, y - 1, z))) return; // solo la raíz decide
   if (!dynGround(w.get(x, y - 1, z))) return;
   const m = w.getMeta(x, y, z), stage = (m >> 3) & 3, stump = m & 32, sp = REG[b].dynLog;
+  if ((m & 64) && !stump) return; // raíz secundaria de un tronco grueso: crece desde la principal
   if (w.light(x, y + 1, z)[0] < 8 && !stump) return;
   if (stump) { // el tocón rebrota: quita lo que quedó del tronco viejo y nace un árbol joven
     if (Math.random() > 0.35) return;
@@ -10681,8 +10921,12 @@ function dynFell(w, x, y, z, old) {
   // el corte todavía presente; después, lo de cada raíz que ya no llega a ella cae
   const roots = []; for (const [k, [a, b, c]] of comp) if (dynGround(w.get(a, b - 1, c))) roots.push(k);
   const cutK = K(x, y, z); const cutRoot = dynGround(w.get(x, y - 1, z)); if (cutRoot) roots.push(cutK);
-  const owner = new Map(); const oq = []; for (const k of roots) { owner.set(k, k); oq.push(k); }
   const pos = k => k === cutK ? [x, y, z] : comp.get(k);
+  // las raíces juntas (la base de un tronco 2x2 o 3x3) son un mismo árbol: solo cae si se corta del todo
+  const grp = new Map(); const rs = new Set(roots); const find = k => { while (grp.get(k) !== k) k = grp.get(k); return k; };
+  for (const k of roots) grp.set(k, k);
+  for (const k of roots) { const [a, b, c] = pos(k); for (const [dx, dz] of [[1, 0], [0, 1]]) { const nk = K(a + dx, b, c + dz); if (rs.has(nk)) { const p1 = find(k), p2 = find(nk); if (p1 !== p2) grp.set(p1, p2); } } }
+  const owner = new Map(); const oq = []; for (const k of roots) { owner.set(k, find(k)); oq.push(k); }
   for (let qi = 0; qi < oq.length; qi++) { const k = oq[qi]; const [a, b, c] = pos(k); const o = owner.get(k);
     for (const [dx, dy, dz] of N6) { const nk = K(a + dx, b + dy, c + dz); if (owner.has(nk) || !(comp.has(nk) || nk === cutK)) continue; owner.set(nk, o); oq.push(nk); } }
   const kept = new Set(); const st2 = [];
@@ -11107,6 +11351,7 @@ function worldTick() {
     const pls = [p, ...[...G.entities.values()].filter(e => e.remotePlayer)];
     for (const pl of pls) { const w = G.worlds[pl.dim]; const cx = Math.floor(pl.x) >> 4, cz = Math.floor(pl.z) >> 4; for (let dx = -4; dx <= 4; dx++) for (let dz = -4; dz <= 4; dz++) randomTicks(w, cx + dx, cz + dz); if (G.tick % 20 === 0) spawnerTick(w, pl); }
     if (G.tick % 20 === 0) spawnTick();
+    plateTick(); // placas de presión (la trampa de la pirámide)
     if (G.tick % 20 === 10 && typeof heatMeltTick === 'function') heatMeltTick(G.world); // el calor derrite nieve y hielo
     furnaceTick();
   }
@@ -11152,6 +11397,7 @@ function gameFrame(dt) {
   R.yawCam = yaw; const alpha = pausedSP ? 1 : acc / 50, alphaW = pausedSP || rate === 0 ? 1 : clamp(accW / 50, 0, 1);
   // ondas del agua (estelas, salpicaduras, chorros): fuentes y un paso de simulación en GPU antes de dibujar
   if (typeof ripUpdate === 'function') { if (!pausedSP) ripSources(w, dt); ripUpdate(wdt); }
+  if (typeof wdTick === 'function' && G.mode === 'game') wdTick(); // distancia a la costa para la dirección del oleaje
   if (typeof flUpdate === 'function') flUpdate(wdt, w); // fluido continuo (partículas en GPU)
   if (typeof flamerTick === 'function') flamerTick(w, wdt);
   if (typeof rainPuddleTick === 'function') rainPuddleTick(w, wdt); // charcos de lluvia (partículas) // calor del lanzallamas y de los conductores: evapora el agua

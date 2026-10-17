@@ -81,7 +81,9 @@ function fluidTick(w, x, y, z) {
   // 3) presión (solo agua): pasar un octavo a una celda del mismo cuerpo 2 octavos más baja
   if (liq === 1 && a >= 2) { const t = pressureTarget(w, x, y, z, a); if (t) { setVol(w, t[0], y, t[1], 1, t[2] + 1, false); setVol(w, x, y, z, 1, a - 1, fallNow); w.scheduleTick(x, y, z, delay, 0); return; } }
   // celda en reposo: actualizar la marca de chorro si cambió
-  const fallBit = (meta & LIQ_FALL) !== 0; if (fallBit !== fallNow) w.set(x, y, z, id, liqMeta(a, fallNow, false));
+  // (solo cambia la marca, no el volumen: sin despertar a las vecinas, o un lago entero se recalcula en cascada)
+  const fallBit = (meta & LIQ_FALL) !== 0;
+  if (fallBit !== fallNow) { const m2 = liqMeta(a, fallNow, false); w.set(x, y, z, id, m2, true); markDirty(w, x, z, true); if (G.net && G.net.role === 'host' && !G.applyingNet) NETBATCH.push([w.dim, x, y, z, id, m2]); }
   // 4) una celda llena rodeada de océano pasa a ser océano (tapar y destapar un hueco en el mar no deja un parche quieto)
   if (liq === 1 && a === 8 && y <= SEA) { let oc = 0; for (const [dx, dz] of N4) if (isOcean(w, x + dx, y, z + dz)) oc++; if (oc >= 2 || (oc >= 1 && isOcean(w, x, y + 1, z))) w.set(x, y, z, ID.water, LIQ_OCEAN); }
 }
@@ -174,7 +176,7 @@ function bucketPour(w, x, y, z, liq) {
 function liquidSurface(world, x, y, z) {
   const b = world.get(x, y, z); const d = b > 0 ? REG[b] : null; if (d && d.inWater) return 1; if (!d || !d.liquid) return typeof flSurfIn === 'function' ? flSurfIn(world, x, y, z) : 0;
   const up = world.get(x, y + 1, z); if (up > 0 && REG[up] && REG[up].liquid === d.liquid) return 1;
-  if (b === ID.water && (world.getMeta(x, y, z) & LIQ_OCEAN)) return clamp(0.92 + oceanWaveAt(x + 0.5, z + 0.5).h * oceanShoreW(world, x + 0.5, y, z + 0.5), 0, 1.6); // mar: con olas y marea
+  if (b === ID.water && (world.getMeta(x, y, z) & LIQ_OCEAN)) return clamp(0.92 + oceanWaveAt(x + 0.5, z + 0.5).h * oceanShoreW(world, x + 0.5, y, z + 0.5), 0, 2.6); // mar: con olas y marea
   const m = world.getMeta(x, y, z); if (m & LIQ_FALL) return 1; return liqAmt(m) / 8 * 0.92; // igual que la superficie dibujada (liqTopH)
 }
 // depuración: suma de volumen (en octavos) de un líquido en una caja
@@ -190,27 +192,79 @@ function migrateFluidChunk(w, c) {
     M[i] = nm;
   }
 }
-// ---- océano: oleaje Gerstner y marea, idénticos a los del shader (VS_CHUNK/oceanWave), para flotar con las olas
+// ---- océano: oleaje Gerstner y marea, idénticos a los del shader (COMMON/oceanWave y q_fluid/seaWave), para flotar con las olas
+// Las tres olas largas (mar de fondo) avanzan hacia la costa más cercana: su fase es la distancia a tierra (WD, más abajo),
+// así las crestas van paralelas a la orilla y rompen contra ella. Mar adentro (lejos de cualquier costa) se funden con un
+// oleaje global de dirección fija. Las dos cortas (picado del viento) son siempre globales.
 const OCEAN_W = [[0.81, 0.59, 22.0, 0.42], [0.97, -0.24, 13.0, 0.26], [0.45, 0.89, 8.5, 0.16], [-0.2, 0.98, 5.2, 0.09], [0.7, -0.71, 3.4, 0.05]];
 function oceanTide() { return 0.28 * Math.sin(((G.time || 0) % 24000) / 12000 * Math.PI * 2); } // dos mareas por día
-const _OWV = { h: 0, ux: 0, uz: 0 };
+// ---- distancia a la costa: rejilla de WD.N×WD.N muestras cada WD.S bloques alrededor de la cámara, según el relieve generado
+// (las estructuras y lo construido no cuentan); se recalcula por partes cuando la cámara se aleja y se sube como textura
+const WD = { N: 64, S: 8, D: 160, cur: null, job: null, tex: null, gl: null, up: false };
+function wdTick() {
+  const w = G.worlds && G.worlds.overworld; const p = G.player; if (!w || !w.gen || !p || p.dim !== 'overworld') return;
+  const N = WD.N, S = WD.S, half = N * S / 2;
+  if (!WD.job) {
+    const c = WD.cur; if (c && c.w === w && Math.abs(p.x - (c.ox + half)) < 96 && Math.abs(p.z - (c.oz + half)) < 96) return;
+    const ox = Math.floor((p.x - half) / S) * S, oz = Math.floor((p.z - half) / S) * S;
+    WD.job = { w, ox, oz, land: new Uint8Array(N * N), i: 0 };
+  }
+  const J = WD.job; const t0 = performance.now();
+  while (J.i < N * N && performance.now() - t0 < 4) { const i = J.i++; const x = J.ox + (i % N) * S, z = J.oz + ((i / N) | 0) * S; J.land[i] = J.w.gen.col(x, z).h >= SEA ? 1 : 0; }
+  if (J.i < N * N) return;
+  // transformada de distancia (chaflán 3-4, dos pasadas) en bloques, con tope WD.D
+  const d = new Float32Array(N * N); const INF = 1e9; for (let i = 0; i < N * N; i++) d[i] = J.land[i] ? 0 : INF;
+  const a = S, b = S * Math.SQRT2;
+  for (let z = 0; z < N; z++) for (let x = 0; x < N; x++) { const i = x + z * N; let v = d[i]; if (x > 0) v = Math.min(v, d[i - 1] + a); if (z > 0) { v = Math.min(v, d[i - N] + a); if (x > 0) v = Math.min(v, d[i - N - 1] + b); if (x < N - 1) v = Math.min(v, d[i - N + 1] + b); } d[i] = v; }
+  for (let z = N - 1; z >= 0; z--) for (let x = N - 1; x >= 0; x--) { const i = x + z * N; let v = d[i]; if (x < N - 1) v = Math.min(v, d[i + 1] + a); if (z < N - 1) { v = Math.min(v, d[i + N] + a); if (x < N - 1) v = Math.min(v, d[i + N + 1] + b); if (x > 0) v = Math.min(v, d[i + N - 1] + b); } d[i] = v; }
+  for (let i = 0; i < N * N; i++) d[i] = Math.min(WD.D, d[i]);
+  WD.cur = { w, ox: J.ox, oz: J.oz, d }; WD.job = null; WD.up = true;
+}
+// distancia a tierra (bilineal) y su gradiente: [d, dd/dx, dd/dz]; fuera de la rejilla, mar abierto
+const _WDS = [0, 0, 0];
+function wdSample(x, z) {
+  const c = WD.cur; _WDS[0] = 1e4; _WDS[1] = 0; _WDS[2] = 0; if (!c) return _WDS;
+  const N = WD.N, qx = (x - c.ox) / WD.S, qz = (z - c.oz) / WD.S; const bx = Math.floor(qx), bz = Math.floor(qz);
+  if (bx < 0 || bz < 0 || bx >= N - 1 || bz >= N - 1) return _WDS;
+  const fx = qx - bx, fz = qz - bz, i = bx + bz * N; const a = c.d[i], b = c.d[i + 1], e = c.d[i + N], f = c.d[i + N + 1];
+  _WDS[0] = lerp(lerp(a, b, fx), lerp(e, f, fx), fz); _WDS[1] = lerp(b - a, f - e, fz) / WD.S; _WDS[2] = lerp(e - a, f - b, fx) / WD.S; return _WDS;
+}
+// textura R32F con las distancias (unidad 12) para los shaders del agua y del fluido continuo
+function wdBind(P) {
+  const gl = R.gl; const u = P.u; if (!u.u_wdist) return;
+  if (WD.gl !== gl) { WD.gl = gl; WD.tex = gl.createTexture(); gl.activeTexture(gl.TEXTURE12); gl.bindTexture(gl.TEXTURE_2D, WD.tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, WD.N, WD.N, 0, gl.RED, gl.FLOAT, new Float32Array(WD.N * WD.N).fill(WD.D)); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST); WD.up = !!WD.cur; }
+  gl.activeTexture(gl.TEXTURE12); gl.bindTexture(gl.TEXTURE_2D, WD.tex);
+  if (WD.up && WD.cur) { gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, WD.N, WD.N, gl.RED, gl.FLOAT, WD.cur.d); WD.up = false; }
+  gl.uniform1i(u.u_wdist, 12); gl.activeTexture(gl.TEXTURE0);
+  if (u.u_wdRect) { const c = WD.cur; gl.uniform4f(u.u_wdRect, c ? c.ox : 0, c ? c.oz : 0, 1 / WD.S, c && R.dimIdx === 0 ? 1 : 0); }
+}
+// altura con olas → desplazamiento de la superficie: nivel medio casi en el de reposo y valles más planos que las crestas
+// (antes todo el mar bajaba ~1,5·A y con olas grandes dejaba al aire la arena de la orilla)
+function waveLift(h, A) { const v = h * 0.85 + A * 0.2; return (v < 0 ? v * 0.5 : v) - 0.05; }
+const _OWV = { h: 0, ux: 0, uz: 0, raw: 0 };
 // desplazamiento de la superficie respecto al nivel quieto (h) y velocidad orbital horizontal del agua (ux, uz)
 function oceanWaveAt(x, z) {
   const t = (typeof R !== 'undefined' && R.time) ? R.time : performance.now() / 1000; const A = (0.16 + (G.rainLevel || 0) * 0.55) * (typeof R !== 'undefined' && R.gfxU ? R.gfxU[0] : 1); let h = 0, ux = 0, uz = 0;
-  for (let i = 0; i < 5; i++) { const W = OCEAN_W[i]; const k = 6.2832 / W[2], c = Math.sqrt(9.8 / k); const ph = k * (W[0] * x + W[1] * z - c * t * 0.55) + i * 1.7; const a = A * W[3] * 2.2; const s = Math.sin(ph);
-    h += a * (Math.pow(s * 0.5 + 0.5, 1.6) * 2 - 1); const om = k * c * 0.55; ux += a * om * s * W[0]; uz += a * om * s * W[1]; }
-  _OWV.h = h * 0.85 - A * 1.1 - 0.05 + oceanTide(); _OWV.ux = ux; _OWV.uz = uz; return _OWV;
+  const sd = (typeof R === 'undefined' || R.dimIdx === 0) ? wdSample(x, z) : [1e4, 0, 0];
+  const wf = smooth(clamp((sd[0] - (WD.D - 60)) / 50, 0, 1)); let gx = -sd[1], gz = -sd[2]; const gl = Math.hypot(gx, gz); if (gl > 1e-4) { gx /= gl; gz /= gl; } else { gx = 0.81; gz = 0.59; }
+  const Sp = sd[0] + 2.5 * Math.sin(x * 0.045 + z * 0.02) * Math.sin(z * 0.05 - x * 0.015);
+  const comp = (dx, dz, ph, k, c, a) => { const s = Math.sin(ph); h += a * (Math.pow(s * 0.5 + 0.5, 1.6) * 2 - 1); const om = k * c * 0.55; ux += a * om * s * dx; uz += a * om * s * dz; };
+  for (let i = 0; i < 5; i++) { const W = OCEAN_W[i]; const k = 6.2832 / W[2], c = Math.sqrt(9.8 / k); const a = A * W[3] * 2.2;
+    const gw = i < 3 ? wf : 1;
+    if (gw > 0.001) comp(W[0], W[1], k * (W[0] * x + W[1] * z - c * t * 0.55) + i * 1.7, k, c, a * gw);
+    if (gw < 0.999) comp(gx, gz, k * (-Sp - c * t * 0.55) + i * 1.7, k, c, a * (1 - gw)); }
+  _OWV.raw = h; _OWV.h = waveLift(h, A) + oceanTide(); _OWV.ux = ux; _OWV.uz = uz; return _OWV;
 }
 // lo mismo que shoreW (d_mesh) pero contra el mundo: peso del oleaje (0 junto a la orilla) para flotación y nado
 const OSHORE = new Map();
 function oceanShoreW(w, x, y, z) {
-  if (MESH_SHORE <= 0) return 1;
+  if (MESH_SHORE <= 0) return 1; if (!SHORE_B) shoreTable();
   const key = ((Math.round(x * 4) + 4e5) * 8e5 + Math.round(z * 4) + 4e5) * 512 + y; let r = OSHORE.get(key); if (r !== undefined) return r;
   if (OSHORE.size > 20000) OSHORE.clear();
   const R = Math.min(13, MESH_SHORE + SHORE_RAMP); let best = R + 1;
   for (let b = Math.floor(z - R); b < Math.ceil(z + R); b++) { const dz = Math.max(b - z, 0, z - (b + 1)); if (dz >= best) continue;
     for (let a = Math.floor(x - R); a < Math.ceil(x + R); a++) { const dx = Math.max(a - x, 0, x - (a + 1)); if (dx >= best) continue;
-      const bb = w.get(a, y, b); if (bb < 0 || (bb > 0 && (REG[bb].liquid === 1 || REG[bb].inWater))) continue; const d = Math.hypot(dx, dz); if (d < best) best = d; } }
+      const bb = w.get(a, y, b); if (bb < 0 || (bb > 0 && (REG[bb].liquid === 1 || REG[bb].inWater || !SHORE_B[bb]))) continue; const d = Math.hypot(dx, dz); if (d < best) best = d; } }
   const t = clamp((best - MESH_SHORE) / SHORE_RAMP, 0, 1); r = t * t * (3 - 2 * t); OSHORE.set(key, r); return r;
 }
 // celda de mar con aire (o algo no líquido) encima

@@ -449,9 +449,9 @@ function updatePlayerPhysics(p, dt, input) {
     if (p.inWater && input.sprint && input.f && p.eyeInWater) { const ly = Math.sin(p.pitch); p.vy = lerp(p.vy, ly * 5, dt * 4); }
     else {
       if (p.inLava) p.vy -= 6 * dt;
-      else { // empuje de Arquímedes según la parte del cuerpo bajo la superficie (el mar sube y baja con las olas)
-        const surf = waterSurfaceAt(w, p.x, p.y + 0.1, p.z); const frac = clamp((surf - p.y) / 1.8, 0, 1);
-        p.vy += clamp(9.8 * (frac / 0.83 - 1), -6, 7) * dt;
+      else { // sin pulsar nada el jugador se hunde despacio (como en el clásico); para quedarse arriba hay que nadar
+        const surf = waterSurfaceAt(w, p.x, p.y + 0.1, p.z);
+        p.vy = lerp(p.vy, -0.75, Math.min(1, dt * 2.5));
         const ow = isOceanTop(w, Math.floor(p.x), Math.floor(surf - 0.92 + 0.001), Math.floor(p.z)) ? oceanWaveAt(p.x, p.z) : null; if (ow && !input.f) { p.vx += ow.ux * dt * 1.5; p.vz += ow.uz * dt * 1.5; }
       }
       if (input.jump) p.vy = lerp(p.vy, p.inLava ? 2 : 3.6, dt * 8); else if (input.sneak) p.vy = lerp(p.vy, -3, dt * 4); p.vy = Math.max(p.vy, -3.5); p.vy *= Math.exp(-2.4 * dt); }

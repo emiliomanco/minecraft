@@ -76,12 +76,23 @@ vec3 applyFog(vec3 col, vec3 p, float sv){
 vec3 aces(vec3 x){ return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14),0.0,1.0); }
 // olas de océano (Gerstner, solo altura): devuelve [altura, dh/dx, dh/dz]; amplitud según el tiempo (lluvia = mar picado)
 float waveA(){ return (0.16+u_rain*0.55)*u_gfx.x; }
+// distancia a la costa (textura de k_fluids/WD, bilineal) y su gradiente; fuera de la rejilla, mar abierto
+uniform highp sampler2D u_wdist; uniform vec4 u_wdRect;
+vec3 shoreDist(vec2 p){ if(u_wdRect.w<0.5) return vec3(1e4,0.0,0.0); vec2 q=(p-u_wdRect.xy)*u_wdRect.z; ivec2 b=ivec2(floor(q)); vec2 f=q-vec2(b);
+  if(b.x<0||b.y<0||b.x>=63||b.y>=63) return vec3(1e4,0.0,0.0);
+  float a=texelFetch(u_wdist,b,0).r, c=texelFetch(u_wdist,b+ivec2(1,0),0).r, d=texelFetch(u_wdist,b+ivec2(0,1),0).r, e=texelFetch(u_wdist,b+ivec2(1,1),0).r;
+  return vec3(mix(mix(a,c,f.x),mix(d,e,f.x),f.y), mix(c-a,e-d,f.y)*u_wdRect.z, mix(d-a,e-c,f.x)*u_wdRect.z); }
+// nivel medio casi en el de reposo y valles más planos que las crestas (igual que waveLift en k_fluids)
+float waveLift(float h, float A){ float v=h*0.85+A*0.2; return (v<0.0?v*0.5:v)-0.05; }
+// las 3 olas largas avanzan hacia la costa (fase = -distancia a tierra); mar adentro se funden con el oleaje global
 vec3 oceanWave(vec2 p){
   float A=waveA(); vec3 r=vec3(0.0);
   const vec4 W[5]=vec4[5](vec4(0.81,0.59,22.0,0.42),vec4(0.97,-0.24,13.0,0.26),vec4(0.45,0.89,8.5,0.16),vec4(-0.2,0.98,5.2,0.09),vec4(0.7,-0.71,3.4,0.05));
-  for(int i=0;i<5;i++){ vec2 d=W[i].xy; float k=6.2832/W[i].z; float c=sqrt(9.8/k); float ph=k*(dot(d,p)-c*u_time*0.55)+float(i)*1.7;
-    float a=A*W[i].w*2.2; float s=sin(ph), co=cos(ph); float sh=pow(s*0.5+0.5,1.6)*2.0-1.0; // crestas más agudas que los valles
-    r.x+=a*sh; r.yz+=a*k*co*d*0.9; }
+  vec3 sd=shoreDist(p); float wf=smoothstep(100.0,150.0,sd.x); vec2 gs=length(sd.yz)>1e-4?-normalize(sd.yz):vec2(0.81,0.59);
+  float Sp=sd.x+2.5*sin(p.x*0.045+p.y*0.02)*sin(p.y*0.05-p.x*0.015);
+  for(int i=0;i<5;i++){ float k=6.2832/W[i].z; float c=sqrt(9.8/k); float a=A*W[i].w*2.2; float gw=i<3?wf:1.0;
+    if(gw>0.001){ vec2 d=W[i].xy; float ph=k*(dot(d,p)-c*u_time*0.55)+float(i)*1.7; float s=sin(ph), co=cos(ph); r.x+=a*gw*(pow(s*0.5+0.5,1.6)*2.0-1.0); r.yz+=a*gw*k*co*d*0.9; } // crestas más agudas que los valles
+    if(gw<0.999){ float ph=k*(-Sp-c*u_time*0.55)+float(i)*1.7; float s=sin(ph), co=cos(ph); r.x+=a*(1.0-gw)*(pow(s*0.5+0.5,1.6)*2.0-1.0); r.yz+=a*(1.0-gw)*k*co*gs*0.9; } }
   return r;
 }
 `;
@@ -107,7 +118,7 @@ void main(){
   uint tc=uint(a_lit.w*255.0+0.5);
   if((fl&64u)!=0u && (fl&7u)==2u){
     float ow=(fl&32768u)!=0u ? oceanW : (tc<200u?1.0:0.0); // peso del oleaje: 1 en mar abierto, fracción donde el mar toca agua dulce (sin escalones)
-    if(ow>0.0){ float A=waveA(); p.y+=(oceanWave(w.xz).x*0.85 - A*1.1 - 0.05 + u_tide)*ow; } // oleaje + marea
+    if(ow>0.0){ float A=waveA(); p.y+=(waveLift(oceanWave(w.xz).x,A) + u_tide)*ow; } // oleaje + marea
   }
   // chorro que cae: el tubo ondula como un líquido de verdad
   if((fl&32768u)!=0u && tc==201u){ float wv=sin(w.y*2.3-u_time*9.0+w.x*1.7)*0.035+sin(w.y*5.1-u_time*14.0+w.z*2.3)*0.018; p.x+=wv*v_n.x+wv*0.5; p.z+=wv*v_n.z-wv*0.4; }
@@ -869,6 +880,7 @@ function setCommon(P) {
   if (u.u_nl !== undefined && u.u_nl) { const n = SETTINGS.gfx.dlights === false ? 0 : Math.min(8, R.plights.length); gl.uniform1i(u.u_nl, n); if (n) { const lp = new Float32Array(32), lc = new Float32Array(24); R.plights.slice(0, 8).forEach((l, i) => { lp.set([l.x - R.cam[0], l.y - R.cam[1], l.z - R.cam[2], l.r], i * 4); lc.set(l.c, i * 3); }); gl.uniform4fv(u.u_lp, lp); gl.uniform3fv(u.u_lc, lc); } }
   if (u.u_grass) { gl.uniform3fv(u.u_grass, GRASS_U); gl.uniform3fv(u.u_foli, FOLI_U); }
   if (u.u_gfx) gl.uniform4fv(u.u_gfx, R.gfxU);
+  if (u.u_wdist) wdBind(P);
   if (u.u_tintTex) { gl.activeTexture(gl.TEXTURE11); gl.bindTexture(gl.TEXTURE_2D_ARRAY, R.tintTex); gl.uniform1i(u.u_tintTex, 11); gl.activeTexture(gl.TEXTURE0); gl.uniform1f(u.u_tintOn, R.tintTex && R.tintWorld ? 1 : 0); }
 }
 function frustumPlanes(m) {
@@ -957,7 +969,8 @@ function renderWorld(world, cam, yaw, pitch, opts = {}) {
   { const P = R.progs.chunk; gl.useProgram(P.p); setCommon(P); gl.uniformMatrix4fv(P.u.u_vp, false, R.vp); gl.uniform1f(P.u.u_pass, 0);
     for (const c of vis) { const m = c.mesh.o; if (!m) continue; gl.uniform3f(P.u.u_off, c.cx * 16 - cam[0], -cam[1], c.cz * 16 - cam[2]); gl.bindVertexArray(m.vao); gl.drawElements(gl.TRIANGLES, m.count, gl.UNSIGNED_INT, 0); R.stats.tris += m.count / 3; R.stats.draws++; } }
   // entidades
-  if (opts.drawEntities) { const P = R.progs.box; gl.useProgram(P.p); setCommon(P); gl.uniformMatrix4fv(P.u.u_vp, false, R.vp); gl.bindVertexArray(R.cube); opts.drawEntities(); }
+  if (opts.drawEntities) { const P = R.progs.box; gl.useProgram(P.p); setCommon(P); gl.uniformMatrix4fv(P.u.u_vp, false, R.vp); gl.bindVertexArray(R.cube); R.boatMasks = []; opts.drawEntities();
+    if (R.boatMasks.length) { gl.colorMask(false, false, false, false); for (const m of R.boatMasks) drawBox(m, TEX.boat_wood, null, null, null, 0); gl.colorMask(true, true, true, true); } R.boatMasks = null; } // el agua no entra en los botes
   if (typeof flDrawDebug === 'function') flDrawDebug();
   if (opts.drawOverlay) opts.drawOverlay(false);
   // copia para agua

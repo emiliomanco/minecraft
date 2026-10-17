@@ -419,15 +419,17 @@ function spawnTick() {
   const counts = {}; for (const e of G.entities.values()) if (e instanceof Mob) { const k = e.dim + (e.def.hostile ? 'h' : 'p'); counts[k] = (counts[k] || 0) + 1; }
   for (const p of players) {
     const w = G.worlds[p.dim]; if (!w) continue;
-    const capH = { overworld: 40, nether: 30, end: 18 }[p.dim];
-    if (G.difficulty > 0 && (counts[p.dim + 'h'] || 0) < capH) for (let a = 0; a < 3; a++) {
+    const capH = { overworld: 18, nether: 20, end: 12 }[p.dim]; // tope de hostiles por dimensión (antes 40: las noches eran imposibles)
+    if (G.difficulty > 0 && (counts[p.dim + 'h'] || 0) < capH) for (let a = 0; a < 2; a++) {
       const ang = Math.random() * 6.28, d = 24 + Math.random() * 36; const x = Math.floor(p.x + Math.cos(ang) * d), z = Math.floor(p.z + Math.sin(ang) * d);
       if (!w.chunk(x >> 4, z >> 4)) continue; let y = Math.floor(p.y + (Math.random() - 0.5) * 40); y = clamp(y, 2, w.H - 3);
-      for (let k = 0; k < 16; k++, y--) { const b = w.get(x, y - 1, z); if (b > 0 && T_FULL[b] && b !== ID.bedrock && w.get(x, y, z) === 0 && w.get(x, y + 1, z) === 0) break; }
-      const b0 = w.get(x, y - 1, z); if (!(b0 > 0 && T_FULL[b0]) || w.get(x, y, z) !== 0 || w.get(x, y + 1, z) !== 0) continue;
+      for (let k = 0; k < 16; k++, y--) { const b = w.get(x, y - 1, z); if (b > 0 && T_FULL[b] && !REG[b].leaves && b !== ID.bedrock && w.get(x, y, z) === 0 && w.get(x, y + 1, z) === 0) break; }
+      const b0 = w.get(x, y - 1, z); if (!(b0 > 0 && T_FULL[b0]) || REG[b0].leaves || w.get(x, y, z) !== 0 || w.get(x, y + 1, z) !== 0) continue; // nunca sobre hojas (copas de los bosques)
       const L = w.light(x, y, z); let type = null;
       if (p.dim === 'overworld') {
-        if (effSkyLight(L) > 7 || L[1] > 0) continue;
+        // solo con oscuridad de verdad: sin luz de bloques, y a cielo abierto ni de día ni al atardecer (si no salen y arden con el sol)
+        const eff = effSkyLight(L); if (L[1] > 0 || eff > 4 || (L[0] > 0 && isDay())) continue;
+        if (Math.random() * 5 < eff) continue; // cuanto más oscuro, más probable
         const cb = w.gen.caveBiome(x, y, z); if (cb === BI.deep_dark) continue;
         const bio = w.biomeAt(x, z); const r = Math.random();
         type = r < 0.32 ? (bio === BI.desert ? 'husk' : 'zombie') : r < 0.58 ? 'skeleton' : r < 0.8 ? 'creeper' : r < 0.96 ? 'spider' : 'enderman';
@@ -442,24 +444,51 @@ function spawnTick() {
         else type = r < 0.55 ? 'zombified_piglin' : r < 0.7 ? 'ghast' : r < 0.85 ? 'magma_cube' : r < 0.95 ? 'piglin' : 'enderman';
         if (type === 'ghast') { if (w.get(x, y + 4, z) !== 0 || w.get(x + 2, y + 2, z + 2) !== 0) continue; y += 2; }
       } else { if (b0 !== ID.end_stone) continue; type = 'enderman'; }
-      if (!type) continue; const n = type === 'ghast' || type === 'enderman' ? 1 : 1 + (Math.random() * 3 | 0);
+      if (!type) continue; const n = type === 'ghast' || type === 'enderman' ? 1 : 1 + (Math.random() * 2 | 0);
       for (let i = 0; i < n; i++) { const m = spawnMob(type, p.dim, x + 0.5 + (i ? (Math.random() - 0.5) * 2 : 0), y, z + 0.5 + (i ? (Math.random() - 0.5) * 2 : 0)); if (m && type === 'skeleton' && w.dim === 'overworld' && Math.random() < 0.05) { } }
       counts[p.dim + 'h'] = (counts[p.dim + 'h'] || 0) + n;
     }
     // pasivos
     if (p.dim === 'overworld' && G.tick % 200 === 0 && (counts['overworldp'] || 0) < 16) {
       const ang = Math.random() * 6.28, d = 28 + Math.random() * 30; const x = Math.floor(p.x + Math.cos(ang) * d), z = Math.floor(p.z + Math.sin(ang) * d);
-      if (!w.chunk(x >> 4, z >> 4)) continue; const y = w.surfaceY(x, z) + 1; if (w.get(x, y - 1, z) !== ID.grass_block && w.get(x, y - 1, z) !== ID.snowy_grass) continue; if (w.light(x, y, z)[0] < 9) continue;
+      if (!w.chunk(x >> 4, z >> 4)) continue; const y = spawnGroundY(w, x, z); if (y < 2) continue; if (w.get(x, y - 1, z) !== ID.grass_block && w.get(x, y - 1, z) !== ID.snowy_grass) continue; if (w.light(x, y, z)[0] < 9) continue;
       const bio = w.biomeAt(x, z); const kinds = bio === BI.snowy_plains || bio === BI.mountains ? ['goat', 'sheep'] : ['pig', 'cow', 'sheep', 'chicken'];
       const k = kinds[Math.random() * kinds.length | 0]; for (let i = 0; i < 2 + (Math.random() * 2 | 0); i++) spawnMob(k, 'overworld', x + 0.5 + (Math.random() - 0.5) * 3, y, z + 0.5 + (Math.random() - 0.5) * 3);
     }
   }
 }
+// ---- placas de presión: al pisarlas (jugadores, mobs, objetos) se activan y prenden la dinamita conectada: la que toca la
+// placa o el bloque de debajo, y la que haya hasta 3 bloques más abajo (la trampa de la pirámide del desierto)
+const PLATES = new Map(); // dim:x,y,z → ticks que le quedan pulsada
+function plateTick() {
+  if (G.net && G.net.role === 'client') return;
+  const pressed = new Set();
+  const check = e => {
+    if (!e || e.removed || e.dead || (e.flying && e === G.player) || e.boat) return; const w = G.worlds[e.dim]; if (!w) return;
+    const x = Math.floor(e.x), y = Math.floor(e.y + 0.05), z = Math.floor(e.z); const b = w.get(x, y, z);
+    if (!(b > 0 && REG[b].name.endsWith('_pressure_plate')) || e.y - y > 0.3) return;
+    const k = e.dim + ':' + x + ',' + y + ',' + z; pressed.add(k); if (!PLATES.has(k)) plateActivate(w, x, y, z); PLATES.set(k, 10);
+  };
+  check(G.player); for (const e of G.entities.values()) if (e instanceof Mob || e.remotePlayer || e.type === 'item') check(e);
+  for (const [k, t] of PLATES) if (!pressed.has(k)) { if (t <= 1) PLATES.delete(k); else PLATES.set(k, t - 1); }
+}
+function plateActivate(w, x, y, z) {
+  playSound('hit', x + 0.5, y, z + 0.5, 0.4, ID.stone);
+  const fire = (a, b, c) => { if (w.get(a, b, c) === ID.tnt) { setBlockNet(w, a, b, c, 0); igniteTNT(w, a, b, c); } };
+  for (const [dx, dy, dz] of [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]) { fire(x + dx, y + dy, z + dz); fire(x + dx, y - 1 + dy, z + dz); }
+  for (let dy = 2; dy <= 3; dy++) for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) fire(x + dx, y - dy, z + dz);
+}
+// suelo para aparecer en la columna: baja por las copas y troncos hasta el suelo de verdad (nunca encima de las hojas); -1 si no hay hueco
+function spawnGroundY(w, x, z) {
+  let y = w.surfaceY(x, z);
+  while (y > 1) { const b = w.get(x, y, z); const d = b > 0 && REG[b]; if (d && d.solid && !d.leaves && !d.dynLog && !/_log$|_wood$|_stem$/.test(d.name)) break; y--; }
+  return y > 1 && w.get(x, y + 1, z) === 0 && w.get(x, y + 2, z) === 0 ? y + 1 : -1;
+}
 function onChunkGenerated(w, c) {
   if (typeof tintUpload === 'function') tintUpload(w, c);
   if (G.net && G.net.role === 'client') return; if (G.mode !== 'game') return;
   const k = w.dim + ':' + c.cx + ',' + c.cz; if (G.spawned.has(k)) return; G.spawned.add(k);
-  for (const s of c.spawns || []) { let y = s.y; if (y === undefined) { y = w.surfaceY(Math.floor(s.x), Math.floor(s.z)) + 1; if (y < 2) continue; } const m = spawnMob(s.type, w.dim, s.x, y, s.z); if (m && (MOB[s.type].hostile)) m.persist = true; }
+  for (const s of c.spawns || []) { let y = s.y; if (y === undefined) { y = spawnGroundY(w, Math.floor(s.x), Math.floor(s.z)); if (y < 2) continue; } const m = spawnMob(s.type, w.dim, s.x, y, s.z); if (m && (MOB[s.type].hostile)) m.persist = true; }
 }
 function spawnerTick(w, p) {
   const pcx = Math.floor(p.x) >> 4, pcz = Math.floor(p.z) >> 4;

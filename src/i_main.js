@@ -325,6 +325,7 @@ function worldTick() {
     const pls = [p, ...[...G.entities.values()].filter(e => e.remotePlayer)];
     for (const pl of pls) { const w = G.worlds[pl.dim]; const cx = Math.floor(pl.x) >> 4, cz = Math.floor(pl.z) >> 4; for (let dx = -4; dx <= 4; dx++) for (let dz = -4; dz <= 4; dz++) randomTicks(w, cx + dx, cz + dz); if (G.tick % 20 === 0) spawnerTick(w, pl); }
     if (G.tick % 20 === 0) spawnTick();
+    plateTick(); // placas de presión (la trampa de la pirámide)
     if (G.tick % 20 === 10 && typeof heatMeltTick === 'function') heatMeltTick(G.world); // el calor derrite nieve y hielo
     furnaceTick();
   }
@@ -370,6 +371,7 @@ function gameFrame(dt) {
   R.yawCam = yaw; const alpha = pausedSP ? 1 : acc / 50, alphaW = pausedSP || rate === 0 ? 1 : clamp(accW / 50, 0, 1);
   // ondas del agua (estelas, salpicaduras, chorros): fuentes y un paso de simulación en GPU antes de dibujar
   if (typeof ripUpdate === 'function') { if (!pausedSP) ripSources(w, dt); ripUpdate(wdt); }
+  if (typeof wdTick === 'function' && G.mode === 'game') wdTick(); // distancia a la costa para la dirección del oleaje
   if (typeof flUpdate === 'function') flUpdate(wdt, w); // fluido continuo (partículas en GPU)
   if (typeof flamerTick === 'function') flamerTick(w, wdt);
   if (typeof rainPuddleTick === 'function') rainPuddleTick(w, wdt); // charcos de lluvia (partículas) // calor del lanzallamas y de los conductores: evapora el agua
