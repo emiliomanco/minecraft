@@ -9281,10 +9281,12 @@ void main(){
   float ph=P.w;
   if(x1.x<1.0||x1.z<1.0||x1.y<1.0||x1.x>float(u_vdim.x)-1.0||x1.z>float(u_vdim.z)-1.0||x1.y>float(u_vdim.y)-1.0) ph+=30.0;
   else { float vv=vox(ivec3(floor(x1))); float fy=fract(x1.y);
-    bool wl=ph<3.5; // la miel y la leche no tienen versión normal: no se suman al agua quieta (se hunden en ella); la lava sí las quema
-    if(wl && vv>26.5 && vv<27.5){ vec3 sw=seaWave(x1.xz+u_org.xz); if(fy<0.92+sw.x-0.04) ph+=10.0; }
-    else if(wl && vv>16.5 && vv<25.5){ float a=vv-16.0; float lv=a>8.5?1.0:a/8.0*0.92; if(fy<lv-0.04) ph+=10.0; }
-    else if(vv>32.5 && vv<41.5){ float a=vv-32.0; float lv=a>8.5?1.0:a/8.0*0.92; if(fy<lv-0.04) ph+=20.0; } }
+    // las partículas NUNCA pasan a líquido normal al tocar el de su mismo tipo (se hunden en él y siguen siendo partículas);
+    // solo se marcan las reacciones entre tipos distintos: lava en agua quieta (piedra) y agua/miel/leche en lava quieta
+    bool lavaP=ph>1.5&&ph<2.5;
+    if(lavaP && vv>26.5 && vv<27.5){ vec3 sw=seaWave(x1.xz+u_org.xz); if(fy<0.92+sw.x-0.04) ph+=10.0; }
+    else if(lavaP && vv>16.5 && vv<25.5){ float a=vv-16.0; float lv=a>8.5?1.0:a/8.0*0.92; if(fy<lv-0.04) ph+=10.0; }
+    else if(!lavaP && vv>32.5 && vv<41.5){ float a=vv-32.0; float lv=a>8.5?1.0:a/8.0*0.92; if(fy<lv-0.04) ph+=20.0; } }
   o=vec4(x1,ph);
 }`;
 // 2) claves (celda con hash, índice)
@@ -9818,10 +9820,10 @@ function flRender() {
 // ============================================================================
 //  Integración con el mundo
 // ============================================================================
-// El líquido normal (lagos, mar, charcos asentados) sigue guardado en las celdas como volumen, fluye con las reglas
-// de siempre (k_fluids) y nunca se convierte en partículas: solo el cubo las crea. Las partículas que se calman se
-// vuelven a guardar como volumen nivelado, y las que tocan agua o lava normal se suman a ella (el mar las absorbe
-// sin límite). Así no hay idas y vueltas entre los dos estados.
+// El líquido normal (lagos, mar) sigue guardado en las celdas como volumen y fluye con las reglas de siempre (k_fluids).
+// Partículas y líquido normal no se convierten el uno en el otro por sí solos (solo con el difusor): una partícula que
+// toca líquido normal de su mismo tipo se hunde en él y sigue siendo partícula; entre tipos distintos reaccionan
+// (lava + agua → piedra u obsidiana, con vapor).
 // El agua puesta con cubo (o derramada) lleva LIQ_PLACED: sobre tierra, pasto, hojas, arena… se va filtrando.
 const LIQ_PLACED = 16;
 let FL_POROUS = null;
@@ -9856,7 +9858,7 @@ function flSpawnCell(w, x, y, z, a, phase, vx, vy, vz) {
   return k;
 }
 // el hueco ya lleno de partículas no vuelve a pedir agua al mar (las partículas cuentan como líquido): pasado un
-// segundo se convierte en mar igualmente y las partículas que quedan dentro se funden con él
+// segundo se convierte en mar igualmente (las partículas siguen siendo partículas)
 FL.oceanFill = [];
 function flOceanFillTick() {
   const L = FL.oceanFill; if (!L.length) return;
@@ -10057,7 +10059,7 @@ function flParkTick(w, dt) {
         const nx = q.x + q.vx * h, ny = q.y + q.vy * h, nz = q.z + q.vz * h; const bx = Math.floor(nx), by = Math.floor(ny), bz = Math.floor(nz);
         const b = w.get(bx, by, bz);
         if (b < 0) { flParkSettle(q, Math.floor(q.x), Math.floor(q.y), Math.floor(q.z)); break; } // chunk sin cargar: se queda ahí
-        if (b > 0 && REG[b].liquid && !(q.ph >= 4 && REG[b].liquid === 1)) { if (flAbsorb(w, nx, ny, nz, q.ph, REG[b].liquid === 1 ? 1 : 2)) { alive = false; break; } flParkSettle(q, bx, by, bz); break; } // miel y leche atraviesan el agua (se hunden)
+        if (b > 0 && REG[b].liquid && (REG[b].liquid === 2) !== (q.ph === 2)) { if (flAbsorb(w, nx, ny, nz, q.ph, REG[b].liquid === 1 ? 1 : 2)) { alive = false; break; } flParkSettle(q, bx, by, bz); break; } // solo reacciones entre tipos distintos; en su mismo líquido se hunden // miel y leche atraviesan el agua (se hunden)
         if (b > 0 && REG[b].solid) {
           const fb = w.get(Math.floor(q.x), by, Math.floor(q.z)); // ¿cae encima (el bloque está debajo) o choca de lado?
           if (q.vy < 0 && fb > 0 && REG[fb].solid && Math.floor(q.y) > by) { flParkSettle(q, Math.floor(q.x), by + 1, Math.floor(q.z)); break; }
