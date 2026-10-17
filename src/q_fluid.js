@@ -41,7 +41,7 @@ float vox(ivec3 c){ if(c.x<0||c.y<0||c.z<0||c.x>=u_vdim.x||c.y>=u_vdim.y||c.z>=u
 // parte sólida de la celda en vertical (y0,y1); vacía si y1<=y0
 vec2 span(float v){ if(v==1.0) return vec2(0.0,1.0); if(v>=100.0){ float k=v-100.0; float a=floor(k/9.0); return vec2(a,k-a*9.0)/8.0; } return vec2(1.0,0.0); }
 // altura del suelo bajo la columna de la celda c (parte sólida de c o tope del bloque de abajo); hueco de 1+ bloques: c.y-1.5
-float supH(ivec3 c){ vec2 s=span(vox(c)); if(s.y>s.x) return float(c.y)+s.y; vec2 b=span(vox(c-ivec3(0,1,0))); if(b.y>b.x) return float(c.y-1)+b.y; return float(c.y)-1.5; }
+float supH(ivec3 c){ float v=vox(c); if(v>49.5&&v<50.5) return float(c.y)+1.0; vec2 s=span(v); if(s.y>s.x) return float(c.y)+s.y; float vb=vox(c-ivec3(0,1,0)); if(vb>49.5&&vb<50.5) return float(c.y); vec2 b=span(vb); if(b.y>b.x) return float(c.y-1)+b.y; return float(c.y)-1.5; } // 50 = celda de aire ya llena de partículas
 // ¿la celda tapa el paso a la altura y? (su parte sólida sube por encima)
 bool wallAt(ivec3 c, float y){ vec2 s=span(vox(c)); return s.y>s.x && float(c.y)+s.y>y-RAD+0.02; }
 float cmp(vec3 v,int a){ return a==0?v.x:(a==1?v.y:v.z); }
@@ -271,7 +271,7 @@ function flVoxFill(w) {
       if (!c) { D[k] = 1; continue; } if (wy < 0) { D[k] = 1; continue; } if (wy >= H) { D[k] = 0; continue; }
       D[k] = flVoxVal(c.blocks, c.meta, base | (wy << 8), H); } } }
   const gl = R.gl; gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1); gl.bindTexture(gl.TEXTURE_3D, FL.vox); gl.texSubImage3D(gl.TEXTURE_3D, 0, 0, 0, 0, vx, vy, vz, gl.RED, gl.UNSIGNED_BYTE, D); gl.bindTexture(gl.TEXTURE_3D, null); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
-  FL.voxDirty.length = 0; FL.voxLoaded = new Set();
+  FL.voxDirty.length = 0; FL.voxLoaded = new Set(); FL.full = new Set();
   for (let cz = oz >> 4; cz <= (oz + vz - 1) >> 4; cz++) for (let cx = ox >> 4; cx <= (ox + vx - 1) >> 4; cx++) if (w.chunk(cx, cz)) FL.voxLoaded.add(cx + ',' + cz);
 }
 // chunks que llegaron después de rellenar la región: copiar su parte (una subida por chunk)
@@ -387,14 +387,14 @@ function flUpdate(dt, w) {
   while (FL.hi > 0 && !FL.phase[FL.hi - 1]) FL.hi--;
   const hasWork = FL.hi > 0 || FL.spawnQ.length || FL.killQ.length; if (!hasWork) return;
   gl.disable(gl.BLEND); gl.disable(gl.CULL_FACE); gl.disable(gl.DEPTH_TEST); gl.depthMask(false);
-  flDyingTick(); flScaleUpload();
+  if (dt > 0) flDyingTick(); flScaleUpload(); // congelado (/tick freeze o pausa): ni se encogen ni se absorben
   flFlushQueues();
   FL.M = Math.max(256, 1 << Math.ceil(Math.log2(Math.max(1, FL.hi))));
   flEntities(w);
   gl.bindVertexArray(FL.vao);
   FL.acc = Math.min(FL.acc + dt, 2 / 60); FL.dt = 1 / 60; let n = 0;
   while (FL.acc >= FL.dt * 0.999 && n < 2) { FL.acc -= FL.dt; flStep(); n++; }
-  flReadback();
+  if (dt > 0) flReadback();
   gl.bindVertexArray(null); gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.depthMask(true); gl.enable(gl.DEPTH_TEST); gl.enable(gl.CULL_FACE);
   gl.activeTexture(gl.TEXTURE0);
 }
@@ -724,6 +724,18 @@ function flAbsorb(w, x, y, z, base, flag) {
   if (a < 8) flSetStatic(w, bx, ty, bz, into, a + 1, placed);
   else if (cellVol(w, bx, ty + 1, bz, into) === 0) flSetStatic(w, bx, ty + 1, bz, into, 1, placed);
 }
+// celdas de aire ya llenas de partículas: en la textura de vóxeles valen 50 (para chocar siguen siendo aire), así el
+// shader no manda más líquido hacia un hueco que ya está lleno (la búsqueda de "lo más bajo" las ve como suelo)
+FL.full = new Set();
+function flMarkFull(occ) {
+  const gl = R.gl; const [vx, vy, vz] = FL.vdim, [ox, oy, oz] = FL.org; const D = FL.voxData; const want = new Set(); const one = new Uint8Array(1);
+  for (const c of occ.values()) { if (c.idx.length < FL_PPB * 0.6) continue; const x = c.x - ox, y = c.y - oy, z = c.z - oz; if (x < 0 || y < 0 || z < 0 || x >= vx || y >= vy || z >= vz) continue; const k = x + vx * (y + vy * z); if (D[k] === 0 || D[k] === 50) want.add(k); }
+  let changed = false; gl.bindTexture(gl.TEXTURE_3D, FL.vox); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  const put = (k, v) => { D[k] = v; one[0] = v; const x = k % vx, y = Math.floor(k / vx) % vy, z = Math.floor(k / (vx * vy)); gl.texSubImage3D(gl.TEXTURE_3D, 0, x, y, z, 1, 1, 1, gl.RED, gl.UNSIGNED_BYTE, one); changed = true; };
+  for (const k of FL.full) if (!want.has(k) && D[k] === 50) put(k, 0);
+  for (const k of want) if (D[k] !== 50) put(k, 50);
+  FL.full = want; gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4); gl.bindTexture(gl.TEXTURE_3D, null);
+}
 // agua y lava que se tocan: la lava se enfría en piedra (obsidiana si había mucha)
 function flQuenchAcc(w, x, y, z, lavaInWater) {
   const k = FLK(x, y, z) + 0.5; const v = (FL.acc2.get(k) || 0) + 1; if (v < (lavaInWater ? 24 : 16)) { FL.acc2.set(k, v); return; } FL.acc2.delete(k);
@@ -734,7 +746,7 @@ function flQuenchAcc(w, x, y, z, lavaInWater) {
 }
 function flAfterReadback() {
   const rb = FL.rb, w = FL.world; if (!w || !FL.spawnFrame) return; const n = rb.count, o = rb.orgNow, P = rb.pos, V = rb.vel, F = rb.frameAt;
-  const now = performance.now(); const dtR = Math.min(1, (now - (FL.lastRB || now)) / 1000); FL.lastRB = now;
+  const now = (G.wclock ?? performance.now() / 1000) * 1000; const dtR = Math.min(1, (now - (FL.lastRB || now)) / 1000); FL.lastRB = now;
   const occ = new Map();
   for (let i = 0; i < n; i++) {
     const ph = FL.phase[i]; if (!ph || FL.spawnFrame[i] > F) continue; const k4 = i * 4; const pw = P[k4 + 3]; if (pw < 0.5) continue;
@@ -752,7 +764,7 @@ function flAfterReadback() {
     if (y > c.top) c.top = y; c.vx += vx; c.vy += vy; c.vz += vz; c.vs = (c.vs || 0) + sp; if (sp > c.vmax) c.vmax = sp; c.idx.push(i);
   }
   for (const c of occ.values()) { const m = c.idx.length; c.vx /= m; c.vy /= m; c.vz /= m; }
-  FL.occ = occ;
+  FL.occ = occ; flMarkFull(occ);
   // la lava en movimiento ilumina (las celdas con más lava, como luces dinámicas)
   FL.lavaPts = []; for (const c of occ.values()) if (c.nl >= 12) FL.lavaPts.push([c.x + 0.5, c.y, c.z + 0.5]);
   // agua y lava en la misma celda
@@ -808,11 +820,11 @@ function flSoak(w, comp, lava, dtR) {
   if (lava) return;
   for (const c of comp) { if (!c.idx.length) continue; const below = w.get(c.x, c.y - 1, c.z); const here = w.get(c.x, c.y, c.z); const g = (below > 0 && flPorous(below)) || (here > 0 && flPorous(here)); if (!g) continue;
     let n = Math.max(1, Math.round(c.idx.length * dtR * 0.08));
-    for (const i of c.idx) { if (n <= 0) break; if (!FL.dying.has(i)) { FL.dying.set(i, performance.now()); n--; } } }
+    for (const i of c.idx) { if (n <= 0) break; if (!FL.dying.has(i)) { FL.dying.set(i, (G.wclock ?? performance.now() / 1000) * 1000); n--; } } }
 }
 // la desaparición: la partícula se encoge (y se hunde en el suelo) durante ~1,2 s y luego se quita
 function flDyingTick() {
-  if (!FL.dying.size && FL.alive <= FL.N * 0.92) return; const now = performance.now(); let dirty = false;
+  if (!FL.dying.size && FL.alive <= FL.N * 0.92) return; const now = (G.wclock ?? performance.now() / 1000) * 1000; let dirty = false;
   for (const [i, t0] of FL.dying) { const k = (now - t0) / 1200; if (!FL.phase[i] || k >= 1) { FL.dying.delete(i); FL.scale[i] = 255; if (FL.phase[i]) flKill(i); dirty = true; continue; } const v = Math.round(255 * (1 - k)); if (FL.scale[i] !== v) { FL.scale[i] = v; dirty = true; } }
   // demasiadas partículas: las más viejas se van filtrando también
   if (FL.alive > FL.N * 0.92) { let n = 64; for (let i = 0; i < FL.hi && n > 0; i++) if (FL.phase[i] && !FL.dying.has(i)) { FL.dying.set(i, now); n--; } }

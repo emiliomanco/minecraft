@@ -58,14 +58,22 @@ function dynFell(w, x, y, z, old) {
   for (const [dx, dy, dz] of N6) { const a = x + dx, b = y + dy, c = z + dz; if (dynIsLog(w.get(a, b, c))) { comp.set(K(a, b, c), [a, b, c]); st.push([a, b, c]); } }
   while (st.length && comp.size < 1500) { const [a, b, c] = st.pop(); for (const [dx, dy, dz] of N6) { const p = a + dx, q = b + dy, r = c + dz; const k = K(p, q, r); if (comp.has(k) || Math.abs(p - x) > 18 || Math.abs(r - z) > 18 || Math.abs(q - y) > 40) continue; if (dynIsLog(w.get(p, q, r))) { comp.set(k, [p, q, r]); st.push([p, q, r]); } } }
   if (!comp.size) return;
-  // lo que sigue unido a una raíz (rama apoyada en suelo firme) se queda
+  // cada rama pertenece a la raíz más cercana por el esqueleto (aunque las copas de dos árboles se toquen). Se calcula con
+  // el corte todavía presente; después, lo de cada raíz que ya no llega a ella cae
+  const roots = []; for (const [k, [a, b, c]] of comp) if (dynGround(w.get(a, b - 1, c))) roots.push(k);
+  const cutK = K(x, y, z); const cutRoot = dynGround(w.get(x, y - 1, z)); if (cutRoot) roots.push(cutK);
+  const owner = new Map(); const oq = []; for (const k of roots) { owner.set(k, k); oq.push(k); }
+  const pos = k => k === cutK ? [x, y, z] : comp.get(k);
+  for (let qi = 0; qi < oq.length; qi++) { const k = oq[qi]; const [a, b, c] = pos(k); const o = owner.get(k);
+    for (const [dx, dy, dz] of N6) { const nk = K(a + dx, b + dy, c + dz); if (owner.has(nk) || !(comp.has(nk) || nk === cutK)) continue; owner.set(nk, o); oq.push(nk); } }
   const kept = new Set(); const st2 = [];
-  for (const [k, [a, b, c]] of comp) { if (dynGround(w.get(a, b - 1, c))) { kept.add(k); st2.push([a, b, c]); } }
-  while (st2.length) { const [a, b, c] = st2.pop(); for (const [dx, dy, dz] of N6) { const k = K(a + dx, b + dy, c + dz); if (comp.has(k) && !kept.has(k)) { kept.add(k); st2.push([a + dx, b + dy, c + dz]); } } }
+  for (const k of roots) if (k !== cutK) { kept.add(k); st2.push(k); }
+  while (st2.length) { const k = st2.pop(); const [a, b, c] = comp.get(k); const o = owner.get(k);
+    for (const [dx, dy, dz] of N6) { const nk = K(a + dx, b + dy, c + dz); if (!comp.has(nk) || kept.has(nk) || owner.get(nk) !== o) continue; kept.add(nk); st2.push(nk); } }
   const fall = []; for (const [k, v] of comp) if (!kept.has(k)) fall.push(v);
   if (!fall.length) return;
   // tocón: si el corte fue en el tronco, encima de la raíz que se queda
-  let stumped = false; const rb = w.get(x, y - 1, z); if (dynIsLog(rb) && kept.has(K(x, y - 1, z))) { stumped = true; const ry = dynRootOf(w, x, y - 1, z); const rm = w.getMeta(x, ry, z); DYNT.busy = true; setBlockNet(w, x, ry, z, w.get(x, ry, z), (rm & 7) | 32); DYNT.busy = false; }
+  let stumped = false; const rb = w.get(x, y - 1, z); if (dynIsLog(rb) && kept.has(K(x, y - 1, z))) { stumped = true; const ry = dynRootOf(w, x, y - 1, z); const rm = w.getMeta(x, ry, z); DYNT.busy = true; try { setBlockNet(w, x, ry, z, w.get(x, ry, z), (rm & 7) | 32); } finally { DYNT.busy = false; } }
   // hojas de las ramas que caen (y no de las que quedan)
   const fallSet = new Set(fall.map(v => K(v[0], v[1], v[2]))); const leaves = new Map(); const lq = [];
   for (const [a, b, c] of fall) for (const [dx, dy, dz] of N6) lq.push([a + dx, b + dy, c + dz, 1]);

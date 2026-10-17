@@ -138,7 +138,7 @@ function efSources(w, fires) {
 }
 function efPass(P, fb) { const gl = R.gl; gl.bindFramebuffer(gl.FRAMEBUFFER, fb); gl.viewport(0, 0, EF.AW, EF.AH); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
 function efBind(P, name, unit, t) { const gl = R.gl; if (P.u[name] === undefined) return; gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, t); gl.uniform1i(P.u[name], unit); }
-function efCommon(P) { const gl = R.gl; if (P.u.u_dt) gl.uniform1f(P.u.u_dt, 1 / 30); if (P.u.u_time) gl.uniform1f(P.u.u_time, performance.now() / 1000); if (P.u.u_wind) gl.uniform2f(P.u.u_wind, (SMK.wind || [0, 0])[0], (SMK.wind || [0, 0])[1]); efBind(P, 'u_sol', 6, EF.sol); efBind(P, 'u_src', 7, EF.src); }
+function efCommon(P) { const gl = R.gl; if (P.u.u_dt) gl.uniform1f(P.u.u_dt, 1 / 30); if (P.u.u_time) gl.uniform1f(P.u.u_time, (G.wclock ?? performance.now() / 1000) * 1000 / 1000); if (P.u.u_wind) gl.uniform2f(P.u.u_wind, (SMK.wind || [0, 0])[0], (SMK.wind || [0, 0])[1]); efBind(P, 'u_sol', 6, EF.sol); efBind(P, 'u_src', 7, EF.src); }
 function efStep() {
   const gl = R.gl; let P;
   P = EF.P.vel; gl.useProgram(P.p); efCommon(P); efBind(P, 'u_vel', 0, EF.vel[EF.cur]); efBind(P, 'u_scal', 1, EF.scal[EF.scur]); efPass(P, EF.fbVel[1 - EF.cur]); EF.cur = 1 - EF.cur;

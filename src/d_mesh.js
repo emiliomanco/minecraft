@@ -151,7 +151,7 @@ function dynLogBoxes(meta, ri) {
   out.push([a, dn || ground ? 0 : a, a, b, up ? 16 : b, b]);
   for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
     const nw = conn(ri + dx + dz * LR); if (!nw) continue; const ww = Math.min(w, nw), c0 = 8 - ww / 2, c1 = 8 + ww / 2;
-    out.push([dx > 0 ? b : dx < 0 ? 0 : c0, c0, dz > 0 ? b : dz < 0 ? 0 : c0, dx > 0 ? 16 : dx < 0 ? a : c1, c1, dz > 0 ? 16 : dz < 0 ? a : c1]);
+    const arm = [dx > 0 ? b : dx < 0 ? 0 : c0, c0, dz > 0 ? b : dz < 0 ? 0 : c0, dx > 0 ? 16 : dx < 0 ? a : c1, c1, dz > 0 ? 16 : dz < 0 ? a : c1]; arm.arm = dx ? 0 : 2; out.push(arm);
   }
   return out;
 }
@@ -191,7 +191,7 @@ const ORIENT_FRONT = [5, 0, 4, 1];
 const OPP = [1, 0, 3, 2, 5, 4];
 function faceLayer(d, f, meta) {
   if (d.orient) { const fr = ORIENT_FRONT[meta & 3]; if (f === fr) return d.faces[5]; if (f === OPP[fr]) return d.faces[4]; if (f >= 4 || f <= 1) return d.faces[0]; }
-  if (d.log && meta) { const ax = meta === 1 ? 0 : 2; if (FACE[f].a === ax) return d.faces[2]; return d.faces[0]; }
+  if (d.log && meta && !d.dynLog) { const ax = meta === 1 ? 0 : 2; /* en las ramas dinámicas meta es el grosor, no la orientación */ if (FACE[f].a === ax) return d.faces[2]; return d.faces[0]; }
   return d.faces[f];
 }
 let MESH_QUALITY = 2;
@@ -261,7 +261,7 @@ function meshRegion(world, ch) {
       emitBox(d, x, y, z, ri, meta, ch);
     } else if (d.render === 'shape') {
       const boxes = d.shape === 'dynlog' ? dynLogBoxes(meta, ri) : shapeBoxes(d, meta, (dx, dz) => regB[ri + dx + dz * LR]); const lay = d.shape === 'door' && (meta & 8) ? d.layerTop : undefined;
-      for (const b of boxes) { if (b.length > 6) emitBox(d, x, y, z, ri, meta, ch, b.slice(0, 6), TEX[b[6]]); else emitBox(d, x, y, z, ri, meta, ch, b, lay); }
+      for (const b of boxes) { if (b.length > 6) emitBox(d, x, y, z, ri, meta, ch, b.slice(0, 6), TEX[b[6]]); else emitBox(d, x, y, z, ri, meta, ch, b, lay, b.arm); }
     } else if (d.render === 'liquid') {
       emitLiquidCell(d.liquid === 1 ? MB_W : O, d.liquid, x, y, z, ri, ch, bxw, bzw);
     } else if (d.render === 'snow') {
@@ -298,7 +298,8 @@ function emitFace(B, f, x, y, z, ri, nri, layer, flags, tint, rot, h0, h1, box) 
   }
   B.quad(aos[0] + aos[2] < aos[1] + aos[3]);
 }
-function emitBox(d, x, y, z, ri, meta, ch, boxOv, layerOv) {
+// armAxis (ramas dinámicas horizontales): la veta de la corteza va a lo largo de la rama y los extremos muestran anillos
+function emitBox(d, x, y, z, ri, meta, ch, boxOv, layerOv, armAxis) {
   let [x0, y0, z0, x1, y1, z1] = (boxOv || d.box).map(v => v / 16);
   if ((d.id === ID.torch) && meta >= 1 && meta <= 4) { const o = [[0, 0.32], [-0.32, 0], [0, -0.32], [0.32, 0]][meta - 1]; x0 += o[0]; x1 += o[0]; z0 += o[1]; z1 += o[1]; y0 += 0.2; y1 += 0.2; }
   if (d.id === ID.pointed_dripstone && meta === 1) { /* colgante: misma caja */ }
@@ -311,11 +312,12 @@ function emitBox(d, x, y, z, ri, meta, ch, boxOv, layerOv) {
     const F = FACE[f]; const atEdge = (f === 0 && x1 >= 1) || (f === 1 && x0 <= 0) || (f === 2 && y1 >= 1) || (f === 3 && y0 <= 0) || (f === 4 && z1 >= 1) || (f === 5 && z0 <= 0);
     if (atEdge) { const nb = regB[ri + F.n[0] + F.n[1] * LRR + F.n[2] * LR]; if (T_FULL[nb]) continue; }
     if (d.endPortal && f !== 2) continue;
-    const layer = layerOv !== undefined ? layerOv : faceLayer(d, f, meta); B.grow(); const p = P[f]; const ao = (f === 3) ? 2 : 3;
+    let layer = layerOv !== undefined ? layerOv : faceLayer(d, f, meta); B.grow(); const p = P[f]; const ao = (f === 3) ? 2 : 3;
+    let swap = false; if (armAxis !== undefined) { if (F.a === armAxis) layer = d.faces[2]; else { const vAx = (f === 2 || f === 3) ? 2 : 1; swap = vAx !== armAxis; } }
     const shadeSide = f === 2 ? 1 : 0.92;
     for (let k = 0; k < 4; k++) {
       const px = p[k * 3], py = p[k * 3 + 1], pz = p[k * 3 + 2];
-      let [u, v] = faceUV(f, px, py, pz); if (d.id === ID.torch || d.id === ID.end_rod) { if (f !== 2 && f !== 3) { v = 1 - (py - y0) / 1; } }
+      let [u, v] = faceUV(f, px, py, pz); if (swap) { const t = u; u = v; v = t; } if (d.id === ID.torch || d.id === ID.end_rod) { if (f !== 2 && f !== 3) { v = 1 - (py - y0) / 1; } }
       B.v(x + px, y + py, z + pz, u, v, layer, flags | f, sky * shadeSide, blk, ao, tint);
     }
     B.quad(false);

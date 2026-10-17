@@ -187,7 +187,7 @@ function drawProj(e, x, y, z, yaw, light, t) {
   const id = { pearl: ID.ender_pearl, eye: ID.eye_of_ender, snowball: ID.snowball }[ty]; if (id) { M4.rotY(m, R.yawCam || 0); M4.scale(m, 1 / 16, 1 / 16, 1 / 16); drawItemModel(id, m, light, 5); }
 }
 function drawAllEntities(dim, alpha, selfView) {
-  const t = performance.now() / 1000; const cam = R.cam; const rd2 = (SETTINGS.rd * 16) ** 2;
+  const t = G.wclock ?? performance.now() / 1000; const cam = R.cam; const rd2 = (SETTINGS.rd * 16) ** 2;
   for (const e of G.entities.values()) {
     if (e.dim !== dim || e.removed) continue; if ((e.x - cam[0]) ** 2 + (e.z - cam[2]) ** 2 > rd2) continue;
     if (e.remotePlayer && e.spectator) continue;

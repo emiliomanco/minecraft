@@ -873,7 +873,7 @@ function boxVisible(P, x0, y0, z0, x1, y1, z1) { for (const p of P) { const x = 
 // ---------------------------------------------------------- frame
 function renderWorld(world, cam, yaw, pitch, opts = {}) {
   if (R.lost) return; // contexto de GPU perdido: esperar a que se restaure
-  const gl = R.gl; resize(); R.time = performance.now() / 1000;
+  const gl = R.gl; resize(); R.time = (G.mode === 'game' && G.wclock !== undefined) ? G.wclock : performance.now() / 1000; // reloj del mundo: /tick freeze también para olas, hojas, nubes y llamas
   R.dimIdx = world.dim === 'overworld' ? 0 : world.dim === 'nether' ? 1 : 2;
   R.cam = cam; R.under = !!opts.under;
   const fov = (opts.fov || SETTINGS.fov) * Math.PI / 180; const far = Math.max(160, SETTINGS.rd * 16 * 1.6 + 48);

@@ -339,6 +339,7 @@ function gameFrame(dt) {
     accW += dt * 1000 * rate; let m = 0; const mx = Math.max(4, Math.ceil(rate * 4)); while (accW >= 50 && m < mx) { worldTick(); accW -= 50; m++; if (G.tickFrozen && G.tickStep > 0 && --G.tickStep <= 0) { accW = 0; break; } } if (m >= mx) accW = 0;
   }
   const wdt = pausedSP ? 0 : Math.min(0.1, dt * rate);
+  if (G.wclock === undefined) G.wclock = performance.now() / 1000; G.wclock += pausedSP ? 0 : dt * rate; // reloj de las animaciones del mundo
   const typing = $('chatIn').classList.contains('on');
   const input = (UI.open || typing || G.paused || p.dead) ? {} : { f: held('forward'), b: held('back'), l: held('left'), r: held('right'), jump: held('jump'), sneak: SETTINGS.ctl.toggleSneak ? !!INPUT.tSneak : held('sneak'), sprint: SETTINGS.ctl.toggleSprint ? (held('forward') ? !!INPUT.tSprint : (INPUT.tSprint = false)) : held('sprint'), useHeld: p.eatT > 0 || p.bowT > 0 };
   if (!pausedSP && !p.dead && !p.ragdoll && p.boat) { p.savePrev(); boatRide(p, dt, input, pausedSP ? 1 : clamp(acc / 50, 0, 1)); }

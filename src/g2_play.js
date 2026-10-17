@@ -317,7 +317,8 @@ function onKeyDown(e) {
   // agacharse / correr en modo «alternar» (Opciones → Controles)
   if (!e.repeat && !UI.open && !G.paused) { if (a === 'sneak' && SETTINGS.ctl.toggleSneak) INPUT.tSneak = !INPUT.tSneak; if (a === 'sprint' && SETTINGS.ctl.toggleSprint) INPUT.tSprint = !INPUT.tSprint; }
   if (e.code === 'F3' || a === 'debug') { e.preventDefault(); if (!e.repeat && !INPUT.keys.F3) { F3 = !F3; setF3Display(); } INPUT.keys.F3 = true; INPUT.f3used = false; return; }
-  if (INPUT.keys.F3 && !INPUT.f3used && /^Key[BGNQ]$/.test(e.code)) { F3 = !F3; setF3Display(); }
+  if (INPUT.keys.F3 && !INPUT.f3used && (/^Key[BGNQ]$/.test(e.code) || e.code === 'F4')) { F3 = !F3; setF3Display(); }
+  if (INPUT.keys.F3 && e.code === 'F4') { e.preventDefault(); INPUT.f3used = true; if (!e.repeat) gmSwitchStep(); return; }
   if (INPUT.keys.F3) { if (e.code === 'KeyB') { F3B = !F3B; INPUT.f3used = true; chatMsg('Cajas de colisión: ' + (F3B ? 'visibles' : 'ocultas')); } if (e.code === 'KeyG') { F3G = !F3G; INPUT.f3used = true; chatMsg('Bordes de chunk: ' + (F3G ? 'visibles' : 'ocultos')); } if (e.code === 'KeyN') { INPUT.f3used = true; setGameMode(G.gameMode === 'spectator' ? 'creative' : 'spectator'); } if (e.code === 'KeyQ') { INPUT.f3used = true; chatMsg('F3+B: cajas  F3+G: chunks  F3+N: espectador'); } e.preventDefault(); return; }
   if (e.code === 'Escape') { e.preventDefault(); if (UI.open) closeScreen(); else if (G.paused) { if ($('sOptions').classList.contains('on') || $('sControls').classList.contains('on')) { waitingKey = null; showScreen('sPause'); } else pauseGame(false); } else if ($('sCredits').classList.contains('on')) { hideScreens(); lockPointer(); } else if (!G.player.dead) pauseGame(true); return; }
   if (UI.open) {
@@ -343,8 +344,27 @@ function onKeyDown(e) {
   if (e.code === 'F2') { e.preventDefault(); screenshot(); }
   if (e.code === 'F11') { e.preventDefault(); if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen().then(() => { try { navigator.keyboard && navigator.keyboard.lock(); } catch (err) { } }).catch(() => { }); }
 }
+// ---- F3+F4: selector de modo de juego (F4 pasa al siguiente; al soltar F3 se aplica)
+const GMSW = { open: false, sel: 0, el: null, modes: [['creative', 'Modo creativo', 'grass_block'], ['survival', 'Modo supervivencia', 'iron_sword'], ['adventure', 'Modo aventura', 'map'], ['spectator', 'Modo espectador', 'eye_of_ender']] };
+function gmSwitchRender() {
+  let el = GMSW.el; if (!el) { el = GMSW.el = document.createElement('div'); el.id = 'gmSwitch'; document.body.appendChild(el); }
+  const m = GMSW.modes; el.innerHTML = '<div class="gt">' + m[GMSW.sel][1] + '</div><div class="gi">' + m.map((q, i) => { const id = ID[q[2]] ?? ID.eye_of_ender ?? ID.grass_block; return '<div class="gs' + (i === GMSW.sel ? ' on' : '') + '"><img src="' + iconURL(id) + '"></div>'; }).join('') + '</div><div class="gk"><b>[ F4 ]</b> Siguiente</div>';
+  el.style.display = 'block';
+}
+function gmSwitchStep() {
+  if (G.mode !== 'game') return;
+  if (!GMSW.open) { GMSW.open = true; const cur = GMSW.modes.findIndex(q => q[0] === G.gameMode); GMSW.sel = ((cur < 0 ? 1 : cur) + 1) % GMSW.modes.length; } // como en Minecraft: empieza en el siguiente
+  else GMSW.sel = (GMSW.sel + 1) % GMSW.modes.length;
+  gmSwitchRender();
+}
+function gmSwitchApply() {
+  GMSW.open = false; if (GMSW.el) GMSW.el.style.display = 'none';
+  const m = GMSW.modes[GMSW.sel]; if (G.cheats === false && !(G.net && G.net.role === 'host')) { chatMsg('Los trucos no están activados en este mundo.', '#f88'); return; }
+  if (m[0] !== G.gameMode) { setGameMode(m[0]); chatMsg('Modo de juego cambiado a ' + m[1].replace('Modo ', '')); }
+}
 function setF3Display() { const v = F3 && G.mode === 'game' ? 'block' : 'none'; $('debugL').style.display = $('debugR').style.display = v; dbgT = 0; }
 function onKeyUp(e) {
+  if ((e.code === 'F3' || actionFor(e.code) === 'debug') && GMSW.open) gmSwitchApply();
   if (e.code === 'F3' || actionFor(e.code) === 'debug') INPUT.keys.F3 = false;
   INPUT.keys[e.code] = false;
 }
