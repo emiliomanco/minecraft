@@ -36,7 +36,7 @@ shaped('gold_ingot', 1, ['NNN', 'NNN', 'NNN'], { N: 'gold_nugget' }); shapeless(
 shaped('iron_ingot', 1, ['NNN', 'NNN', 'NNN'], { N: 'iron_nugget' }); shapeless('iron_nugget', 9, ['iron_ingot']);
 shaped('bucket', 1, ['I I', ' I '], { I: 'iron_ingot' }); shapeless('flint_and_steel', 1, ['iron_ingot', 'flint']);
 shaped('fire_extinguisher', 1, ['INI', 'I I', 'INI'], { I: 'iron_ingot', N: 'iron_nugget' });
-shaped('flamethrower', 1, ['  F', 'IBI', 'II '], { I: 'iron_ingot', B: 'blaze_rod', F: 'flint_and_steel' }); shapeless('sponge_item', 2, ['sponge']);
+shaped('flamethrower', 1, ['  F', 'IBI', 'II '], { I: 'iron_ingot', B: 'blaze_rod', F: 'flint_and_steel' }); shapeless('sponge_item', 2, ['sponge']); shaped('diffuser', 1, [' HP', ' PH', 'P  '], { P: 'stick', H: 'iron_ingot' });
 shaped('shears', 1, [' I', 'I '], { I: 'iron_ingot' }); shaped('compass', 1, [' I ', 'IRI', ' I '], { I: 'iron_ingot', R: 'redstone' }); shaped('clock', 1, [' G ', 'GRG', ' G '], { G: 'gold_ingot', R: 'redstone' });
 shaped('bow', 1, [' TS', 'T S', ' TS'], { T: 'stick', S: 'string' }); shaped('arrow', 4, ['F', 'S', 'E'], { F: 'flint', S: 'stick', E: 'feather' });
 shaped('crossbow', 1, ['STS', 'TIT', ' S '], { S: 'stick', T: 'string', I: 'iron_ingot' });
@@ -77,7 +77,7 @@ shaped('lever', 1, ['S', 'C'], { S: 'stick', C: 'cobblestone' }); shapeless('sto
 shapeless('bone_meal', 3, ['bone']); shapeless('firework_rocket', 3, ['paper', 'gunpowder']);
 shaped('map', 1, ['PPP', 'PCP', 'PPP'], { P: 'paper', C: 'compass' }); shaped('brush', 1, ['F', 'C', 'S'], { F: 'feather', C: 'copper_ingot', S: 'stick' });
 shaped('slime_block', 1, ['SSS', 'SSS', 'SSS'], { S: 'slime_ball' }); shapeless('slime_ball', 9, ['slime_block']);
-shaped('honey_block', 1, ['HH', 'HH'], { H: 'honeycomb' }); shaped('honeycomb_block', 1, ['HH', 'HH'], { H: 'honeycomb' });
+shaped('honey_block', 1, ['HH', 'HH'], { H: 'honeycomb' }); shaped('honey_bucket', 1, ['M', 'C'], { M: 'honey_block', C: 'bucket' }); // 10 L de miel shaped('honeycomb_block', 1, ['HH', 'HH'], { H: 'honeycomb' });
 shaped('scaffolding', 6, ['SSS', 'S S', 'S S'], { S: 'stick' });
 shaped('iron_bars', 16, ['III', 'III'], { I: 'iron_ingot' }); shaped('rail', 16, ['I I', 'ISI', 'I I'], { I: 'iron_ingot', S: 'stick' });
 shaped('mace', 1, ['H', 'B'], { H: 'heavy_core', B: 'breeze_rod' }); shaped('lead', 2, ['SS ', 'SB ', '  S'], { S: 'string', B: 'slime_ball' });

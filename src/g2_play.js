@@ -145,7 +145,7 @@ function renderEnchant() {
   box.innerHTML = rolls.length ? rolls.map((o, i) => { const ok = G.gameMode === 'creative' || (xpLevel(p.xp) >= o.cost && lap >= i + 1); return `<div class="eopt ${ok ? '' : 'no'}" data-i="${i}"><b>${o.cost}</b> ${ENCH[o.k][0]} ${ROMAN[o.lvl]} <small>(${i + 1} lapislázuli)</small></div>`; }).join('') : '<div class="hint">' + (s && s.e ? 'Ya está encantado' : 'Coloca una herramienta, arma o armadura y lapislázuli') + '</div>';
   box.querySelectorAll('.eopt').forEach(el => el.onmousedown = ev => { ev.preventDefault(); const i = +el.dataset.i; const o = rolls[i]; if (G.gameMode !== 'creative' && (xpLevel(p.xp) < o.cost || lap < i + 1)) return; s.e = { [o.k]: o.lvl }; if (Math.random() < 0.5) { const L = enchOptions(s).filter(k => k !== o.k); if (L.length) { const k2 = L[Math.random() * L.length | 0]; s.e[k2] = Math.max(1, Math.round(o.lvl * 0.6)); } } if (G.gameMode !== 'creative') { E[1].c -= i + 1; if (E[1].c <= 0) E[1] = null; spendLevels(p, i + 1); } p.enchSeed = Math.random() * 1e9 | 0; playSound('levelup', 0, 0, 0, 0.5); refreshInvUI(); });
 }
-function consumeCraft() { const c = UI.craft; for (let i = 0; i < c.grid.length; i++) { const s = c.grid[i]; if (!s) continue; if (s.id === ID.water_bucket || s.id === ID.lava_bucket || s.id === ID.milk_bucket) { c.grid[i] = { id: ID.bucket, c: 1 }; continue; } s.c--; if (s.c <= 0) c.grid[i] = null; } }
+function consumeCraft() { const c = UI.craft; for (let i = 0; i < c.grid.length; i++) { const s = c.grid[i]; if (!s) continue; if (s.id === ID.water_bucket || s.id === ID.lava_bucket || s.id === ID.milk_bucket || s.id === ID.honey_bucket) { c.grid[i] = { id: ID.bucket, c: 1 }; continue; } s.c--; if (s.c <= 0) c.grid[i] = null; } }
 function smithResult() { const s = UI.smith; if (!s || !s[0] || !s[1] || s[1].id !== ID.netherite_ingot) return null; const n = REG[s[0].id].name; if (!n.startsWith('diamond_')) return null; const t = ID['netherite_' + n.slice(8)]; if (t === undefined) return null; return { id: t, c: 1, d: s[0].d || 0 }; }
 function consumeSmith() { const s = UI.smith; s[0] = null; s[1].c--; if (s[1].c <= 0) s[1] = null; if (s[2]) { s[2].c--; if (s[2].c <= 0) s[2] = null; } }
 function sameItem(a, b) { return a && b && a.id === b.id && (a.d || 0) === (b.d || 0) && !a.e && !b.e; }
@@ -268,7 +268,7 @@ const CREATIVE_TABS = [['Construcción', i => { const d = REG[i]; return d.isBlo
   ['Colores', i => REG[i].isBlock && /wool|terracotta|glass|concrete|carpet/.test(REG[i].name)],
   ['Naturales', i => { const d = REG[i]; return d.isBlock && (/ore|log|leaves|sand|gravel|dirt|grass|nylium|sapling|flower|mushroom|cactus|snow|ice|stone$|netherrack|soul|end_stone|moss|sculk|dripstone|clay|mud|basalt|blackstone|kelp|seagrass|lily|vine|fungus|roots|stem|wart|melon|pumpkin|bush|fern|poppy|dandelion|orchid|cornflower|daisy|amethyst|cane|chorus|petals|debris/.test(d.name)); }],
   ['Funcionales', i => { const d = REG[i]; return d.isBlock && (d.ui || d.light || /portal|spawner|vault|bed|tnt|bars|rail|ladder|scaffold|lever|button|plate|rod|lamp|detector|target|note|slime|honey|sponge|bedrock/.test(d.name)) && !/stairs|slab|_wall$|fence|door/.test(d.name); }],
-  ['Herramientas', i => { const d = REG[i]; return !d.isBlock && (d.tool && d.tool.type !== 'sword' || /bucket|flint_and|extinguisher|flamethrower|sponge_item|shears|compass|clock|spyglass|map|lead|brush|broom|boat|fishing|rocket|saddle|name_tag|bone_meal|eye_of|ender_pearl/.test(d.name)); }],
+  ['Herramientas', i => { const d = REG[i]; return !d.isBlock && (d.tool && d.tool.type !== 'sword' || /bucket|flint_and|extinguisher|flamethrower|sponge_item|diffuser|shears|compass|clock|spyglass|map|lead|brush|broom|boat|fishing|rocket|saddle|name_tag|bone_meal|eye_of|ender_pearl/.test(d.name)); }],
   ['Combate', i => { const d = REG[i]; return !d.isBlock && (d.armor || (d.tool && d.tool.type === 'sword') || /bow|arrow|shield|trident|mace|totem|elytra|snowball|obliterator/.test(d.name) || (d.tool && d.tool.type === 'axe')); }],
   ['Comida', i => !REG[i].isBlock && !!REG[i].food],
   ['Ingredientes', i => { const d = REG[i]; return !d.isBlock && !d.food && !d.tool && !d.armor && !d.dur && !d.bucket && !/bow|arrow|shield|trident|mace|totem|elytra/.test(d.name); }],
@@ -291,7 +291,7 @@ const CR_GROUPS = [
   /ice$|snow/, /netherrack|nylium|soul_s|wart_block|shroomlight|magma_block|glowstone$/, /^end_stone$|chorus|dragon_egg/, /dripstone|amethyst|sculk/,
   /crafting_table|furnace|smoker|smithing|anvil|enchanting|bookshelf|barrel|chest$/, /torch|lantern|campfire|end_rod|sea_lantern|froglight|lamp/, /bed$|ladder|scaffolding|bars$|rail/,
   /redstone|lever|button|pressure_plate|target|daylight|note_block|lightning_rod|tnt|piston|observer|hopper|dispenser|dropper/,
-  /_shovel$|_pickaxe$|_axe$|_hoe$/, /bucket/, /flint_and_steel|fire_charge|bone_meal|shears|brush|fishing_rod|compass|clock|spyglass|map$|lead|name_tag|saddle|boat|broom|extinguisher|flamethrower|sponge_item/,
+  /_shovel$|_pickaxe$|_axe$|_hoe$/, /bucket/, /flint_and_steel|fire_charge|bone_meal|shears|brush|fishing_rod|compass|clock|spyglass|map$|lead|name_tag|saddle|boat|broom|extinguisher|flamethrower|sponge_item|diffuser/,
   /_sword$/, /bow$|crossbow|arrow|trident|mace|shield|totem|obliterator/, /_helmet$|_chestplate$|_leggings$|_boots$/, /elytra/
 ];
 const _crKey = new Map();
@@ -520,7 +520,7 @@ function useItem(hit) {
   if (hit && hit.ent) {
     const e = hit.ent;
     if (s && s.id === ID.shears && e.type === 'sheep' && !e.sheared) { e.sheared = true; dropItem(e.dim, e.x, e.y + 1, e.z, { id: ID.white_wool, c: 1 + (Math.random() * 3 | 0) }); damageItem(p.inv, p.sel, 1); return true; }
-    if (s && s.id === ID.bucket && (e.type === 'cow' || e.type === 'goat')) { consumeHeld(p); giveItem(p, { id: ID.milk_bucket, c: 1 }); return true; }
+    if (s && s.id === ID.bucket && (e.type === 'cow' || e.type === 'goat')) { consumeHeld(p); giveItem(p, { id: ID.milk_bucket, c: 1, ml: BUCKET_ML }); playSound('bucket', e.x, e.y + 1, e.z, 0.6); return true; } // ordeñar: 10 L de leche
     if (e.isBoat) { boatMount(p, e); return true; }
     if (e.type === 'villager') { openTrade(e); return true; }
     if (s && s.id === ID.name_tag) { e.persist = true; e.name = 'Mascota'; consumeHeld(p); return true; }
@@ -546,13 +546,13 @@ function useItem(hit) {
   if (!s) return false;
   // objetos
   if (d.food && (p.food < 20 || d.regen || s.id === ID.chorus_fruit || G.gameMode === 'creative')) { p.eatT = 0.01; return 'hold'; }
-  if (d.milk) { p.effects = {}; consumeHeld(p); giveItem(p, { id: ID.bucket, c: 1 }); playSound('drink', p.x, p.y, p.z, 0.8); return true; }
   if (d.bow) { if (G.gameMode === 'creative' || countItem(p, ID.arrow) > 0) { p.bowT = 0.01; return 'hold'; } return false; }
   if (d.trident) { p.bowT = 0.01; return 'hold'; }
   if (d.spyglass) { p.spy = true; return 'hold'; }
   if (d.extinguisher) { sprayExtinguisher(p); return 'hold'; }
   if (d.flamethrower) { sprayFlamethrower(p); return 'hold'; }
   if (d.pbfSponge) { spongeUse(p); return 'hold'; }
+  if (d.diffuser) { diffuserUse(p, s); return 'hold'; }
   if (d.broom) { broomUse(p); return 'hold'; }
   if (d.throwable) {
     const dir = lookDir(p);
@@ -576,14 +576,14 @@ function useItem(hit) {
       const now = performance.now(); if (now - (p._bkT || 0) < 100) return 'hold'; p._bkT = now;
       const got = bucketCollect(w, p, dir, cont, BUCKET_ML - ml);
       if (got.ml > 0) {
-        const nm = Math.min(BUCKET_ML, ml + got.ml); const item = { id: got.liq === 2 ? ID.lava_bucket : ID.water_bucket, c: 1, ml: nm };
+        const nm = Math.min(BUCKET_ML, ml + got.ml); const item = { id: ({ 1: ID.water_bucket, 2: ID.lava_bucket, 4: ID.honey_bucket, 5: ID.milk_bucket })[got.liq] || ID.water_bucket, c: 1, ml: nm };
         if (s.c > 1) { s.c--; p.inv[p.sel] = item; giveItem(p, { id: ID.bucket, c: s.c }); } else p.inv[p.sel] = item;
-        showActionMsg((got.liq === 2 ? 'Lava: ' : 'Agua: ') + (nm / 1000).toFixed(1) + ' / 10 L'); if (Math.random() < 0.35) playSound('bucket', p.x, p.eye, p.z, 0.4); updateHUD();
+        showActionMsg((LIQ_NAME[got.liq] || 'Agua') + ': ' + (nm / 1000).toFixed(1) + ' / 10 L'); if (Math.random() < 0.35) playSound('bucket', p.x, p.eye, p.z, 0.4); updateHUD();
       }
       return 'hold';
     }
     if (!cont || ml <= 0) return false;
-    bucketPourMl(w, p, dir, hit, cont, ml);
+    if (!bucketPourMl(w, p, dir, hit, cont, ml)) return false;
     if (G.gameMode !== 'creative') p.inv[p.sel] = { id: ID.bucket, c: 1 }; playSound('bucket_empty', p.x, p.eye, p.z, 0.8); updateHUD(); return true;
   }
   if (d.boatItem) { if (boatPlace(p, w)) { if (G.gameMode !== 'creative') consumeHeld(p); return true; } return false; }
@@ -642,6 +642,9 @@ function updateInteraction(dt) {
   if (MINE.cool > 0) MINE.cool -= dt; if (MINE.useCool > 0) MINE.useCool -= dt; if (MINE.attackCool > 0) MINE.attackCool -= dt;
   const attack = held('attack'), use = held('use');
   if (p.swing > 0) { p.swing += dt * 6; if (p.swing > 1) p.swing = 0; }
+  // difusor en la mano: golpear el aire cambia de modo (Líquido ↔ PBF)
+  { const s = p.held(); if (attack && !MINE.atkPrev && !tgt && s && REG[s.id].diffuser && G.gameMode !== 'spectator') { s.mode = s.mode === 'pbf' ? 'liquid' : 'pbf'; p.swing = 0.01; showActionMsg('Difusor: modo ' + (s.mode === 'pbf' ? 'PBF (líquido normal → partículas)' : 'Líquido (partículas → líquido normal)')); showItemName(); playSound('hit', p.x, p.eye, p.z, 0.3, ID.iron_block); } }
+  MINE.atkPrev = attack;
   // atacar / minar
   if (attack && G.gameMode !== 'spectator') {
     if (tgt && tgt.ent) { if (MINE.attackCool <= 0) { attackEntity(tgt.ent); MINE.attackCool = 0.35; p.swing = 0.01; } MINE.target = null; }

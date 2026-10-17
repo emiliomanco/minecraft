@@ -76,6 +76,7 @@ function hostHandle(c, m) {
     case 'tnt': { if (!w) return; igniteTNT(w, m.x, m.y, m.z); break; }
     case 'boat': boatNetRecv(c, m); break;
     case 'flm': { const e = c.ent; if (e && Array.isArray(m.o) && Array.isArray(m.dir)) flamerEmit(G.worlds[e.dim] || G.world, m.o.map(Number), m.dir.map(Number), clamp(+m.dt || 0.05, 0, 0.1), e); break; }
+    case 'dif': { const e = c.ent; if (e && Array.isArray(m.p) && Math.hypot(m.p[0] - e.x, m.p[2] - e.z) < 8) diffuserAt(G.worlds[e.dim] || G.world, m.p.map(Number), m.m === 'pbf' ? 'pbf' : 'liquid', 1.6); break; }
     case 'spg': { const e = c.ent; if (e && Array.isArray(m.p) && Math.hypot(m.p[0] - e.x, m.p[2] - e.z) < 8) spongeAt(G.worlds[e.dim] || G.world, m.p.map(Number), 1.6); break; }
     case 'brm': { const e = c.ent; if (e && Array.isArray(m.h) && Array.isArray(m.v)) broomPush(e, Math.floor(e.y + 0.01), clamp(+m.dt || 0.05, 0, 0.1), { head: m.h, v: m.v }); break; }
     case 'boom': { if (!w) return; explode(w, m.x, m.y, m.z, m.p, true, null); break; }

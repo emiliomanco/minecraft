@@ -397,7 +397,7 @@ const GFX_DEF = { shadows: -1, shadowDist: 1, sunRays: true, bloom: 1, dlights: 
 // físicas: cada apartado tiene modo 'real' (físicas de Minecraft 2) o 'vanilla' (como el juego original) y sus valores
 const PHYS_DEF = {
   oceans: { mode: 'real', waves: 1, foam: true, shore: 3 },
-  liquids: { mode: 'real', waterSpeed: 1, lavaVisc: 1, splash: true, continuous: true },
+  liquids: { mode: 'real', waterSpeed: 1, lavaVisc: 1, splash: true, continuous: true, pbfSize: 1 },
   snow: { mode: 'real', depth: 1 },
   ragdoll: { mode: 'real', corpse: 4, knock: 6, fall: 32, max: 20 },
   fire: { mode: 'real', height: 1, spread: 1 },
@@ -744,7 +744,7 @@ defI('firework_rocket', 'Cohete de fuegos artificiales', { rocket: true }); defI
 defI('carrot', 'Zanahoria', { food: [3, 3.6], places: 'carrots' }); defI('potato', 'Patata', { food: [1, 0.6], places: 'potatoes' }); defI('beetroot', 'Remolacha', { food: [1, 1.2] }); defI('beetroot_seeds', 'Semillas de remolacha', { places: 'beetroots' }); defI('beetroot_soup', 'Sopa de remolacha', { food: [6, 7.2], stack: 1 }); defI('baked_potato', 'Patata asada', { food: [5, 6] }); defI('golden_carrot', 'Zanahoria dorada', { food: [6, 14.4] });
 defI('salmon', 'Salmón crudo', { food: [2, 0.4] }); defI('cooked_salmon', 'Salmón cocinado', { food: [6, 9.6] }); defI('sweet_berries', 'Bayas dulces', { food: [2, 0.4] });
 defI('cookie', 'Galleta', { food: [2, 0.4] }); defI('pumpkin_pie', 'Tarta de calabaza', { food: [8, 4.8] }); defI('mushroom_stew', 'Estofado de champiñones', { food: [6, 7.2], stack: 1 });
-defI('milk_bucket', 'Cubo de leche', { stack: 1, milk: true }); defI('sugar', 'Azúcar');
+defI('milk_bucket', 'Cubo de leche', { stack: 1, milk: true, bucket: 5 }); defI('honey_bucket', 'Cubo de miel', { stack: 1, bucket: 4 }); /* solo fluido continuo: se vierten como partículas */ defI('sugar', 'Azúcar');
 defI('shears', 'Tijeras', { stack: 1, dur: 238, shears: true }); defI('compass', 'Brújula', { stack: 1, compass: true }); defI('clock', 'Reloj', { stack: 1, clock: true });
 defI('spyglass', 'Catalejo', { stack: 1, spyglass: true }); defI('map', 'Mapa', { stack: 1 }); defI('lead', 'Rienda');
 defI('turtle_helmet', 'Caparazón de tortuga', { stack: 1, armor: { slot: 0, pts: 2, mat: 'turtle', tough: 0 }, dur: 275 });
@@ -767,6 +767,7 @@ for (const m in ARMORMAT) ARMORPART.forEach(([p, dn, du], slot) => {
 defI('fire_extinguisher', 'Extintor', { stack: 1, dur: 400, extinguisher: true });
 defI('one_hit_obliterator', 'One-Hit Obliterator', { stack: 1, dmg: 1e9, obliterator: true }); /* sin receta: solo en el menú creativo */
 defI('flamethrower', 'Lanzallamas', { stack: 1, dur: 600, flamethrower: true });
+defI('diffuser', 'Difusor', { stack: 1, diffuser: true }); /* agua y lava: partículas ↔ líquido normal (dos modos, se cambian golpeando el aire) */
 defI('sponge_item', 'Esponja', { stack: 1, pbfSponge: true }); /* borra agua y lava: partículas del fluido continuo y líquido normal */
 // ---- codificación del meta de líquidos (agua/lava), compartida por simulación (k_fluids), mallado y render:
 //  bits 0-2: volumen en octavos (0 = bloque lleno 8/8, 1..7 = n/8)
@@ -1271,7 +1272,7 @@ function itemTexAuto(p, name) {
     carrot: () => { for (let i = 0; i < 9; i++) { p.set(3 + i, 12 - i, [240, 130, 30]); p.set(4 + i, 12 - i, [220, 110, 20]); } p.rect(11, 1, 13, 3, [60, 160, 40]); outline(p); }, potato: () => blob([200, 160, 90], 4.5), baked_potato: () => blob([220, 170, 80], 4.5), golden_carrot: () => { for (let i = 0; i < 9; i++) { p.set(3 + i, 12 - i, [250, 210, 60]); p.set(4 + i, 12 - i, [220, 180, 40]); } outline(p); },
     salmon: () => meat([230, 110, 90], false), cooked_salmon: () => meat([210, 140, 90], false), sweet_berries: () => { blob([200, 30, 50], 3); }, cookie: () => { blob([200, 140, 70], 5); p.speck([80, 40, 20], 6); },
     pumpkin_pie: () => blob([220, 140, 60], 5.5), mushroom_stew: () => { for (let y = 7; y < 13; y++) for (let x = 3; x < 13; x++) if (Math.hypot((x - 7.5) / 5, (y - 7) / 5.5) < 1) p.set(x, y, [140, 100, 60]); p.rect(4, 7, 11, 8, [200, 150, 100]); outline(p); },
-    milk_bucket: () => bucket(p, [245, 245, 245]), sugar: () => dust([255, 255, 255]),
+    milk_bucket: () => bucket(p, [245, 245, 245]), honey_bucket: () => bucket(p, [236, 162, 28]), sugar: () => dust([255, 255, 255]),
     shears: () => { for (let i = 0; i < 7; i++) { p.set(4 + i, 4 + i, [200, 200, 205]); p.set(11 - i, 4 + i, [200, 200, 205]); } p.rect(2, 11, 4, 13, [180, 60, 40]); p.rect(11, 11, 13, 13, [180, 60, 40]); outline(p); },
     compass: () => { blob([150, 150, 155], 5.5); p.rect(5, 5, 10, 10, [230, 230, 220]); p.set(8, 5, [220, 30, 30]); p.set(8, 6, [220, 30, 30]); p.set(7, 9, [60, 60, 60]); }, clock: () => { blob([250, 210, 60], 5.5); p.rect(5, 5, 10, 10, [60, 120, 220]); p.rect(5, 8, 10, 10, [40, 140, 40]); },
     spyglass: () => { for (let i = 0; i < 10; i++) { p.set(3 + i, 12 - i, [200, 120, 70]); p.set(4 + i, 12 - i, [170, 100, 60]); } p.rect(11, 2, 13, 4, [180, 130, 230]); outline(p); }, map: () => { p.rect(2, 2, 13, 13, [230, 220, 180]); p.rect(4, 4, 11, 11, [140, 180, 110]); outline(p); }, lead: () => { for (let i = 0; i < 12; i++) p.set(2 + i, 8 + Math.round(Math.sin(i) * 3), [180, 140, 90]); outline(p); },
@@ -1290,6 +1291,7 @@ function itemTexAuto(p, name) {
     beetroot: () => { blob([170, 30, 50], 4.5); p.rect(7, 2, 8, 4, [60, 140, 40]); }, beetroot_seeds: () => { for (let i = 0; i < 6; i++) p.set(4 + ((p.r() * 8) | 0), 6 + ((p.r() * 6) | 0), [150, 110, 60]); }, beetroot_soup: () => { for (let y = 7; y < 13; y++) for (let x = 3; x < 13; x++) if (Math.hypot((x - 7.5) / 5, (y - 7) / 5.5) < 1) p.set(x, y, [140, 100, 60]); p.rect(4, 7, 11, 8, [170, 30, 50]); outline(p); },
     fire_extinguisher: () => { p.rect(5, 4, 10, 14, [200, 30, 30]); p.rect(6, 5, 7, 13, [240, 80, 70]); p.rect(9, 5, 9, 13, [140, 15, 15]); p.rect(5, 8, 10, 9, [230, 230, 230]); p.rect(6, 2, 9, 3, [40, 40, 40]); p.rect(9, 1, 12, 1, [60, 60, 60]); p.rect(3, 2, 5, 2, [40, 40, 40]); p.rect(2, 3, 2, 9, [30, 30, 30]); outline(p); },
     flamethrower: () => { for (let i = 0; i < 9; i++) { p.set(4 + i, 11 - i, [90, 90, 98]); p.set(5 + i, 11 - i, [140, 140, 150]); } p.rect(2, 9, 6, 14, [190, 70, 30]); p.rect(3, 10, 4, 13, [235, 125, 60]); p.rect(6, 12, 8, 13, [60, 60, 66]); p.set(14, 2, [120, 170, 255]); p.set(13, 1, [255, 190, 80]); p.set(14, 1, [255, 235, 150]); p.set(15, 1, [255, 150, 40]); p.set(15, 0, [255, 120, 30]); outline(p); },
+    diffuser: () => { for (let k = 0; k < 7; k++) { p.set(2 + k, 14 - k, [125, 88, 46]); p.set(3 + k, 14 - k, [96, 66, 34]); } for (let y = 2; y < 9; y++) for (let x = 7; x < 14; x++) { const d = Math.abs((x - 10.5) + (y - 5.5)); if (d < 3) p.set(x, y, [212, 216, 222].map(v => v - d * 28)); } for (const [x, y] of [[13, 1], [14, 2], [12, 0], [15, 3], [14, 0]]) p.set(x, y, [150, 210, 255]); outline(p); },
     sponge_item: () => { for (let y = 4; y < 13; y++) for (let x = 2; x < 14; x++) if (Math.hypot((x - 7.5) / 5.6, (y - 8.5) / 4.4) < 1) p.set(x, y, [228, 208, 75].map(v => v + (p.r() - 0.5) * 22)); for (let k = 0; k < 12; k++) p.set(4 + ((p.r() * 8) | 0), 6 + ((p.r() * 6) | 0), [165, 140, 38]); outline(p); },
     experience_bottle: () => { for (let y = 5; y < 15; y++) for (let x = 4; x < 12; x++) if (Math.hypot(x - 7.5, y - 10) < 4.2) p.set(x, y, [120, 230, 90]); p.rect(7, 2, 8, 5, [200, 220, 240]); outline(p); },
     saddle: () => blob([120, 70, 40], 5), name_tag: () => { p.rect(3, 5, 12, 10, [220, 210, 180]); outline(p); }, netherite_upgrade: () => { p.rect(3, 2, 12, 13, [60, 50, 50]); p.rect(5, 4, 10, 11, [110, 90, 85]); outline(p); },
@@ -5106,7 +5108,10 @@ function updatePlayerPhysics(p, dt, input) {
   const lf = liquidAt(w, p.x, p.y + 0.1, p.z), lm = liquidAt(w, p.x, p.y + 0.9, p.z), le = liquidAt(w, p.x, p.eye, p.z);
   p.inWater = lf === 1 || lm === 1; p.inLava = lf === 2 || lm === 2; p.eyeInWater = le === 1; p.eyeInLava = le === 2;
   const climb = entityInBlock(w, p, d => d.climb);
-  const web = entityInBlock(w, p, d => d.slow);
+  // miel (partículas): pegajosa, frena como una telaraña; leche: al tocarla se anulan los efectos de poción
+  const honey = typeof flHoneyAt === 'function' && !spectator && (flHoneyAt(w, p.x, p.y + 0.1, p.z) || flHoneyAt(w, p.x, p.y + 0.9, p.z));
+  const web = entityInBlock(w, p, d => d.slow) || honey;
+  if (typeof flMilkAt === 'function' && !spectator && (flMilkAt(w, p.x, p.y + 0.1, p.z) || flMilkAt(w, p.x, p.y + 0.9, p.z)) && Object.keys(p.effects).length) { p.effects = {}; if (p === G.player) { showActionMsg('La leche anuló los efectos'); updateHUD(); } }
   const below = blockAt(w, p.x, p.y - 0.05, p.z); const bd = below > 0 ? REG[below] : null;
   // dirección deseada
   let fx = 0, fz = 0; if (input.f) fz -= 1; if (input.b) fz += 1; if (input.l) fx -= 1; if (input.r) fx += 1;
@@ -5172,7 +5177,7 @@ function updatePlayerPhysics(p, dt, input) {
       p.fallDist = 0;
     }
     p.vy -= 32 * dt; if (web) p.vy = Math.max(p.vy, -1); p.vy = Math.max(p.vy, -78);
-    if (input.jump && p.onGround && !p.jumpCool) { p.vy = p.effects.jump ? 11 : 9; if (p.sprinting) { p.vx += -Math.sin(p.yaw) * 2; p.vz += -Math.cos(p.yaw) * 2; } p.exh += p.sprinting ? 0.2 : 0.05; p.jumpCool = 0.1; if (bd && bd.sticky) p.vy = 4; }
+    if (input.jump && p.onGround && !p.jumpCool) { p.vy = p.effects.jump ? 11 : 9; if (p.sprinting) { p.vx += -Math.sin(p.yaw) * 2; p.vz += -Math.cos(p.yaw) * 2; } p.exh += p.sprinting ? 0.2 : 0.05; p.jumpCool = 0.1; if ((bd && bd.sticky) || honey) p.vy = 4; }
     if (p.jumpCool) p.jumpCool = Math.max(0, p.jumpCool - dt);
     // agacharse: no caer por bordes
     let mx = p.vx * dt, mz = p.vz * dt;
@@ -5254,6 +5259,8 @@ function entityTick(e, dt) {
   if (e.dead) { e.deathTime++; if (e.deathTime === 1) mobDie(e); if (e.deathTime > (e.type === 'ender_dragon' ? 100 : 20)) e.removed = true; if (e.type === 'ender_dragon') { e.y += 0.1; if (e.deathTime % 3 === 0) explosionFX(e.dim, e.x + (Math.random() - 0.5) * 8, e.y + Math.random() * 4, e.z + (Math.random() - 0.5) * 8, 2); } return; }
   // medio
   const feet = liquidAt(w, e.x, e.y + 0.2, e.z); e.inWater = feet === 1; e.inLava = feet === 2;
+  e._honey = typeof flHoneyAt === 'function' && flHoneyAt(w, e.x, e.y + 0.2, e.z); // en miel: muy despacio
+  if (e.effects && typeof flMilkAt === 'function' && flMilkAt(w, e.x, e.y + 0.2, e.z)) e.effects = {}; // la leche anula los efectos
   if (e.inLava && !d.fireImmune) { e.fire = 300; if (e.age % 10 === 0) hurtEntity(e, 4, null, 0, 0, 0, 'lava'); }
   if (e.fire > 0) { e.fire--; if (e.inWater) e.fire = 0; if (e.age % 20 === 0 && !d.fireImmune) hurtEntity(e, 1, null, 0, 0, 0, 'fire'); if (Math.random() < 0.3) flame(e.x, e.y + Math.random() * e.h, e.z, { size: 0.3 }); }
   if (d.burns && w.dim === 'overworld' && isDay() && !e.inWater && (G.rainLevel || 0) < 0.5 && e.age % 20 === 0) { const L = w.light(Math.floor(e.x), Math.floor(e.y + e.h), Math.floor(e.z)); if (L[0] >= 15 && e.target !== null || L[0] >= 15) e.fire = Math.max(e.fire, 160); }
@@ -5355,6 +5362,7 @@ function entityTick(e, dt) {
   if (moving && e.hc && e.onGround && e.navT !== e.age) e.vy = 10; // salto de ~1,3 bloques con el paso de 0,05 s (8,5 no superaba un bloque)
   if (e.onGround) { const fr = w.get(Math.floor(e.x), Math.floor(e.y - 0.05), Math.floor(e.z)) === ID.snow ? 0.7 : 0.82; e.vx *= fr; e.vz *= fr; } // en nieve profunda cuesta avanzar
   e.vy = Math.max(e.vy, -60);
+  if (e._honey) { e.vx *= 0.25; e.vz *= 0.25; e.vy = clamp(e.vy, -1, 3); }
   const vyB = e.vy; moveEntity(w, e, e.vx * dt, e.vy * dt, e.vz * dt);
   if (vyB < 0 && !e.onGround) e.fallDist += -vyB * dt;
   if (vyB < -12 && typeof ragFallCheck === 'function' && !d.climb && !d.noGrav) ragFallCheck(e, vyB);
@@ -5376,6 +5384,7 @@ function itemTick(e, dt, w) {
   if (inW) { const bx = Math.floor(e.x), bz = Math.floor(e.z); let by = Math.floor(e.y + 0.1); while (liquidAt(w, e.x, by + 1.02, e.z) === inW && by < e.y + 4) by++; const sy = by + liquidSurface(w, bx, by, bz); const tgt = clamp((sy - 0.12 - e.y) * (inW === 2 ? 2 : 7), -2.5, 2.5) + Math.sin(e.age * 0.12 + e.id) * 0.15; e.vy = lerp(e.vy, tgt, inW === 2 ? 0.08 : 0.22); e.vx *= inW === 2 ? 0.7 : 0.9; e.vz *= inW === 2 ? 0.7 : 0.9; const fv = flowVec(w, Math.floor(e.x), Math.floor(e.y + 0.1), Math.floor(e.z)); e.vx += fv[0] * 0.5; e.vz += fv[1] * 0.5; if (inW === 2 && !(e.stack.id === ID.netherite_ingot || REG[e.stack.id].name.startsWith('netherite'))) { e.removed = true; smoke(e.x, e.y, e.z, { size: 0.3 }); return; } }
   else e.vy -= 20 * dt;
   if (e.onGround) { e.vx *= 0.6; e.vz *= 0.6; }
+  if (typeof flHoneyAt === 'function' && flHoneyAt(w, e.x, e.y + 0.1, e.z)) { e.vx *= 0.5; e.vz *= 0.5; e.vy = Math.max(e.vy, -0.6); } // pegado en la miel
   // dentro de un bloque sólido: empujar arriba
   const b = blockAt(w, e.x, e.y + 0.1, e.z); if (b > 0 && T_FULL[b]) { e.y += 0.2; e.vy = 1; }
   moveEntity(w, e, e.vx * dt, e.vy * dt, e.vz * dt);
@@ -6194,7 +6203,7 @@ shaped('gold_ingot', 1, ['NNN', 'NNN', 'NNN'], { N: 'gold_nugget' }); shapeless(
 shaped('iron_ingot', 1, ['NNN', 'NNN', 'NNN'], { N: 'iron_nugget' }); shapeless('iron_nugget', 9, ['iron_ingot']);
 shaped('bucket', 1, ['I I', ' I '], { I: 'iron_ingot' }); shapeless('flint_and_steel', 1, ['iron_ingot', 'flint']);
 shaped('fire_extinguisher', 1, ['INI', 'I I', 'INI'], { I: 'iron_ingot', N: 'iron_nugget' });
-shaped('flamethrower', 1, ['  F', 'IBI', 'II '], { I: 'iron_ingot', B: 'blaze_rod', F: 'flint_and_steel' }); shapeless('sponge_item', 2, ['sponge']);
+shaped('flamethrower', 1, ['  F', 'IBI', 'II '], { I: 'iron_ingot', B: 'blaze_rod', F: 'flint_and_steel' }); shapeless('sponge_item', 2, ['sponge']); shaped('diffuser', 1, [' HP', ' PH', 'P  '], { P: 'stick', H: 'iron_ingot' });
 shaped('shears', 1, [' I', 'I '], { I: 'iron_ingot' }); shaped('compass', 1, [' I ', 'IRI', ' I '], { I: 'iron_ingot', R: 'redstone' }); shaped('clock', 1, [' G ', 'GRG', ' G '], { G: 'gold_ingot', R: 'redstone' });
 shaped('bow', 1, [' TS', 'T S', ' TS'], { T: 'stick', S: 'string' }); shaped('arrow', 4, ['F', 'S', 'E'], { F: 'flint', S: 'stick', E: 'feather' });
 shaped('crossbow', 1, ['STS', 'TIT', ' S '], { S: 'stick', T: 'string', I: 'iron_ingot' });
@@ -6235,7 +6244,7 @@ shaped('lever', 1, ['S', 'C'], { S: 'stick', C: 'cobblestone' }); shapeless('sto
 shapeless('bone_meal', 3, ['bone']); shapeless('firework_rocket', 3, ['paper', 'gunpowder']);
 shaped('map', 1, ['PPP', 'PCP', 'PPP'], { P: 'paper', C: 'compass' }); shaped('brush', 1, ['F', 'C', 'S'], { F: 'feather', C: 'copper_ingot', S: 'stick' });
 shaped('slime_block', 1, ['SSS', 'SSS', 'SSS'], { S: 'slime_ball' }); shapeless('slime_ball', 9, ['slime_block']);
-shaped('honey_block', 1, ['HH', 'HH'], { H: 'honeycomb' }); shaped('honeycomb_block', 1, ['HH', 'HH'], { H: 'honeycomb' });
+shaped('honey_block', 1, ['HH', 'HH'], { H: 'honeycomb' }); shaped('honey_bucket', 1, ['M', 'C'], { M: 'honey_block', C: 'bucket' }); // 10 L de miel shaped('honeycomb_block', 1, ['HH', 'HH'], { H: 'honeycomb' });
 shaped('scaffolding', 6, ['SSS', 'S S', 'S S'], { S: 'stick' });
 shaped('iron_bars', 16, ['III', 'III'], { I: 'iron_ingot' }); shaped('rail', 16, ['I I', 'ISI', 'I I'], { I: 'iron_ingot', S: 'stick' });
 shaped('mace', 1, ['H', 'B'], { H: 'heavy_core', B: 'breeze_rod' }); shaped('lead', 2, ['SS ', 'SB ', '  S'], { S: 'string', B: 'slime_ball' });
@@ -6867,7 +6876,7 @@ function renderEnchant() {
   box.innerHTML = rolls.length ? rolls.map((o, i) => { const ok = G.gameMode === 'creative' || (xpLevel(p.xp) >= o.cost && lap >= i + 1); return `<div class="eopt ${ok ? '' : 'no'}" data-i="${i}"><b>${o.cost}</b> ${ENCH[o.k][0]} ${ROMAN[o.lvl]} <small>(${i + 1} lapislázuli)</small></div>`; }).join('') : '<div class="hint">' + (s && s.e ? 'Ya está encantado' : 'Coloca una herramienta, arma o armadura y lapislázuli') + '</div>';
   box.querySelectorAll('.eopt').forEach(el => el.onmousedown = ev => { ev.preventDefault(); const i = +el.dataset.i; const o = rolls[i]; if (G.gameMode !== 'creative' && (xpLevel(p.xp) < o.cost || lap < i + 1)) return; s.e = { [o.k]: o.lvl }; if (Math.random() < 0.5) { const L = enchOptions(s).filter(k => k !== o.k); if (L.length) { const k2 = L[Math.random() * L.length | 0]; s.e[k2] = Math.max(1, Math.round(o.lvl * 0.6)); } } if (G.gameMode !== 'creative') { E[1].c -= i + 1; if (E[1].c <= 0) E[1] = null; spendLevels(p, i + 1); } p.enchSeed = Math.random() * 1e9 | 0; playSound('levelup', 0, 0, 0, 0.5); refreshInvUI(); });
 }
-function consumeCraft() { const c = UI.craft; for (let i = 0; i < c.grid.length; i++) { const s = c.grid[i]; if (!s) continue; if (s.id === ID.water_bucket || s.id === ID.lava_bucket || s.id === ID.milk_bucket) { c.grid[i] = { id: ID.bucket, c: 1 }; continue; } s.c--; if (s.c <= 0) c.grid[i] = null; } }
+function consumeCraft() { const c = UI.craft; for (let i = 0; i < c.grid.length; i++) { const s = c.grid[i]; if (!s) continue; if (s.id === ID.water_bucket || s.id === ID.lava_bucket || s.id === ID.milk_bucket || s.id === ID.honey_bucket) { c.grid[i] = { id: ID.bucket, c: 1 }; continue; } s.c--; if (s.c <= 0) c.grid[i] = null; } }
 function smithResult() { const s = UI.smith; if (!s || !s[0] || !s[1] || s[1].id !== ID.netherite_ingot) return null; const n = REG[s[0].id].name; if (!n.startsWith('diamond_')) return null; const t = ID['netherite_' + n.slice(8)]; if (t === undefined) return null; return { id: t, c: 1, d: s[0].d || 0 }; }
 function consumeSmith() { const s = UI.smith; s[0] = null; s[1].c--; if (s[1].c <= 0) s[1] = null; if (s[2]) { s[2].c--; if (s[2].c <= 0) s[2] = null; } }
 function sameItem(a, b) { return a && b && a.id === b.id && (a.d || 0) === (b.d || 0) && !a.e && !b.e; }
@@ -6990,7 +6999,7 @@ const CREATIVE_TABS = [['Construcción', i => { const d = REG[i]; return d.isBlo
   ['Colores', i => REG[i].isBlock && /wool|terracotta|glass|concrete|carpet/.test(REG[i].name)],
   ['Naturales', i => { const d = REG[i]; return d.isBlock && (/ore|log|leaves|sand|gravel|dirt|grass|nylium|sapling|flower|mushroom|cactus|snow|ice|stone$|netherrack|soul|end_stone|moss|sculk|dripstone|clay|mud|basalt|blackstone|kelp|seagrass|lily|vine|fungus|roots|stem|wart|melon|pumpkin|bush|fern|poppy|dandelion|orchid|cornflower|daisy|amethyst|cane|chorus|petals|debris/.test(d.name)); }],
   ['Funcionales', i => { const d = REG[i]; return d.isBlock && (d.ui || d.light || /portal|spawner|vault|bed|tnt|bars|rail|ladder|scaffold|lever|button|plate|rod|lamp|detector|target|note|slime|honey|sponge|bedrock/.test(d.name)) && !/stairs|slab|_wall$|fence|door/.test(d.name); }],
-  ['Herramientas', i => { const d = REG[i]; return !d.isBlock && (d.tool && d.tool.type !== 'sword' || /bucket|flint_and|extinguisher|flamethrower|sponge_item|shears|compass|clock|spyglass|map|lead|brush|broom|boat|fishing|rocket|saddle|name_tag|bone_meal|eye_of|ender_pearl/.test(d.name)); }],
+  ['Herramientas', i => { const d = REG[i]; return !d.isBlock && (d.tool && d.tool.type !== 'sword' || /bucket|flint_and|extinguisher|flamethrower|sponge_item|diffuser|shears|compass|clock|spyglass|map|lead|brush|broom|boat|fishing|rocket|saddle|name_tag|bone_meal|eye_of|ender_pearl/.test(d.name)); }],
   ['Combate', i => { const d = REG[i]; return !d.isBlock && (d.armor || (d.tool && d.tool.type === 'sword') || /bow|arrow|shield|trident|mace|totem|elytra|snowball|obliterator/.test(d.name) || (d.tool && d.tool.type === 'axe')); }],
   ['Comida', i => !REG[i].isBlock && !!REG[i].food],
   ['Ingredientes', i => { const d = REG[i]; return !d.isBlock && !d.food && !d.tool && !d.armor && !d.dur && !d.bucket && !/bow|arrow|shield|trident|mace|totem|elytra/.test(d.name); }],
@@ -7013,7 +7022,7 @@ const CR_GROUPS = [
   /ice$|snow/, /netherrack|nylium|soul_s|wart_block|shroomlight|magma_block|glowstone$/, /^end_stone$|chorus|dragon_egg/, /dripstone|amethyst|sculk/,
   /crafting_table|furnace|smoker|smithing|anvil|enchanting|bookshelf|barrel|chest$/, /torch|lantern|campfire|end_rod|sea_lantern|froglight|lamp/, /bed$|ladder|scaffolding|bars$|rail/,
   /redstone|lever|button|pressure_plate|target|daylight|note_block|lightning_rod|tnt|piston|observer|hopper|dispenser|dropper/,
-  /_shovel$|_pickaxe$|_axe$|_hoe$/, /bucket/, /flint_and_steel|fire_charge|bone_meal|shears|brush|fishing_rod|compass|clock|spyglass|map$|lead|name_tag|saddle|boat|broom|extinguisher|flamethrower|sponge_item/,
+  /_shovel$|_pickaxe$|_axe$|_hoe$/, /bucket/, /flint_and_steel|fire_charge|bone_meal|shears|brush|fishing_rod|compass|clock|spyglass|map$|lead|name_tag|saddle|boat|broom|extinguisher|flamethrower|sponge_item|diffuser/,
   /_sword$/, /bow$|crossbow|arrow|trident|mace|shield|totem|obliterator/, /_helmet$|_chestplate$|_leggings$|_boots$/, /elytra/
 ];
 const _crKey = new Map();
@@ -7242,7 +7251,7 @@ function useItem(hit) {
   if (hit && hit.ent) {
     const e = hit.ent;
     if (s && s.id === ID.shears && e.type === 'sheep' && !e.sheared) { e.sheared = true; dropItem(e.dim, e.x, e.y + 1, e.z, { id: ID.white_wool, c: 1 + (Math.random() * 3 | 0) }); damageItem(p.inv, p.sel, 1); return true; }
-    if (s && s.id === ID.bucket && (e.type === 'cow' || e.type === 'goat')) { consumeHeld(p); giveItem(p, { id: ID.milk_bucket, c: 1 }); return true; }
+    if (s && s.id === ID.bucket && (e.type === 'cow' || e.type === 'goat')) { consumeHeld(p); giveItem(p, { id: ID.milk_bucket, c: 1, ml: BUCKET_ML }); playSound('bucket', e.x, e.y + 1, e.z, 0.6); return true; } // ordeñar: 10 L de leche
     if (e.isBoat) { boatMount(p, e); return true; }
     if (e.type === 'villager') { openTrade(e); return true; }
     if (s && s.id === ID.name_tag) { e.persist = true; e.name = 'Mascota'; consumeHeld(p); return true; }
@@ -7268,13 +7277,13 @@ function useItem(hit) {
   if (!s) return false;
   // objetos
   if (d.food && (p.food < 20 || d.regen || s.id === ID.chorus_fruit || G.gameMode === 'creative')) { p.eatT = 0.01; return 'hold'; }
-  if (d.milk) { p.effects = {}; consumeHeld(p); giveItem(p, { id: ID.bucket, c: 1 }); playSound('drink', p.x, p.y, p.z, 0.8); return true; }
   if (d.bow) { if (G.gameMode === 'creative' || countItem(p, ID.arrow) > 0) { p.bowT = 0.01; return 'hold'; } return false; }
   if (d.trident) { p.bowT = 0.01; return 'hold'; }
   if (d.spyglass) { p.spy = true; return 'hold'; }
   if (d.extinguisher) { sprayExtinguisher(p); return 'hold'; }
   if (d.flamethrower) { sprayFlamethrower(p); return 'hold'; }
   if (d.pbfSponge) { spongeUse(p); return 'hold'; }
+  if (d.diffuser) { diffuserUse(p, s); return 'hold'; }
   if (d.broom) { broomUse(p); return 'hold'; }
   if (d.throwable) {
     const dir = lookDir(p);
@@ -7298,14 +7307,14 @@ function useItem(hit) {
       const now = performance.now(); if (now - (p._bkT || 0) < 100) return 'hold'; p._bkT = now;
       const got = bucketCollect(w, p, dir, cont, BUCKET_ML - ml);
       if (got.ml > 0) {
-        const nm = Math.min(BUCKET_ML, ml + got.ml); const item = { id: got.liq === 2 ? ID.lava_bucket : ID.water_bucket, c: 1, ml: nm };
+        const nm = Math.min(BUCKET_ML, ml + got.ml); const item = { id: ({ 1: ID.water_bucket, 2: ID.lava_bucket, 4: ID.honey_bucket, 5: ID.milk_bucket })[got.liq] || ID.water_bucket, c: 1, ml: nm };
         if (s.c > 1) { s.c--; p.inv[p.sel] = item; giveItem(p, { id: ID.bucket, c: s.c }); } else p.inv[p.sel] = item;
-        showActionMsg((got.liq === 2 ? 'Lava: ' : 'Agua: ') + (nm / 1000).toFixed(1) + ' / 10 L'); if (Math.random() < 0.35) playSound('bucket', p.x, p.eye, p.z, 0.4); updateHUD();
+        showActionMsg((LIQ_NAME[got.liq] || 'Agua') + ': ' + (nm / 1000).toFixed(1) + ' / 10 L'); if (Math.random() < 0.35) playSound('bucket', p.x, p.eye, p.z, 0.4); updateHUD();
       }
       return 'hold';
     }
     if (!cont || ml <= 0) return false;
-    bucketPourMl(w, p, dir, hit, cont, ml);
+    if (!bucketPourMl(w, p, dir, hit, cont, ml)) return false;
     if (G.gameMode !== 'creative') p.inv[p.sel] = { id: ID.bucket, c: 1 }; playSound('bucket_empty', p.x, p.eye, p.z, 0.8); updateHUD(); return true;
   }
   if (d.boatItem) { if (boatPlace(p, w)) { if (G.gameMode !== 'creative') consumeHeld(p); return true; } return false; }
@@ -7364,6 +7373,9 @@ function updateInteraction(dt) {
   if (MINE.cool > 0) MINE.cool -= dt; if (MINE.useCool > 0) MINE.useCool -= dt; if (MINE.attackCool > 0) MINE.attackCool -= dt;
   const attack = held('attack'), use = held('use');
   if (p.swing > 0) { p.swing += dt * 6; if (p.swing > 1) p.swing = 0; }
+  // difusor en la mano: golpear el aire cambia de modo (Líquido ↔ PBF)
+  { const s = p.held(); if (attack && !MINE.atkPrev && !tgt && s && REG[s.id].diffuser && G.gameMode !== 'spectator') { s.mode = s.mode === 'pbf' ? 'liquid' : 'pbf'; p.swing = 0.01; showActionMsg('Difusor: modo ' + (s.mode === 'pbf' ? 'PBF (líquido normal → partículas)' : 'Líquido (partículas → líquido normal)')); showItemName(); playSound('hit', p.x, p.eye, p.z, 0.3, ID.iron_block); } }
+  MINE.atkPrev = attack;
   // atacar / minar
   if (attack && G.gameMode !== 'spectator') {
     if (tgt && tgt.ent) { if (MINE.attackCool <= 0) { attackEntity(tgt.ent); MINE.attackCool = 0.35; p.swing = 0.01; } MINE.target = null; }
@@ -7539,6 +7551,7 @@ function hostHandle(c, m) {
     case 'tnt': { if (!w) return; igniteTNT(w, m.x, m.y, m.z); break; }
     case 'boat': boatNetRecv(c, m); break;
     case 'flm': { const e = c.ent; if (e && Array.isArray(m.o) && Array.isArray(m.dir)) flamerEmit(G.worlds[e.dim] || G.world, m.o.map(Number), m.dir.map(Number), clamp(+m.dt || 0.05, 0, 0.1), e); break; }
+    case 'dif': { const e = c.ent; if (e && Array.isArray(m.p) && Math.hypot(m.p[0] - e.x, m.p[2] - e.z) < 8) diffuserAt(G.worlds[e.dim] || G.world, m.p.map(Number), m.m === 'pbf' ? 'pbf' : 'liquid', 1.6); break; }
     case 'spg': { const e = c.ent; if (e && Array.isArray(m.p) && Math.hypot(m.p[0] - e.x, m.p[2] - e.z) < 8) spongeAt(G.worlds[e.dim] || G.world, m.p.map(Number), 1.6); break; }
     case 'brm': { const e = c.ent; if (e && Array.isArray(m.h) && Array.isArray(m.v)) broomPush(e, Math.floor(e.y + 0.01), clamp(+m.dt || 0.05, 0, 0.1), { head: m.h, v: m.v }); break; }
     case 'boom': { if (!w) return; explode(w, m.x, m.y, m.z, m.p, true, null); break; }
@@ -8296,8 +8309,8 @@ function waterSurfaceAt(w, x, y, z) {
   return by + liquidSurface(w, bx, by, bz);
 }
 // ---- cubos con capacidad: 10 L (10000 ml) = un bloque de líquido; cada partícula del fluido continuo son 0,08 L
-const BUCKET_ML = 10000, ML_PER_EIGHTH = 1250; const ML_PER_PART = BUCKET_ML / 216; // (216 = FL_PPB, que se define después) un cubo (10 L) = un bloque = 216 partículas
-function bucketLabel(s) { const d = s && REG[s.id]; if (!d || d.bucket === undefined || !d.bucket) return ''; return ' (' + (((s.ml ?? BUCKET_ML)) / 1000).toFixed(1) + ' L)'; }
+const BUCKET_ML = 10000, ML_PER_EIGHTH = 1250; const mlPerPart = () => BUCKET_ML / (typeof FL_PPB !== 'undefined' ? FL_PPB : 216); // un cubo (10 L) = un bloque = FL_PPB partículas (216 o 1728 según el tamaño)
+function bucketLabel(s) { const d = s && REG[s.id]; if (d && d.diffuser) return s.mode === 'pbf' ? ' (modo PBF)' : ' (modo Líquido)'; if (!d || d.bucket === undefined || !d.bucket) return ''; return ' (' + (((s.ml ?? BUCKET_ML)) / 1000).toFixed(1) + ' L)'; }
 const BKT_ACC = new Map();
 // recoge hasta `room` ml del líquido que hay en una caja pequeña e invisible alrededor de donde apunta el jugador
 // cont: 0 vacío (acepta el primero que encuentre), 1 agua, 2 lava (solo ese). Devuelve { liq, ml }
@@ -8308,20 +8321,20 @@ function bucketCollect(w, p, dir, cont, room) {
     const b = w.get(Math.floor(x), Math.floor(y), Math.floor(z));
     if (b > 0 && REG[b] && REG[b].solid && !REG[b].liquid) break;
     const oc = typeof FL !== 'undefined' && FL.occ && w === FL.world ? FL.occ.get(FLK(Math.floor(x), Math.floor(y), Math.floor(z))) : null;
-    if (oc && oc.idx.length >= 2 && y < oc.top + 0.2) { c = [x, y, z]; liq = oc.nl > oc.nw ? 2 : 1; break; }
+    if (oc && oc.idx.length >= 2 && y < oc.top + 0.2) { c = [x, y, z]; liq = flKind(oc); if (liq === 1 && oc.nm * 2 > oc.nw) liq = 5; break; } // 1 agua, 2 lava, 4 miel, 5 leche
     const sl = b > 0 && REG[b] ? (REG[b].liquid || (REG[b].inWater ? 1 : 0)) : 0; if (sl) { c = [x, y, z]; liq = sl; isStatic = true; break; }
   }
   if (!c || (cont && cont !== liq)) return { liq: cont, ml: 0 };
   if (!isStatic) { // partículas dentro de la caja (de la última lectura de la GPU)
-    const rb = FL.rb, o = rb.orgNow; if (!rb.ready) return { liq, ml: 0 }; const want = Math.min(26, Math.floor(room / ML_PER_PART)); let n = 0;
+    const rb = FL.rb, o = rb.orgNow; if (!rb.ready) return { liq, ml: 0 }; const want = Math.min(Math.round(26 * FL_PPB / 216), Math.floor(room / mlPerPart())); let n = 0;
     const bx = Math.floor(c[0]), by = Math.floor(c[1]), bz = Math.floor(c[2]);
     for (let dy = -1; dy <= 1 && n < want; dy++) for (let dz = -1; dz <= 1 && n < want; dz++) for (let dx = -1; dx <= 1 && n < want; dx++) {
       const cell = FL.occ.get(FLK(bx + dx, by + dy, bz + dz)); if (!cell) continue;
-      for (const i of cell.idx) { if (n >= want) break; const ph = FL.phase[i]; if (!ph || (ph === 2) !== (liq === 2) || FL.dying.has(i)) continue; const k = i * 4;
+      for (const i of cell.idx) { if (n >= want) break; const ph = FL.phase[i]; if (!ph || phLiq(ph) !== liq || FL.dying.has(i)) continue; const k = i * 4;
         if (Math.abs(rb.pos[k] + o[0] - c[0]) > 0.6 || Math.abs(rb.pos[k + 1] + o[1] - c[1]) > 0.6 || Math.abs(rb.pos[k + 2] + o[2] - c[2]) > 0.6) continue;
         flKill(i); n++; }
     }
-    return { liq, ml: n * ML_PER_PART };
+    return { liq, ml: n * mlPerPart() };
   }
   // agua o lava quieta: 1 L cada décima de segundo; el mar no se gasta; un lago pierde 1/8 de bloque cada 1,25 L
   const x = Math.floor(c[0]), y = Math.floor(c[1]), z = Math.floor(c[2]); const take = Math.min(1000, room);
@@ -8332,22 +8345,27 @@ function bucketCollect(w, p, dir, cont, room) {
   }
   return { liq, ml: take };
 }
-// vacía de golpe todo el contenido delante del jugador
+// líquido de un cubo (1 agua, 2 lava, 4 miel, 5 leche) ↔ fase de sus partículas (3 agua puesta, 2, 4, 5)
+const phLiq = ph => ph === 2 ? 2 : ph === 4 ? 4 : ph === 5 ? 5 : 1;
+const liqPh = liq => liq === 1 ? 3 : liq;
+const LIQ_NAME = { 1: 'Agua', 2: 'Lava', 4: 'Miel', 5: 'Leche' };
+// vacía de golpe todo el contenido delante del jugador; false si no se pudo (miel y leche solo existen como partículas)
 function bucketPourMl(w, p, dir, hit, liq, ml) {
   let d = 1.6; if (hit && !hit.ent && hit.t !== undefined) d = Math.max(0.6, Math.min(d, hit.t - 0.4));
   const cx = p.x + dir[0] * d, cy = p.eye + dir[1] * d - 0.2, cz = p.z + dir[2] * d;
   if (liq === 1 && p.dim === 'nether') { fizz(w, Math.floor(cx), Math.floor(cy), Math.floor(cz)); return; }
   if (typeof flCanSim === 'function' && flCanSim(w, Math.floor(cx), Math.floor(cy), Math.floor(cz))) {
-    const n = Math.max(1, Math.round(ml / ML_PER_PART)); const r = Math.cbrt(n * FL_S * FL_S * FL_S * 3 / (4 * Math.PI)) + 0.05;
+    const n = Math.max(1, Math.round(ml / mlPerPart())); const r = Math.cbrt(n * FL_S * FL_S * FL_S * 3 / (4 * Math.PI)) + 0.05;
     for (let i = 0; i < n; i++) { let ox, oy, oz; do { ox = Math.random() * 2 - 1; oy = Math.random() * 2 - 1; oz = Math.random() * 2 - 1; } while (ox * ox + oy * oy + oz * oz > 1);
-      flSpawn(cx + ox * r, cy + oy * r, cz + oz * r, dir[0] * 2.5 + (p.vx || 0), dir[1] * 2.5 + 0.5, dir[2] * 2.5 + (p.vz || 0), liq === 1 ? 3 : 2); }
-    if (liq === 1) splashFX(w, Math.floor(cx), Math.floor(cy), Math.floor(cz), 4); return;
+      flSpawn(cx + ox * r, cy + oy * r, cz + oz * r, dir[0] * 2.5 + (p.vx || 0), dir[1] * 2.5 + 0.5, dir[2] * 2.5 + (p.vz || 0), liqPh(liq)); }
+    if (liq === 1 || liq === 5) splashFX(w, Math.floor(cx), Math.floor(cy), Math.floor(cz), 4); return true;
   }
+  if (liq >= 4) { showActionMsg((LIQ_NAME[liq] || 'Este líquido') + ' solo existe como fluido continuo (calidad Alta o Ultra con partículas activadas)'); return false; }
   // sin fluido continuo: el volumen va a la celda (octavos)
   const x = Math.floor(cx), y = Math.floor(cy), z = Math.floor(cz); const id = liq === 1 ? ID.water : ID.lava; const cur = w.get(x, y, z);
-  if (cur !== 0 && cur !== id && !(cur > 0 && REG[cur].replace)) return;
+  if (cur !== 0 && cur !== id && !(cur > 0 && REG[cur].replace)) return false;
   const a = Math.max(1, Math.min(8, Math.round(ml / ML_PER_EIGHTH))); const v = cur === id ? liqAmt(w.getMeta(x, y, z)) : 0;
-  setBlockNet(w, x, y, z, id, liqMeta(Math.min(8, v + a), false, false) | (liq === 1 ? 16 : 0));
+  setBlockNet(w, x, y, z, id, liqMeta(Math.min(8, v + a), false, false) | (liq === 1 ? 16 : 0)); return true;
 }
 
 // ===== l_vfx.js
@@ -9156,7 +9174,14 @@ const FL = {
   rb: { pbo: null, sync: null, frame: 0, pos: null, vel: null, n: 0, ready: false, org: [0, 0, 0] },
   ents: new Float32Array(32), entV: new Float32Array(32), nEnt: 0
 };
-const FL_K = 6, FL_S = 1 / FL_K, FL_H = 0.34, FL_R = 0.066, FL_T = 262144, FL_PPB = FL_K * FL_K * FL_K; // 6×6×6 = 216 partículas por bloque, más pequeñas
+// tamaño de las partículas (Opciones → Físicas → Líquidos → Tamaño de PBF): 1 = pequeñas (12×12×12 = 1728 por bloque),
+// 2 = grandes (6×6×6 = 216). FL_PS escala todas las distancias de la simulación y del dibujo; FL_MIN es el mínimo de
+// partículas para que una celda cuente como líquido de verdad
+let FL_K = 6, FL_S = 1 / FL_K, FL_H = 0.34, FL_R = 0.066, FL_PPB = FL_K * FL_K * FL_K, FL_PS = 1, FL_MIN = 5;
+function flSizeCfg() { const o = SETTINGS.physics && SETTINGS.physics.liquids; return o && o.pbfSize === 2 ? 2 : 1; }
+function flApplySize(sz) { FL_K = sz === 2 ? 6 : 12; FL_PS = 6 / FL_K; FL_S = 1 / FL_K; FL_H = 0.34 * FL_PS; FL_R = 0.066 * FL_PS; FL_PPB = FL_K * FL_K * FL_K; FL_MIN = Math.max(5, Math.round(FL_PPB * 0.023)); FL.size = sz; }
+// constantes de los shaders según el tamaño (sustituye la línea de constantes de GLSL_FLHEAD al compilar)
+function flSub(src) { return src.replace('const float H=0.34, H2=0.1156, RAD=0.066;', `const float H=${FL_H.toFixed(6)}, H2=${(FL_H * FL_H).toFixed(8)}, RAD=${FL_R.toFixed(6)}, PS=${FL_PS.toFixed(4)};`); }
 const GLSL_FLHEAD = `#version 300 es
 precision highp float; precision highp int; precision highp sampler2D; precision highp sampler3D;
 uniform sampler2D u_pos, u_vel, u_pred, u_lam, u_key, u_tab; uniform sampler3D u_vox;
@@ -9181,6 +9206,8 @@ vec3 seaWave(vec2 p){ float A=(0.16+u_rain*0.55)*u_waveK; float h=0.0; vec2 u=ve
   return vec3(v+u_tide,u); }
 ivec2 tc(int i){ return ivec2(i&255, i>>8); }
 int idx(){ ivec2 f=ivec2(gl_FragCoord.xy); return f.y*256+f.x; }
+// clase de líquido de una partícula: 2 lava, 4 miel, 1 el resto (agua, agua puesta y leche se mezclan como un solo líquido)
+int kindOf(float w){ return (w>1.5&&w<2.5)?2:((w>3.5&&w<4.5)?4:1); }
 uint hashc(ivec3 c){ uvec3 u=uvec3(c+ivec3(4096)); return ((u.x*73856093u)^(u.y*19349663u)^(u.z*83492791u))&262143u; }
 float Wp(float r2){ float d=H2-r2; return d>0.0 ? u_kp*d*d*d : 0.0; }
 vec3 gradW(vec3 r, float rl){ if(rl<1e-5 || rl>=H) return vec3(0.0); float d=H-rl; return u_ks*d*d*r/rl; }
@@ -9243,7 +9270,7 @@ void main(){
         ivec3 m=c+ivec3(dx/2,0,dz/2); if((abs(dx)==2||abs(dz)==2) && wallAt(m,x.y)) continue;
         if(abs(dx)==1&&abs(dz)==1 && wallAt(c+ivec3(dx,0,0),x.y) && wallAt(c+ivec3(0,0,dz),x.y)) continue; // esquina cerrada
         if(supH(n)<h0-0.1){ best=dd; tgt=vec2(n.xz)+0.5; } }
-      if(best<1e8){ vec2 d=tgt-x.xz; float l=length(d); if(l>1e-3){ float acc=P.w>1.5&&P.w<2.5?2.2:7.0; v.xz+=d/l*acc*u_dt; } }
+      if(best<1e8){ vec2 d=tgt-x.xz; float l=length(d); if(l>1e-3){ float acc=P.w>1.5&&P.w<2.5?2.2:(P.w>3.5&&P.w<4.5?0.7:7.0); v.xz+=d/l*acc*u_dt; } }
     } }
   // orilla: junto a (o sobre) el mar, el oleaje arrastra el agua adelante y atrás
   { ivec3 c=ivec3(floor(x)); bool sea=false; for(int k=0;k<6;k++){ ivec3 o2=k==0?ivec3(0,-1,0):k==1?ivec3(1,-1,0):k==2?ivec3(-1,-1,0):k==3?ivec3(0,-1,1):k==4?ivec3(0,-1,-1):ivec3(0,0,0); if(vox(c+o2)==27.0) sea=true; }
@@ -9253,8 +9280,9 @@ void main(){
   float ph=P.w;
   if(x1.x<1.0||x1.z<1.0||x1.y<1.0||x1.x>float(u_vdim.x)-1.0||x1.z>float(u_vdim.z)-1.0||x1.y>float(u_vdim.y)-1.0) ph+=30.0;
   else { float vv=vox(ivec3(floor(x1))); float fy=fract(x1.y);
-    if(vv>26.5 && vv<27.5){ vec3 sw=seaWave(x1.xz+u_org.xz); if(fy<0.92+sw.x-0.04) ph+=10.0; }
-    else if(vv>16.5 && vv<25.5){ float a=vv-16.0; float lv=a>8.5?1.0:a/8.0*0.92; if(fy<lv-0.04) ph+=10.0; }
+    bool wl=ph<3.5; // la miel y la leche no tienen versión normal: no se suman al agua quieta (se hunden en ella); la lava sí las quema
+    if(wl && vv>26.5 && vv<27.5){ vec3 sw=seaWave(x1.xz+u_org.xz); if(fy<0.92+sw.x-0.04) ph+=10.0; }
+    else if(wl && vv>16.5 && vv<25.5){ float a=vv-16.0; float lv=a>8.5?1.0:a/8.0*0.92; if(fy<lv-0.04) ph+=10.0; }
     else if(vv>32.5 && vv<41.5){ float a=vv-32.0; float lv=a>8.5?1.0:a/8.0*0.92; if(fy<lv-0.04) ph+=20.0; } }
   o=vec4(x1,ph);
 }`;
@@ -9298,28 +9326,29 @@ void main(){ int i=idx(); vec4 Pi=texelFetch(u_pred,tc(i),0); if(Pi.w<0.5||Pi.w>
         if(rl<1e-4){ r=vec3(fract(float(i)*0.618)-0.5,0.3,fract(float(j)*0.618)-0.5)*1e-3; rl=length(r); }
         dp+=(li+lj+sc)*gradW(r,rl); } }
   NEIGH_END
-  float l=length(dp); if(l>0.1) dp*=0.1/l;
+  float l=length(dp); if(l>0.1*PS) dp*=0.1*PS/l;
   o=vec4(sweep(Pi.xyz,Pi.xyz+dp),Pi.w); }`;
 // 7) velocidad, viscosidad XSPH, cohesión, rozamiento y temperatura (escribe POS y VEL)
 const FS_FLVEL = GLSL_FLHEAD + `layout(location=0) out vec4 oP; layout(location=1) out vec4 oV;
 void main(){ int i=idx(); vec4 Pi=texelFetch(u_pred,tc(i),0); vec4 Xi=texelFetch(u_pos,tc(i),0); vec4 Vi=texelFetch(u_vel,tc(i),0);
   if(Pi.w<0.5){ oP=Xi; oV=Vi; return; }
   if(Pi.w>=10.0){ oP=Pi; oV=Pi.w>=30.0?Vi:vec4(0.0,0.0,0.0,Vi.w); return; } // las que salen de la región conservan su velocidad (la CPU sigue su trayectoria)
-  float base=Pi.w; bool lava=base>1.5&&base<2.5;
+  float base=Pi.w; bool lava=base>1.5&&base<2.5; bool honey=base>3.5&&base<4.5; int kd=kindOf(base);
   vec3 vi=(Pi.xyz-Xi.xyz)/u_dt; vec3 acc=vec3(0.0); float ws=0.0; vec3 cen=vec3(0.0); float cn=0.0; float Ts=0.0;
   NEIGH_BEGIN(Pi.xyz)
     if(j!=i){ vec4 Pj=texelFetch(u_pred,tc(j),0); vec3 r=Pi.xyz-Pj.xyz; float r2=dot(r,r);
-      if(r2<H2 && (Pj.w>1.5&&Pj.w<2.5)==lava){ vec4 Xj=texelFetch(u_pos,tc(j),0); vec3 vj=(Pj.xyz-Xj.xyz)/u_dt; float w=Wp(r2);
+      if(r2<H2 && kindOf(Pj.w)==kd){ vec4 Xj=texelFetch(u_pos,tc(j),0); vec3 vj=(Pj.xyz-Xj.xyz)/u_dt; float w=Wp(r2);
         acc+=(vj-vi)*w; ws+=w; cen+=Pj.xyz; cn+=1.0; Ts+=texelFetch(u_vel,tc(j),0).w*w; } }
   NEIGH_END
-  vi+=acc*(lava?0.55:0.02);
-  if(cn>0.0){ vec3 tc2=cen/cn-Pi.xyz; float surf=clamp(1.0-cn/26.0,0.0,1.0); vi+=tc2*(lava?9.0:4.0)*surf*u_dt; } // cohesión (tensión superficial)
+  vi+=acc*(lava?0.55:(honey?0.9:0.02)); // viscosidad: la miel muchísimo, la lava bastante, agua y leche casi nada
+  if(cn>0.0){ vec3 tc2=(cen/cn-Pi.xyz)/PS; float surf=clamp(1.0-cn/26.0,0.0,1.0); vi+=tc2*(lava?9.0:(honey?14.0:4.0))*surf*u_dt; } // cohesión (tensión superficial)
   // rozamiento con el suelo (la lava se pega, el agua resbala)
   vec2 sb=span(vox(ivec3(floor(Pi.xyz-vec3(0.0,RAD+0.04,0.0))))); float fb=floor(Pi.y-RAD-0.04);
   bool ground=sb.y>sb.x && Pi.y-RAD-0.04<fb+sb.y;
-  if(ground) vi.xz*=lava?0.80:(cn<7.0?0.86:0.985); // una película fina se queda pegada (la línea de contacto frena el charco)
+  if(ground) vi.xz*=lava?0.80:(honey?0.55:(cn<7.0?0.86:0.985)); // la miel se pega al suelo // una película fina se queda pegada (la línea de contacto frena el charco)
   float T=Vi.w;
   if(lava){ vi*=0.985; if(ws>0.0) T=mix(T,Ts/ws,0.15); T=clamp(T-u_dt*(cn<16.0?0.03:0.002),0.35,1.0); }
+  else if(honey){ vi*=0.93; T=0.0; } // espesa y pegajosa: sin espuma
   else { float sp=length(vi); T=max(T*0.96,clamp((sp-3.0)*0.12,0.0,1.0)*clamp(1.0-cn/22.0,0.0,1.0)); }
   float sp=length(vi); if(sp>20.0) vi*=20.0/sp;
   if(sp<0.45) vi*=mix(0.82,1.0,sp/0.45); // temblor del solver en reposo: se apaga (el líquido quieto queda quieto)
@@ -9350,8 +9379,11 @@ precision highp float; in vec2 v_q; in vec4 v_c; out vec4 o; void main(){ float 
 function flInit() {
   const gl = R.gl; FL.gl = gl; FL.ok = false;
   if (!gl.getExtension('EXT_color_buffer_float')) return;
-  FL.N = R.q >= 3 ? 262144 : 131072; FL.rows = FL.N / FL.W;
-  const P = {}; const C = (n, vs, fs) => { P[n] = compileRaw(vs, fs); };
+  flApplySize(flSizeCfg());
+  // capacidad: con partículas pequeñas, 4 veces más (hasta lo que permita el tamaño máximo de textura)
+  const maxRows = Math.min(8192, gl.getParameter(gl.MAX_TEXTURE_SIZE)); const want = (R.q >= 3 ? 262144 : 131072) * (FL.size === 1 ? 4 : 1);
+  FL.N = Math.min(want, maxRows * FL.W); FL.rows = FL.N / FL.W;
+  const P = {}; const C = (n, vs, fs) => { P[n] = compileRaw(flSub(vs), flSub(fs)); };
   try {
     C('pred', VS_FLQUAD, FS_FLPRED); C('key', VS_FLQUAD, FS_FLKEY); C('sort', VS_FLQUAD, FS_FLSORT); C('tab', VS_FLTAB, FS_FLTAB);
     C('lam', VS_FLQUAD, FS_FLLAM); C('del', VS_FLQUAD, FS_FLDEL); C('vel', VS_FLQUAD, FS_FLVEL); C('spawn', VS_FLSPAWN, FS_FLSPAWN);
@@ -9394,6 +9426,17 @@ function flInit() {
   FL.rb.sync = null; FL.rb.ready = false; FL.rb.pos = new Float32Array(FL.N * 4); FL.rb.vel = new Float32Array(FL.N * 4);
   FL.ok = true;
   flRInit(); FL.R.gl = gl; // compilar ya los shaders del render (la primera compilación tarda)
+}
+// cambio de tamaño de partícula: se liberan los recursos de la GPU, se borran las partículas y se vuelve a crear todo
+function flResize() {
+  const gl = R.gl;
+  const T = [...(FL.pos || []), ...(FL.vel || []), ...(FL.pred || []), ...(FL.key || []), FL.lam, FL.tab, FL.scaleTex, FL.vox]; for (const t of T) if (t) gl.deleteTexture(t);
+  const F = [...(FL.fbPV || []), ...(FL.fbPred || []), ...(FL.fbKey || []), FL.fbLam, FL.fbTab, ...(FL.fbPos || []), ...(FL.fbVel || [])]; for (const f of F) if (f) gl.deleteFramebuffer(f);
+  for (const b of [FL.rb.pbo, FL.rb.pbo2]) if (b) gl.deleteBuffer(b);
+  if (FL.P) for (const k in FL.P) if (FL.P[k] && FL.P[k].p) gl.deleteProgram(FL.P[k].p);
+  FL.hi = 0; FL.alive = 0; FL.ptr = 0; FL.spawnQ.length = 0; FL.killQ.length = 0; FL.occ = new Map(); FL.calm = new Map(); FL.acc2 = new Map(); FL.full = new Set();
+  FL.parked = []; FL.parkCells = new Map(); FL.absAcc = [0, 0, 0, 0, 0, 0]; FL.exitAcc = [0, 0, 0, 0, 0, 0]; FL.world = null; FL.pending = null;
+  flInit();
 }
 // ---------------------------------------------------------------- campo de colisión
 let FLVC = null;
@@ -9528,6 +9571,7 @@ function flRecenter(w, px, py, pz, force) {
 function flUpdate(dt, w) {
   const gl = R.gl; if (!gl || !G.player) return;
   if (FL.gl !== gl) flInit();
+  else if (FL.ok && FL.size !== flSizeCfg()) flResize(); // cambió el tamaño de las partículas: se rehace la simulación
   if (!FL.ok || R.q < 2) return;
   flOceanFillTick();
   const p = G.player; FL.frame++; flRecenter(w, p.x, p.y, p.z, false);
@@ -9602,10 +9646,10 @@ out vec2 v_q; out vec3 v_ce; out float v_ph; out float v_t; out float v_s; out f
 void main(){ int i=gl_InstanceID; vec4 P=texelFetch(u_pos,ivec2(i&255,i>>8),0); vec4 V=texelFetch(u_vel,ivec2(i&255,i>>8),0);
   vec2 q=vec2(float(gl_VertexID&1),float(gl_VertexID>>1))*2.0-1.0; v_q=q;
   float ph=mod(P.w,10.0); if(P.w<0.5 || P.w>=30.0){ gl_Position=vec4(2.0,2.0,2.0,1.0); return; }
-  v_ph=ph>1.5&&ph<2.5?2.0:1.0; v_t=V.w; v_s=length(V.xyz);
+  v_ph=ph>1.5&&ph<2.5?2.0:(ph>3.5&&ph<4.5?3.0:(ph>4.5&&ph<5.5?4.0:1.0)); v_t=V.w; v_s=length(V.xyz); // 1 agua, 2 lava, 3 miel, 4 leche
   // gotas sueltas (poca densidad alrededor): más pequeñas y blancas, como salpicaduras
   float rho=texelFetch(u_lam,ivec2(i&255,i>>8),0).y; float iso=1.0-smoothstep(0.22,0.36,rho); if(P.w>=10.0) iso=0.0;
-  v_t=max(v_t,iso*(v_ph>1.5?0.0:0.8));
+  v_t=max(v_t,iso*(v_ph<1.5?0.8:0.0));
   float scl=texelFetch(u_scl,ivec2(i&255,i>>8),0).r; // al desaparecer: se encoge y se hunde en el suelo
   vec3 ce=mat3(u_view)*(P.xyz+u_off-vec3(0.0,(1.0-scl)*0.12,0.0)); v_ce=ce; float r=u_rad*(v_ph>1.5?1.15:1.0)*mix(1.0,0.45,iso)*scl; v_r=r; if(scl<0.02){ gl_Position=vec4(2.0,2.0,2.0,1.0); return; }
   gl_Position=u_proj*vec4(ce+vec3(q*r*1.05,0.0),1.0); }`;
@@ -9626,7 +9670,7 @@ float linD(float d){ float z=d*2.0-1.0; return 2.0*u_near*u_far/(u_far+u_near-z*
 void main(){ float r2=dot(v_q,v_q); if(r2>1.0) discard; float r=v_r;
   float sd=linD(texture(u_depthCopy,gl_FragCoord.xy/u_res).r); if(-v_ce.z-r>sd) discard;
   float th=2.0*r*sqrt(1.0-r2)*0.6; // la red de partículas deja huecos: cada esfera aporta algo menos que su cuerda
-  o=v_ph>1.5?vec4(0.0,th,th*v_t,th*min(v_s,4.0)*0.25):vec4(th,0.0,0.0,th*v_t); }`;
+  o=(v_ph>1.5&&v_ph<2.5)?vec4(0.0,th,th*v_t,th*min(v_s,4.0)*0.25):vec4(th,0.0,0.0,th*(v_ph<1.5?v_t:0.0)); }`;
 // suavizado bilateral separable (en profundidad lineal; respeta saltos grandes)
 const FS_FLSMOOTH = `#version 300 es
 precision highp float; precision highp sampler2D;
@@ -9654,7 +9698,7 @@ void main(){
     for(int k=0;k<4;k++){ ivec2 o2=ivec2(k&1,k>>1); float dk=texelFetch(u_fd,clamp(b+o2,ivec2(0),sz-1),0).x; if(dk<=0.0||abs(dk-d)>0.25) continue;
       float w=(o2.x==1?f.x:1.0-f.x)*(o2.y==1?f.y:1.0-f.y)+1e-4; s+=dk*w; ws+=w; } if(ws>0.0) db=s/ws; }
   vec4 Th=texture(u_ft,gl_FragCoord.xy/u_res); float tw=Th.r, tl=Th.g;
-  bool lava=F.y>1.5; if((lava?tl:tw)<0.004 && !(u_camIn>0.5 && !lava)) discard;
+  bool lava=F.y>1.5&&F.y<2.5, honey=F.y>2.5&&F.y<3.5, milk=F.y>3.5; if((lava?tl:tw)<0.004 && !(u_camIn>0.5 && !lava)) discard;
   // normal: diferencias con el vecino de menor salto en cada eje
   vec3 P=eyeAt(hp,d);
   float dxp=texelFetch(u_fd,min(hp+ivec2(1,0),sz-1),0).x, dxm=texelFetch(u_fd,max(hp-ivec2(1,0),ivec2(0)),0).x;
@@ -9672,11 +9716,20 @@ void main(){
     // con la escena de detrás desviada y reflexión total interna al mirar de lado; la niebla submarina hace el resto
     vec2 suv=gl_FragCoord.xy/u_res; vec3 behind=texture(u_sceneCopy,clamp(suv+Ne.xy*0.03,0.001,0.999)).rgb;
     float tir=smoothstep(0.45,0.2,NdV); col=mix(behind,u_fogCol*1.5+u_amb*0.04*u_camSky,tir);
+  } else if(milk){
+    // leche: blanca y opaca (casi todo se dispersa), con un brillo suave
+    vec3 alb=vec3(0.93,0.93,0.9);
+    vec3 dif=alb*(Lsun*max(dot(N,u_sunDir),0.0)*0.85+u_amb*(0.6+0.4*N.y)*u_camSky+dynLights(wp)*0.4);
+    vec3 R=reflect(V,N); if(R.y<0.02) R.y=0.02+abs(R.y)*0.2; R=normalize(R); float fres=0.03+0.97*pow(1.0-NdV,5.0);
+    col=mix(dif,skyColor(R)*mix(0.03,1.0,u_camSky*u_camSky),fres*0.35);
+    vec3 Hm=normalize(u_sunDir-V); col+=Lsun*pow(max(dot(N,Hm),0.0),60.0)*0.25;
+    alpha=smoothstep(0.004,0.03,tw); col=mix(texture(u_sceneCopy,gl_FragCoord.xy/u_res).rgb,col,alpha);
   } else if(!lava){
-    vec2 suv=gl_FragCoord.xy/u_res; vec2 off=Ne.xy*clamp(tw,0.0,1.2)*0.035; // refracción (IOR 1,333): desvía según la normal y el grosor
+    vec2 suv=gl_FragCoord.xy/u_res; vec2 off=Ne.xy*clamp(tw,0.0,1.2)*(honey?0.055:0.035); // refracción (IOR 1,333; la miel desvía más): según la normal y el grosor
     vec3 behind=texture(u_sceneCopy,clamp(suv+off,0.001,0.999)).rgb;
-    vec3 sA=vec3(0.60,0.16,0.19), sS=vec3(0.014,0.024,0.017), sT=sA+sS;
-    vec3 Tv=exp(-sT*tw*1.3);
+    // agua: absorbe sobre todo el rojo; miel: absorbe mucho el azul y dispersa ámbar (dorada y espesa)
+    vec3 sA=honey?vec3(0.22,0.7,2.3):vec3(0.60,0.16,0.19), sS=honey?vec3(0.32,0.2,0.05):vec3(0.014,0.024,0.017), sT=sA+sS;
+    vec3 Tv=exp(-sT*tw*(honey?2.4:1.3));
     vec3 lightIn=u_amb*0.9*u_camSky+Lsun*0.8+dynLights(wp)*0.3;
     vec3 refr=behind*Tv+lightIn*(sS/sT)*(1.0-Tv)*1.15;
     vec3 R=reflect(V,N); if(R.y<0.02) R.y=0.02+abs(R.y)*0.2; R=normalize(R);
@@ -9739,7 +9792,7 @@ function flRender() {
   gl.bindFramebuffer(gl.READ_FRAMEBUFFER, R.fbo.scene.fb); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, R.fbo.copy.fb);
   const K = FL.rskip || 0;
   if (!(K & 16)) gl.blitFramebuffer(0, 0, R.w, R.h, 0, 0, R.w, R.h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
-  const off = [FL.org[0] - R.cam[0], FL.org[1] - R.cam[1], FL.org[2] - R.cam[2]]; const rad = 0.13;
+  const off = [FL.org[0] - R.cam[0], FL.org[1] - R.cam[1], FL.org[2] - R.cam[2]]; const rad = 0.13 * FL_PS;
   gl.bindVertexArray(FL.vao); gl.disable(gl.CULL_FACE);
   const sphU = P => { gl.useProgram(P.p); gl.uniformMatrix4fv(P.u.u_view, false, R.view); gl.uniformMatrix4fv(P.u.u_proj, false, R.proj); gl.uniform3f(P.u.u_off, off[0], off[1], off[2]); gl.uniform1f(P.u.u_rad, rad);
     flBindTex(P, 'u_pos', 0, FL.pos[FL.cur]); flBindTex(P, 'u_vel', 1, FL.vel[FL.cur]); flBindTex(P, 'u_lam', 2, FL.lam); flBindTex(P, 'u_scl', 9, FL.scaleTex); flBindTex(P, 'u_depthCopy', 3, R.fbo.copy.depth);
@@ -9817,6 +9870,7 @@ FL.frame = 0; FL.spawnFrame = null; FL.calm = new Map(); FL.acc2 = new Map(); FL
 FL.absAcc = [0, 0, 0]; FL.absAt = [null, null, null];
 function flAbsorb(w, x, y, z, base, flag) {
   const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z);
+  if (base >= 4) { if (flag === 2 && Math.random() < 0.05) fizz(w, bx, by, bz); return; } // miel y leche: la lava las quema (no tienen versión normal)
   const lavaP = base === 2; const into = flag === 1 ? 1 : 2; // líquido quieto en el que entró
   const isInto = b => b > 0 && REG[b] && (REG[b].liquid === into || (into === 1 && REG[b].inWater));
   // la celda donde quedó (o una vecina, si la lectura llegó un poco desfasada)
@@ -9881,9 +9935,9 @@ function flAfterReadback() {
     if (flag === 1 || flag === 2) { flAbsorb(w, x, y, z, base, flag); flKill(i); if (flag === 1 && Math.random() < 0.3 && typeof ripImpulse === 'function') { const sp = Math.hypot(V[k4], V[k4 + 1], V[k4 + 2]); ripImpulse(x, z, 0.3 + sp * 0.04, Math.min(1.4, 0.15 + sp * 0.18)); } continue; }
     if (flag >= 3) { flPark(w, x, y, z, V[k4], V[k4 + 1], V[k4 + 2], base, V[k4 + 3]); flKill(i); continue; } // salió de la región: sigue como partícula fuera (nunca líquido normal)
     const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z); const key = FLK(bx, by, bz);
-    let c = occ.get(key); if (!c) { c = { x: bx, y: by, z: bz, nw: 0, nl: 0, np: 0, top: -1e9, vx: 0, vy: 0, vz: 0, vmax: 0, idx: [] }; occ.set(key, c); }
+    let c = occ.get(key); if (!c) { c = { x: bx, y: by, z: bz, nw: 0, nl: 0, np: 0, nh: 0, nm: 0, top: -1e9, vx: 0, vy: 0, vz: 0, vmax: 0, idx: [] }; occ.set(key, c); }
     const vx = V[k4], vy = V[k4 + 1], vz = V[k4 + 2]; const sp = Math.hypot(vx, vy, vz);
-    if (base === 2) c.nl++; else { c.nw++; if (base === 3) c.np++; }
+    if (base === 2) c.nl++; else if (base === 4) c.nh++; else { c.nw++; if (base === 3) c.np++; if (base === 5) c.nm++; } // la leche cuenta como agua (se nada en ella)
     if (y > c.top) c.top = y; c.vx += vx; c.vy += vy; c.vz += vz; c.vs = (c.vs || 0) + sp; if (sp > c.vmax) c.vmax = sp; c.idx.push(i);
   }
   for (const c of occ.values()) { const m = c.idx.length; c.vx /= m; c.vy /= m; c.vz /= m; }
@@ -10001,7 +10055,7 @@ function flParkTick(w, dt) {
         const nx = q.x + q.vx * h, ny = q.y + q.vy * h, nz = q.z + q.vz * h; const bx = Math.floor(nx), by = Math.floor(ny), bz = Math.floor(nz);
         const b = w.get(bx, by, bz);
         if (b < 0) { flParkSettle(q, Math.floor(q.x), Math.floor(q.y), Math.floor(q.z)); break; } // chunk sin cargar: se queda ahí
-        if (b > 0 && REG[b].liquid) { flAbsorb(w, nx, ny, nz, q.ph, REG[b].liquid === 1 ? 1 : 2); alive = false; break; }
+        if (b > 0 && REG[b].liquid && !(q.ph >= 4 && REG[b].liquid === 1)) { flAbsorb(w, nx, ny, nz, q.ph, REG[b].liquid === 1 ? 1 : 2); alive = false; break; } // miel y leche atraviesan el agua (se hunden)
         if (b > 0 && REG[b].solid) {
           const fb = w.get(Math.floor(q.x), by, Math.floor(q.z)); // ¿cae encima (el bloque está debajo) o choca de lado?
           if (q.vy < 0 && fb > 0 && REG[fb].solid && Math.floor(q.y) > by) { flParkSettle(q, Math.floor(q.x), by + 1, Math.floor(q.z)); break; }
@@ -10018,21 +10072,31 @@ function flParkTick(w, dt) {
 // consultas para la física de las entidades (de la última lectura)
 // ¿celda con líquido de verdad? Pocas partículas sueltas sin nada debajo (gotas sobre la cabeza, salpicaduras) no cuentan
 function flCellWet(world, c) {
-  const n = c.idx.length; if (n < 5) return false; if (n >= FL_PPB * 0.5) return true;
+  const n = c.idx.length; if (n < FL_MIN) return false; if (n >= FL_PPB * 0.5) return true;
   const b = world.get(c.x, c.y - 1, c.z); if (b < 0 || (b > 0 && (REG[b].solid || REG[b].liquid))) return true;
   const d = FL.occ.get(FLK(c.x, c.y - 1, c.z)); return !!d && d.idx.length >= FL_PPB * 0.3;
 }
+// líquido que domina en la celda: 2 lava, 4 miel, 1 agua (o leche)
+function flKind(c) { if (c.nh > c.nw && c.nh > c.nl) return 4; return c.nl > c.nw ? 2 : 1; }
 function flLiquidAt(world, x, y, z) {
   if (world !== FL.world || !FL.occ.size) return 0; const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z); const c = FL.occ.get(FLK(bx, by, bz));
-  if (c && y < c.top + 0.12 && flCellWet(world, c)) return c.nl > c.nw ? 2 : 1;
-  const u = FL.occ.get(FLK(bx, by + 1, bz)); if (u && c && c.idx.length >= 5 && flCellWet(world, u) && flCellWet(world, c)) return u.nl > u.nw ? 2 : 1; // la celda de arriba también tiene: estamos dentro
-  return 0;
+  let k = 0;
+  if (c && y < c.top + 0.12 && flCellWet(world, c)) k = flKind(c);
+  else { const u = FL.occ.get(FLK(bx, by + 1, bz)); if (u && c && c.idx.length >= FL_MIN && flCellWet(world, u) && flCellWet(world, c)) k = flKind(u); } // la celda de arriba también tiene: estamos dentro
+  return k === 4 ? 0 : k; // en la miel no se nada (frena: flHoneyAt)
 }
+// ¿hay miel (o leche) en ese punto? (para frenar a las entidades / anular efectos)
+function flTypeAt(world, x, y, z, key) {
+  if (typeof FL === 'undefined' || world !== FL.world || !FL.occ || !FL.occ.size) return false; const c = FL.occ.get(FLK(Math.floor(x), Math.floor(y), Math.floor(z)));
+  return !!c && c[key] >= Math.max(3, FL_MIN * 0.5) && y < c.top + 0.15;
+}
+function flHoneyAt(world, x, y, z) { return flTypeAt(world, x, y, z, 'nh'); }
+function flMilkAt(world, x, y, z) { return flTypeAt(world, x, y, z, 'nm'); }
 function flSurfIn(world, bx, by, bz) {
-  if (world !== FL.world) return 0; const c = FL.occ.get(FLK(bx, by, bz)); if (!c || c.idx.length < 5) return 0;
-  const u = FL.occ.get(FLK(bx, by + 1, bz)); if (u && u.idx.length >= 5) return 1; return clamp(c.top + 0.12 - by, 0, 1);
+  if (world !== FL.world) return 0; const c = FL.occ.get(FLK(bx, by, bz)); if (!c || c.idx.length < FL_MIN) return 0;
+  const u = FL.occ.get(FLK(bx, by + 1, bz)); if (u && u.idx.length >= FL_MIN) return 1; return clamp(c.top + 0.12 - by, 0, 1);
 }
-function flFlowAt(world, bx, by, bz) { if (world !== FL.world) return null; const c = FL.occ.get(FLK(bx, by, bz)); return c && c.idx.length >= 5 ? [c.vx, c.vy, c.vz] : null; }
+function flFlowAt(world, bx, by, bz) { if (world !== FL.world) return null; const c = FL.occ.get(FLK(bx, by, bz)); return c && c.idx.length >= FL_MIN ? [c.vx, c.vy, c.vz] : null; }
 function flDepositAll_old(w) {
   if (!FL.ok || w !== FL.world || !FL.rb.ready) return; FL.calm = new Map(); const occ = FL.occ; const seen = new Set();
   for (const [k0, c0] of occ) { if (seen.has(k0) || !c0.idx.length) continue; const comp = []; const q = [c0]; seen.add(k0); const lava = c0.nl > c0.nw;
@@ -10520,7 +10584,7 @@ function flamerTick(w, dt) {
   for (const [k, h] of FLAMER.heat) {
     h.h -= dt * 0.5; if (h.h <= 0) { FLAMER.heat.delete(k); continue; }
     if (h.h < 2.5) continue;
-    h.acc += dt * (h.h - 2) * 14; const n = Math.floor(h.acc); if (n <= 0) continue; h.acc -= n;
+    h.acc += dt * (h.h - 2) * 14 * (h.s ? 1 : FL_PPB / 216); const n = Math.floor(h.acc); if (n <= 0) continue; h.acc -= n; // (partículas pequeñas: más por segundo, mismo volumen)
     if (!(h.s ? flamerBoilStatic(w, h, n) : flamerBoil(w, h, n))) FLAMER.heat.delete(k);
   }
 }
@@ -10533,7 +10597,7 @@ function steamPuff(w, x, y, z, k) {
 function flamerBoil(w, h, n) {
   if (typeof FL === 'undefined' || !FL.occ) return false;
   let c = FL.occ.get(FLK(h.x, h.y, h.z)); if (!c || !c.idx.length) c = FL.occ.get(FLK(h.x, h.y - 1, h.z)); if (!c || !c.idx.length) return false;
-  let k = 0; for (let j = c.idx.length - 1; j >= 0 && k < n; j--) { const i = c.idx[j]; const ph = FL.phase[i]; if (ph && ph !== 2) { flKill(i); c.idx.splice(j, 1); c.nw = Math.max(0, c.nw - 1); k++; } }
+  let k = 0; for (let j = c.idx.length - 1; j >= 0 && k < n; j--) { const i = c.idx[j]; const ph = FL.phase[i]; if (ph && ph !== 2 && ph !== 4) { flKill(i); c.idx.splice(j, 1); c.nw = Math.max(0, c.nw - 1); k++; } }
   if (k) steamPuff(w, c.x, Math.max(c.y, c.top), c.z, k);
   return k > 0;
 }
@@ -10545,6 +10609,50 @@ function flamerBoilStatic(w, h, n) {
     if (a <= 0) { setBlockNet(w, h.x, h.y, h.z, 0); return false; }
     setBlockNet(w, h.x, h.y, h.z, ID.water, liqMeta(a, false, false) | (m & 16)); }
   return true;
+}
+// ------------------------------------------------------------ difusor
+// Agua y lava (la miel y la leche no tienen versión normal). Modo «Líquido»: las partículas a las que apunta pasan a
+// líquido normal (con el mismo volumen); modo «PBF»: el líquido normal pasa a partículas. Sin durabilidad.
+const DIFF = { last: 0 };
+function diffuserUse(p, s) {
+  const pt = fluidAim(p); const mode = s && s.mode === 'pbf' ? 'pbf' : 'liquid'; p.swing = Math.max(p.swing || 0, 0.01);
+  if (G.net && G.net.role === 'client') { const now = performance.now(); if (now - (FLAMER.sentD || 0) > 100) { FLAMER.sentD = now; netSend({ t: 'dif', p: pt.map(v => +v.toFixed(2)), m: mode }); } return; }
+  const n = diffuserAt(p.world, pt, mode, 1.6); if (n && Math.random() < 0.3) playSound(mode === 'pbf' ? 'splash' : 'bucket', pt[0], pt[1], pt[2], 0.25);
+}
+function diffuserAt(w, pt, mode, r) {
+  const now = performance.now(); if (now - DIFF.last < 100) return 0; DIFF.last = now;
+  if (typeof FL === 'undefined' || !flCanSim(w)) { if (w === G.world) showActionMsg('El difusor necesita el fluido continuo (calidad Alta o Ultra con partículas activadas)'); return 0; }
+  const ri = Math.ceil(r), cx = Math.floor(pt[0]), cy = Math.floor(pt[1]), cz = Math.floor(pt[2]); let n = 0;
+  if (mode === 'pbf') { // líquido normal → partículas
+    for (let dy = ri; dy >= -ri; dy--) for (let dz = -ri; dz <= ri; dz++) for (let dx = -ri; dx <= ri; dx++) {
+      const x = cx + dx, y = cy + dy, z = cz + dz; const b = w.get(x, y, z); if (b !== ID.water && b !== ID.lava) continue;
+      if ((x + 0.5 - pt[0]) ** 2 + (y + 0.5 - pt[1]) ** 2 + (z + 0.5 - pt[2]) ** 2 > (r + 0.5) ** 2 || !flCanSim(w, x, y, z)) continue;
+      const a = liqAmt(w.getMeta(x, y, z)); if (flFree() < a / 8 * FL_PPB + 1000 || n >= 6) return n;
+      w.set(x, y, z, 0); flSpawnCell(w, x, y, z, a, b === ID.water ? 3 : 2, 0, 0, 0); n++;
+    }
+    return n;
+  }
+  if (!FL.rb.ready) return 0; const P = FL.rb.pos, o = FL.rb.orgNow; // partículas → líquido normal
+  for (let dy = -ri; dy <= ri; dy++) for (let dz = -ri; dz <= ri; dz++) for (let dx = -ri; dx <= ri; dx++) {
+    const c = FL.occ.get(FLK(cx + dx, cy + dy, cz + dz)); if (!c || !c.idx.length) continue;
+    for (let j = c.idx.length - 1; j >= 0; j--) { const i = c.idx[j]; const ph = FL.phase[i]; if (!ph) { c.idx.splice(j, 1); continue; } if (ph >= 4) continue; // miel y leche: no compatibles
+      const k = i * 4; const x = P[k] + o[0], y = P[k + 1] + o[1], z = P[k + 2] + o[2];
+      if ((x - pt[0]) ** 2 + (y - pt[1]) ** 2 + (z - pt[2]) ** 2 > r * r) continue;
+      flExitVol(w, Math.floor(x), Math.floor(y), Math.floor(z), ph); flKill(i); c.idx.splice(j, 1); n++; }
+  }
+  return n;
+}
+// punto al que apunta una herramienta de líquidos: la primera celda con partículas o con líquido en la mirada (hasta 5
+// bloques) o, si no hay, delante del bloque que se mira
+function fluidAim(p) {
+  const w = p.world, dir = lookDir(p); let pt = null;
+  for (let t = 0.4; t < 5; t += 0.2) {
+    const x = p.x + dir[0] * t, y = p.eye + dir[1] * t, z = p.z + dir[2] * t; const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z);
+    const c = typeof FL !== 'undefined' && FL.occ && FL.occ.get(FLK(bx, by, bz)); if (c && c.idx.length) { pt = [x, y, z]; break; }
+    const b = w.get(bx, by, bz); if (b > 0 && REG[b].liquid) { pt = [x, y, z]; break; }
+    if (b > 0 && REG[b].solid) { pt = [x - dir[0] * 0.4, y - dir[1] * 0.4, z - dir[2] * 0.4]; break; }
+  }
+  return pt || [p.x + dir[0] * 2, p.eye + dir[1] * 2, p.z + dir[2] * 2];
 }
 // ------------------------------------------------------------ esponja
 function spongeUse(p) {
@@ -10587,7 +10695,7 @@ function spongeAt(w, pt, r) {
       const ex = P[k] + o[0] - pt[0], ey = P[k + 1] + o[1] - pt[1], ez = P[k + 2] + o[2] - pt[2];
       if (ex * ex + ey * ey + ez * ez < R2) { flKill(i); c.idx.splice(j, 1); n++; } }
   }
-  n += ns * 27;
+  n += ns * FL_PPB / 8;
   if (n) for (let i = 0; i < Math.min(6, n / 20); i++) P_({ x: pt[0] + (Math.random() - 0.5) * r, y: pt[1] + (Math.random() - 0.5) * r, z: pt[2] + (Math.random() - 0.5) * r, vy: 0.5, life: 0.5, size: 0.08, r: 0.6, g: 0.75, b: 1, a: 0.6, grav: 4, layer: TEX.drip });
   return n;
 }
@@ -10790,11 +10898,11 @@ const CMD_SPEC = {
   dimension: [['overworld', 'nether', 'end']],
   gamerule: [['keepInventory', 'doWaterDespawn', 'doDaylightCycle', 'doWeatherCycle'], ['true', 'false']],
   effect: [['give'], CMD_EFFECTS, ['30', '60', '300']],
-  liquids: [['delete', 'sphere', 'cube'], a => a[1] === 'delete' ? ['all', 'water', 'lava'] : ['water', 'lava'], a => a[1] === 'sphere' ? ['<radio>', '2', '3', '4'] : a[1] === 'cube' ? ['<lado>', '2', '4', '6'] : []],
+  liquids: [['delete', 'sphere', 'cube'], a => a[1] === 'delete' ? ['all', 'water', 'lava', 'honey', 'milk'] : ['water', 'lava', 'honey', 'milk'], a => a[1] === 'sphere' ? ['<radio>', '2', '3', '4'] : a[1] === 'cube' ? ['<lado>', '2', '4', '6'] : []],
   tick: [['freeze', 'unfreeze', 'rate', 'step', 'query', '0.25', '0.5', '2', '4'], a => a[1] === 'rate' ? ['0.1', '0.5', '1', '2', '4', '10'] : a[1] === 'step' ? ['1', '20', '100'] : []]
 };
 CMD_SPEC.teleport = CMD_SPEC.tp;
-const CMD_HELP = { help: 'lista de comandos', liquids: 'delete all|water|lava · sphere|cube water|lava <radio|lado>', gamemode: '<modo>', time: 'set|add|query', weather: 'clear|rain|thunder [segundos]', tp: '<x y z> | <jugador> | <quién> <x y z|destino>', give: '<objeto> [cantidad]', kill: '[@s|@e|@e[type=mob]|mob]', seed: '', summon: '<mob> [x y z]', spawnpoint: '', difficulty: '<dificultad>', locate: 'structure <nombre>', clear: '', dimension: '<dimensión>', gamerule: 'keepInventory <true|false>', effect: 'give <efecto> [segundos]', tick: 'freeze | unfreeze | <velocidad> | rate <x> | step [ticks] | query' };
+const CMD_HELP = { help: 'lista de comandos', liquids: 'delete all|water|lava|honey|milk · sphere|cube water|lava|honey|milk <radio|lado>', gamemode: '<modo>', time: 'set|add|query', weather: 'clear|rain|thunder [segundos]', tp: '<x y z> | <jugador> | <quién> <x y z|destino>', give: '<objeto> [cantidad]', kill: '[@s|@e|@e[type=mob]|mob]', seed: '', summon: '<mob> [x y z]', spawnpoint: '', difficulty: '<dificultad>', locate: 'structure <nombre>', clear: '', dimension: '<dimensión>', gamerule: 'keepInventory <true|false>', effect: 'give <efecto> [segundos]', tick: 'freeze | unfreeze | <velocidad> | rate <x> | step [ticks] | query' };
 // ---- ejecución
 function runCommand(cmd) {
   const a = cmd.trim().slice(1).split(/\s+/); const c = (a[0] || '').toLowerCase(); const p = G.player;
@@ -10845,16 +10953,16 @@ function runCommand(cmd) {
     case 'liquids': { // solo partículas del fluido continuo: el agua y la lava normales (y los océanos) no se tocan
       if (G.net && G.net.role === 'client') return chatMsg('Solo el anfitrión puede usar /liquids (él simula el fluido)', '#f88');
       if (typeof FL === 'undefined' || !flCanSim(p.world)) return chatMsg('El fluido continuo no está activo (calidad alta y líquidos continuos en las opciones)', '#f88');
-      const k = (a[1] || '').toLowerCase(), kind = (a[2] || '').toLowerCase(); const name = { water: 'agua', lava: 'lava', all: 'agua y lava' };
+      const k = (a[1] || '').toLowerCase(), kind = (a[2] || '').toLowerCase(); const name = { water: 'agua', lava: 'lava', honey: 'miel', milk: 'leche', all: 'todos los líquidos' }; const KL = { water: 1, lava: 2, honey: 4, milk: 5 };
       if (k === 'delete') {
-        if (!name[kind]) return chatMsg('Uso: /liquids delete all|water|lava', '#f88');
-        let n = 0; for (let i = 0; i < FL.hi; i++) { const ph = FL.phase[i]; if (!ph || (kind === 'water' && ph === 2) || (kind === 'lava' && ph !== 2)) continue; flKill(i); n++; }
+        if (!name[kind]) return chatMsg('Uso: /liquids delete all|water|lava|honey|milk', '#f88');
+        let n = 0; for (let i = 0; i < FL.hi; i++) { const ph = FL.phase[i]; if (!ph || (kind !== 'all' && phLiq(ph) !== KL[kind])) continue; flKill(i); n++; }
         for (const [key, c] of FL.occ) { c.idx = c.idx.filter(i => FL.phase[i]); if (!c.idx.length) FL.occ.delete(key); }
         return chatMsg(n + ' partículas de ' + name[kind] + ' eliminadas');
       }
       if (k === 'sphere' || k === 'cube') {
-        const liq = kind === 'water' ? 1 : kind === 'lava' ? 2 : 0; let s = +a[3];
-        if (!liq || !(s > 0)) return chatMsg('Uso: /liquids ' + k + ' water|lava <' + (k === 'sphere' ? 'radio' : 'lado') + '>', '#f88');
+        const liq = KL[kind] || 0; let s = +a[3];
+        if (!liq || !(s > 0)) return chatMsg('Uso: /liquids ' + k + ' water|lava|honey|milk <' + (k === 'sphere' ? 'radio' : 'lado') + '>', '#f88');
         s = Math.min(s, k === 'sphere' ? 8 : 16); const half = k === 'sphere' ? s : s / 2;
         // delante del jugador, sin tocarlo
         const dir = lookDir(p); const dd = half + 1.5; const cx = p.x + dir[0] * dd, cy = p.eye + dir[1] * dd, cz = p.z + dir[2] * dd; const w = p.world; const S = FL_S;
@@ -10863,7 +10971,7 @@ function runCommand(cmd) {
           if (k === 'sphere' && (x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2 > s * s) continue;
           const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z); const b = w.get(bx, by, bz); if (b < 0 || (b > 0 && (REG[b].solid || REG[b].liquid))) continue;
           if (!flCanSim(w, bx, by, bz)) continue;
-          const j = () => (Math.random() - 0.5) * 0.03; if (flSpawn(x + j(), y + j(), z + j(), 0, 0, 0, liq === 1 ? 3 : 2) < 0) { full = true; break; } n++;
+          const j = () => (Math.random() - 0.5) * 0.03; if (flSpawn(x + j(), y + j(), z + j(), 0, 0, 0, liqPh(liq)) < 0) { full = true; break; } n++;
         }
         return chatMsg((k === 'sphere' ? 'Esfera' : 'Cubo') + ' de ' + name[kind] + ': ' + n + ' partículas' + (full ? ' (no caben más: límite del fluido)' : ''), full ? '#fc8' : null);
       }
@@ -11709,6 +11817,7 @@ function optPhysics(ui) {
   ui.slider('Velocidad del agua', ...PK('liquids', 'waterSpeed'), 0.5, 2, 0.05, pct, 'Lo rápido que fluye y se nivela el agua.');
   ui.slider('Viscosidad de la lava', ...PK('liquids', 'lavaVisc'), 0.5, 3, 0.05, pct, 'Más viscosidad = la lava avanza más despacio.');
   ui.cycle('Fluido continuo (partículas)', ...PK('liquids', 'continuous'), [true, false], ['Sí', 'No'], 'Calidad Alta o Ultra: el agua y la lava se mueven como fluido real (partículas en la GPU) en vez de por celdas.', { off: v });
+  ui.cycle('Tamaño de PBF', ...PK('liquids', 'pbfSize'), [1, 2], ['1 (pequeñas)', '2 (grandes)'], 'Tamaño de las partículas del fluido continuo. 1: la mitad de tamaño, con 8 veces más partículas por bloque (más detalle, más carga para la GPU). 2: el tamaño anterior. Al cambiarlo se borran las partículas que haya.', { off: v });
   ui.cycle('Salpicaduras', ...PK('liquids', 'splash'), [true, false], ['Sí', 'No'], 'Gotas al caer agua y al moverse los líquidos.', { off: v });
   ui.sec('Nieve');
   v = mode('snow', 'la nieve está suelta y se compacta solo donde pisan el jugador y los mobs (huellas y rastros).', 'capas de nieve sólidas, sin huellas.');

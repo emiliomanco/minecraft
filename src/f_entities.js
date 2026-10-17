@@ -401,7 +401,10 @@ function updatePlayerPhysics(p, dt, input) {
   const lf = liquidAt(w, p.x, p.y + 0.1, p.z), lm = liquidAt(w, p.x, p.y + 0.9, p.z), le = liquidAt(w, p.x, p.eye, p.z);
   p.inWater = lf === 1 || lm === 1; p.inLava = lf === 2 || lm === 2; p.eyeInWater = le === 1; p.eyeInLava = le === 2;
   const climb = entityInBlock(w, p, d => d.climb);
-  const web = entityInBlock(w, p, d => d.slow);
+  // miel (partículas): pegajosa, frena como una telaraña; leche: al tocarla se anulan los efectos de poción
+  const honey = typeof flHoneyAt === 'function' && !spectator && (flHoneyAt(w, p.x, p.y + 0.1, p.z) || flHoneyAt(w, p.x, p.y + 0.9, p.z));
+  const web = entityInBlock(w, p, d => d.slow) || honey;
+  if (typeof flMilkAt === 'function' && !spectator && (flMilkAt(w, p.x, p.y + 0.1, p.z) || flMilkAt(w, p.x, p.y + 0.9, p.z)) && Object.keys(p.effects).length) { p.effects = {}; if (p === G.player) { showActionMsg('La leche anuló los efectos'); updateHUD(); } }
   const below = blockAt(w, p.x, p.y - 0.05, p.z); const bd = below > 0 ? REG[below] : null;
   // dirección deseada
   let fx = 0, fz = 0; if (input.f) fz -= 1; if (input.b) fz += 1; if (input.l) fx -= 1; if (input.r) fx += 1;
@@ -467,7 +470,7 @@ function updatePlayerPhysics(p, dt, input) {
       p.fallDist = 0;
     }
     p.vy -= 32 * dt; if (web) p.vy = Math.max(p.vy, -1); p.vy = Math.max(p.vy, -78);
-    if (input.jump && p.onGround && !p.jumpCool) { p.vy = p.effects.jump ? 11 : 9; if (p.sprinting) { p.vx += -Math.sin(p.yaw) * 2; p.vz += -Math.cos(p.yaw) * 2; } p.exh += p.sprinting ? 0.2 : 0.05; p.jumpCool = 0.1; if (bd && bd.sticky) p.vy = 4; }
+    if (input.jump && p.onGround && !p.jumpCool) { p.vy = p.effects.jump ? 11 : 9; if (p.sprinting) { p.vx += -Math.sin(p.yaw) * 2; p.vz += -Math.cos(p.yaw) * 2; } p.exh += p.sprinting ? 0.2 : 0.05; p.jumpCool = 0.1; if ((bd && bd.sticky) || honey) p.vy = 4; }
     if (p.jumpCool) p.jumpCool = Math.max(0, p.jumpCool - dt);
     // agacharse: no caer por bordes
     let mx = p.vx * dt, mz = p.vz * dt;
@@ -549,6 +552,8 @@ function entityTick(e, dt) {
   if (e.dead) { e.deathTime++; if (e.deathTime === 1) mobDie(e); if (e.deathTime > (e.type === 'ender_dragon' ? 100 : 20)) e.removed = true; if (e.type === 'ender_dragon') { e.y += 0.1; if (e.deathTime % 3 === 0) explosionFX(e.dim, e.x + (Math.random() - 0.5) * 8, e.y + Math.random() * 4, e.z + (Math.random() - 0.5) * 8, 2); } return; }
   // medio
   const feet = liquidAt(w, e.x, e.y + 0.2, e.z); e.inWater = feet === 1; e.inLava = feet === 2;
+  e._honey = typeof flHoneyAt === 'function' && flHoneyAt(w, e.x, e.y + 0.2, e.z); // en miel: muy despacio
+  if (e.effects && typeof flMilkAt === 'function' && flMilkAt(w, e.x, e.y + 0.2, e.z)) e.effects = {}; // la leche anula los efectos
   if (e.inLava && !d.fireImmune) { e.fire = 300; if (e.age % 10 === 0) hurtEntity(e, 4, null, 0, 0, 0, 'lava'); }
   if (e.fire > 0) { e.fire--; if (e.inWater) e.fire = 0; if (e.age % 20 === 0 && !d.fireImmune) hurtEntity(e, 1, null, 0, 0, 0, 'fire'); if (Math.random() < 0.3) flame(e.x, e.y + Math.random() * e.h, e.z, { size: 0.3 }); }
   if (d.burns && w.dim === 'overworld' && isDay() && !e.inWater && (G.rainLevel || 0) < 0.5 && e.age % 20 === 0) { const L = w.light(Math.floor(e.x), Math.floor(e.y + e.h), Math.floor(e.z)); if (L[0] >= 15 && e.target !== null || L[0] >= 15) e.fire = Math.max(e.fire, 160); }
@@ -650,6 +655,7 @@ function entityTick(e, dt) {
   if (moving && e.hc && e.onGround && e.navT !== e.age) e.vy = 10; // salto de ~1,3 bloques con el paso de 0,05 s (8,5 no superaba un bloque)
   if (e.onGround) { const fr = w.get(Math.floor(e.x), Math.floor(e.y - 0.05), Math.floor(e.z)) === ID.snow ? 0.7 : 0.82; e.vx *= fr; e.vz *= fr; } // en nieve profunda cuesta avanzar
   e.vy = Math.max(e.vy, -60);
+  if (e._honey) { e.vx *= 0.25; e.vz *= 0.25; e.vy = clamp(e.vy, -1, 3); }
   const vyB = e.vy; moveEntity(w, e, e.vx * dt, e.vy * dt, e.vz * dt);
   if (vyB < 0 && !e.onGround) e.fallDist += -vyB * dt;
   if (vyB < -12 && typeof ragFallCheck === 'function' && !d.climb && !d.noGrav) ragFallCheck(e, vyB);
@@ -671,6 +677,7 @@ function itemTick(e, dt, w) {
   if (inW) { const bx = Math.floor(e.x), bz = Math.floor(e.z); let by = Math.floor(e.y + 0.1); while (liquidAt(w, e.x, by + 1.02, e.z) === inW && by < e.y + 4) by++; const sy = by + liquidSurface(w, bx, by, bz); const tgt = clamp((sy - 0.12 - e.y) * (inW === 2 ? 2 : 7), -2.5, 2.5) + Math.sin(e.age * 0.12 + e.id) * 0.15; e.vy = lerp(e.vy, tgt, inW === 2 ? 0.08 : 0.22); e.vx *= inW === 2 ? 0.7 : 0.9; e.vz *= inW === 2 ? 0.7 : 0.9; const fv = flowVec(w, Math.floor(e.x), Math.floor(e.y + 0.1), Math.floor(e.z)); e.vx += fv[0] * 0.5; e.vz += fv[1] * 0.5; if (inW === 2 && !(e.stack.id === ID.netherite_ingot || REG[e.stack.id].name.startsWith('netherite'))) { e.removed = true; smoke(e.x, e.y, e.z, { size: 0.3 }); return; } }
   else e.vy -= 20 * dt;
   if (e.onGround) { e.vx *= 0.6; e.vz *= 0.6; }
+  if (typeof flHoneyAt === 'function' && flHoneyAt(w, e.x, e.y + 0.1, e.z)) { e.vx *= 0.5; e.vz *= 0.5; e.vy = Math.max(e.vy, -0.6); } // pegado en la miel
   // dentro de un bloque sólido: empujar arriba
   const b = blockAt(w, e.x, e.y + 0.1, e.z); if (b > 0 && T_FULL[b]) { e.y += 0.2; e.vy = 1; }
   moveEntity(w, e, e.vx * dt, e.vy * dt, e.vz * dt);

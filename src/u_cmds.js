@@ -29,11 +29,11 @@ const CMD_SPEC = {
   dimension: [['overworld', 'nether', 'end']],
   gamerule: [['keepInventory', 'doWaterDespawn', 'doDaylightCycle', 'doWeatherCycle'], ['true', 'false']],
   effect: [['give'], CMD_EFFECTS, ['30', '60', '300']],
-  liquids: [['delete', 'sphere', 'cube'], a => a[1] === 'delete' ? ['all', 'water', 'lava'] : ['water', 'lava'], a => a[1] === 'sphere' ? ['<radio>', '2', '3', '4'] : a[1] === 'cube' ? ['<lado>', '2', '4', '6'] : []],
+  liquids: [['delete', 'sphere', 'cube'], a => a[1] === 'delete' ? ['all', 'water', 'lava', 'honey', 'milk'] : ['water', 'lava', 'honey', 'milk'], a => a[1] === 'sphere' ? ['<radio>', '2', '3', '4'] : a[1] === 'cube' ? ['<lado>', '2', '4', '6'] : []],
   tick: [['freeze', 'unfreeze', 'rate', 'step', 'query', '0.25', '0.5', '2', '4'], a => a[1] === 'rate' ? ['0.1', '0.5', '1', '2', '4', '10'] : a[1] === 'step' ? ['1', '20', '100'] : []]
 };
 CMD_SPEC.teleport = CMD_SPEC.tp;
-const CMD_HELP = { help: 'lista de comandos', liquids: 'delete all|water|lava · sphere|cube water|lava <radio|lado>', gamemode: '<modo>', time: 'set|add|query', weather: 'clear|rain|thunder [segundos]', tp: '<x y z> | <jugador> | <quién> <x y z|destino>', give: '<objeto> [cantidad]', kill: '[@s|@e|@e[type=mob]|mob]', seed: '', summon: '<mob> [x y z]', spawnpoint: '', difficulty: '<dificultad>', locate: 'structure <nombre>', clear: '', dimension: '<dimensión>', gamerule: 'keepInventory <true|false>', effect: 'give <efecto> [segundos]', tick: 'freeze | unfreeze | <velocidad> | rate <x> | step [ticks] | query' };
+const CMD_HELP = { help: 'lista de comandos', liquids: 'delete all|water|lava|honey|milk · sphere|cube water|lava|honey|milk <radio|lado>', gamemode: '<modo>', time: 'set|add|query', weather: 'clear|rain|thunder [segundos]', tp: '<x y z> | <jugador> | <quién> <x y z|destino>', give: '<objeto> [cantidad]', kill: '[@s|@e|@e[type=mob]|mob]', seed: '', summon: '<mob> [x y z]', spawnpoint: '', difficulty: '<dificultad>', locate: 'structure <nombre>', clear: '', dimension: '<dimensión>', gamerule: 'keepInventory <true|false>', effect: 'give <efecto> [segundos]', tick: 'freeze | unfreeze | <velocidad> | rate <x> | step [ticks] | query' };
 // ---- ejecución
 function runCommand(cmd) {
   const a = cmd.trim().slice(1).split(/\s+/); const c = (a[0] || '').toLowerCase(); const p = G.player;
@@ -84,16 +84,16 @@ function runCommand(cmd) {
     case 'liquids': { // solo partículas del fluido continuo: el agua y la lava normales (y los océanos) no se tocan
       if (G.net && G.net.role === 'client') return chatMsg('Solo el anfitrión puede usar /liquids (él simula el fluido)', '#f88');
       if (typeof FL === 'undefined' || !flCanSim(p.world)) return chatMsg('El fluido continuo no está activo (calidad alta y líquidos continuos en las opciones)', '#f88');
-      const k = (a[1] || '').toLowerCase(), kind = (a[2] || '').toLowerCase(); const name = { water: 'agua', lava: 'lava', all: 'agua y lava' };
+      const k = (a[1] || '').toLowerCase(), kind = (a[2] || '').toLowerCase(); const name = { water: 'agua', lava: 'lava', honey: 'miel', milk: 'leche', all: 'todos los líquidos' }; const KL = { water: 1, lava: 2, honey: 4, milk: 5 };
       if (k === 'delete') {
-        if (!name[kind]) return chatMsg('Uso: /liquids delete all|water|lava', '#f88');
-        let n = 0; for (let i = 0; i < FL.hi; i++) { const ph = FL.phase[i]; if (!ph || (kind === 'water' && ph === 2) || (kind === 'lava' && ph !== 2)) continue; flKill(i); n++; }
+        if (!name[kind]) return chatMsg('Uso: /liquids delete all|water|lava|honey|milk', '#f88');
+        let n = 0; for (let i = 0; i < FL.hi; i++) { const ph = FL.phase[i]; if (!ph || (kind !== 'all' && phLiq(ph) !== KL[kind])) continue; flKill(i); n++; }
         for (const [key, c] of FL.occ) { c.idx = c.idx.filter(i => FL.phase[i]); if (!c.idx.length) FL.occ.delete(key); }
         return chatMsg(n + ' partículas de ' + name[kind] + ' eliminadas');
       }
       if (k === 'sphere' || k === 'cube') {
-        const liq = kind === 'water' ? 1 : kind === 'lava' ? 2 : 0; let s = +a[3];
-        if (!liq || !(s > 0)) return chatMsg('Uso: /liquids ' + k + ' water|lava <' + (k === 'sphere' ? 'radio' : 'lado') + '>', '#f88');
+        const liq = KL[kind] || 0; let s = +a[3];
+        if (!liq || !(s > 0)) return chatMsg('Uso: /liquids ' + k + ' water|lava|honey|milk <' + (k === 'sphere' ? 'radio' : 'lado') + '>', '#f88');
         s = Math.min(s, k === 'sphere' ? 8 : 16); const half = k === 'sphere' ? s : s / 2;
         // delante del jugador, sin tocarlo
         const dir = lookDir(p); const dd = half + 1.5; const cx = p.x + dir[0] * dd, cy = p.eye + dir[1] * dd, cz = p.z + dir[2] * dd; const w = p.world; const S = FL_S;
@@ -102,7 +102,7 @@ function runCommand(cmd) {
           if (k === 'sphere' && (x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2 > s * s) continue;
           const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z); const b = w.get(bx, by, bz); if (b < 0 || (b > 0 && (REG[b].solid || REG[b].liquid))) continue;
           if (!flCanSim(w, bx, by, bz)) continue;
-          const j = () => (Math.random() - 0.5) * 0.03; if (flSpawn(x + j(), y + j(), z + j(), 0, 0, 0, liq === 1 ? 3 : 2) < 0) { full = true; break; } n++;
+          const j = () => (Math.random() - 0.5) * 0.03; if (flSpawn(x + j(), y + j(), z + j(), 0, 0, 0, liqPh(liq)) < 0) { full = true; break; } n++;
         }
         return chatMsg((k === 'sphere' ? 'Esfera' : 'Cubo') + ' de ' + name[kind] + ': ' + n + ' partículas' + (full ? ' (no caben más: límite del fluido)' : ''), full ? '#fc8' : null);
       }

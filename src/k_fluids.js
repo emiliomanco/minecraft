@@ -283,8 +283,8 @@ function waterSurfaceAt(w, x, y, z) {
   return by + liquidSurface(w, bx, by, bz);
 }
 // ---- cubos con capacidad: 10 L (10000 ml) = un bloque de líquido; cada partícula del fluido continuo son 0,08 L
-const BUCKET_ML = 10000, ML_PER_EIGHTH = 1250; const ML_PER_PART = BUCKET_ML / 216; // (216 = FL_PPB, que se define después) un cubo (10 L) = un bloque = 216 partículas
-function bucketLabel(s) { const d = s && REG[s.id]; if (!d || d.bucket === undefined || !d.bucket) return ''; return ' (' + (((s.ml ?? BUCKET_ML)) / 1000).toFixed(1) + ' L)'; }
+const BUCKET_ML = 10000, ML_PER_EIGHTH = 1250; const mlPerPart = () => BUCKET_ML / (typeof FL_PPB !== 'undefined' ? FL_PPB : 216); // un cubo (10 L) = un bloque = FL_PPB partículas (216 o 1728 según el tamaño)
+function bucketLabel(s) { const d = s && REG[s.id]; if (d && d.diffuser) return s.mode === 'pbf' ? ' (modo PBF)' : ' (modo Líquido)'; if (!d || d.bucket === undefined || !d.bucket) return ''; return ' (' + (((s.ml ?? BUCKET_ML)) / 1000).toFixed(1) + ' L)'; }
 const BKT_ACC = new Map();
 // recoge hasta `room` ml del líquido que hay en una caja pequeña e invisible alrededor de donde apunta el jugador
 // cont: 0 vacío (acepta el primero que encuentre), 1 agua, 2 lava (solo ese). Devuelve { liq, ml }
@@ -295,20 +295,20 @@ function bucketCollect(w, p, dir, cont, room) {
     const b = w.get(Math.floor(x), Math.floor(y), Math.floor(z));
     if (b > 0 && REG[b] && REG[b].solid && !REG[b].liquid) break;
     const oc = typeof FL !== 'undefined' && FL.occ && w === FL.world ? FL.occ.get(FLK(Math.floor(x), Math.floor(y), Math.floor(z))) : null;
-    if (oc && oc.idx.length >= 2 && y < oc.top + 0.2) { c = [x, y, z]; liq = oc.nl > oc.nw ? 2 : 1; break; }
+    if (oc && oc.idx.length >= 2 && y < oc.top + 0.2) { c = [x, y, z]; liq = flKind(oc); if (liq === 1 && oc.nm * 2 > oc.nw) liq = 5; break; } // 1 agua, 2 lava, 4 miel, 5 leche
     const sl = b > 0 && REG[b] ? (REG[b].liquid || (REG[b].inWater ? 1 : 0)) : 0; if (sl) { c = [x, y, z]; liq = sl; isStatic = true; break; }
   }
   if (!c || (cont && cont !== liq)) return { liq: cont, ml: 0 };
   if (!isStatic) { // partículas dentro de la caja (de la última lectura de la GPU)
-    const rb = FL.rb, o = rb.orgNow; if (!rb.ready) return { liq, ml: 0 }; const want = Math.min(26, Math.floor(room / ML_PER_PART)); let n = 0;
+    const rb = FL.rb, o = rb.orgNow; if (!rb.ready) return { liq, ml: 0 }; const want = Math.min(Math.round(26 * FL_PPB / 216), Math.floor(room / mlPerPart())); let n = 0;
     const bx = Math.floor(c[0]), by = Math.floor(c[1]), bz = Math.floor(c[2]);
     for (let dy = -1; dy <= 1 && n < want; dy++) for (let dz = -1; dz <= 1 && n < want; dz++) for (let dx = -1; dx <= 1 && n < want; dx++) {
       const cell = FL.occ.get(FLK(bx + dx, by + dy, bz + dz)); if (!cell) continue;
-      for (const i of cell.idx) { if (n >= want) break; const ph = FL.phase[i]; if (!ph || (ph === 2) !== (liq === 2) || FL.dying.has(i)) continue; const k = i * 4;
+      for (const i of cell.idx) { if (n >= want) break; const ph = FL.phase[i]; if (!ph || phLiq(ph) !== liq || FL.dying.has(i)) continue; const k = i * 4;
         if (Math.abs(rb.pos[k] + o[0] - c[0]) > 0.6 || Math.abs(rb.pos[k + 1] + o[1] - c[1]) > 0.6 || Math.abs(rb.pos[k + 2] + o[2] - c[2]) > 0.6) continue;
         flKill(i); n++; }
     }
-    return { liq, ml: n * ML_PER_PART };
+    return { liq, ml: n * mlPerPart() };
   }
   // agua o lava quieta: 1 L cada décima de segundo; el mar no se gasta; un lago pierde 1/8 de bloque cada 1,25 L
   const x = Math.floor(c[0]), y = Math.floor(c[1]), z = Math.floor(c[2]); const take = Math.min(1000, room);
@@ -319,20 +319,25 @@ function bucketCollect(w, p, dir, cont, room) {
   }
   return { liq, ml: take };
 }
-// vacía de golpe todo el contenido delante del jugador
+// líquido de un cubo (1 agua, 2 lava, 4 miel, 5 leche) ↔ fase de sus partículas (3 agua puesta, 2, 4, 5)
+const phLiq = ph => ph === 2 ? 2 : ph === 4 ? 4 : ph === 5 ? 5 : 1;
+const liqPh = liq => liq === 1 ? 3 : liq;
+const LIQ_NAME = { 1: 'Agua', 2: 'Lava', 4: 'Miel', 5: 'Leche' };
+// vacía de golpe todo el contenido delante del jugador; false si no se pudo (miel y leche solo existen como partículas)
 function bucketPourMl(w, p, dir, hit, liq, ml) {
   let d = 1.6; if (hit && !hit.ent && hit.t !== undefined) d = Math.max(0.6, Math.min(d, hit.t - 0.4));
   const cx = p.x + dir[0] * d, cy = p.eye + dir[1] * d - 0.2, cz = p.z + dir[2] * d;
   if (liq === 1 && p.dim === 'nether') { fizz(w, Math.floor(cx), Math.floor(cy), Math.floor(cz)); return; }
   if (typeof flCanSim === 'function' && flCanSim(w, Math.floor(cx), Math.floor(cy), Math.floor(cz))) {
-    const n = Math.max(1, Math.round(ml / ML_PER_PART)); const r = Math.cbrt(n * FL_S * FL_S * FL_S * 3 / (4 * Math.PI)) + 0.05;
+    const n = Math.max(1, Math.round(ml / mlPerPart())); const r = Math.cbrt(n * FL_S * FL_S * FL_S * 3 / (4 * Math.PI)) + 0.05;
     for (let i = 0; i < n; i++) { let ox, oy, oz; do { ox = Math.random() * 2 - 1; oy = Math.random() * 2 - 1; oz = Math.random() * 2 - 1; } while (ox * ox + oy * oy + oz * oz > 1);
-      flSpawn(cx + ox * r, cy + oy * r, cz + oz * r, dir[0] * 2.5 + (p.vx || 0), dir[1] * 2.5 + 0.5, dir[2] * 2.5 + (p.vz || 0), liq === 1 ? 3 : 2); }
-    if (liq === 1) splashFX(w, Math.floor(cx), Math.floor(cy), Math.floor(cz), 4); return;
+      flSpawn(cx + ox * r, cy + oy * r, cz + oz * r, dir[0] * 2.5 + (p.vx || 0), dir[1] * 2.5 + 0.5, dir[2] * 2.5 + (p.vz || 0), liqPh(liq)); }
+    if (liq === 1 || liq === 5) splashFX(w, Math.floor(cx), Math.floor(cy), Math.floor(cz), 4); return true;
   }
+  if (liq >= 4) { showActionMsg((LIQ_NAME[liq] || 'Este líquido') + ' solo existe como fluido continuo (calidad Alta o Ultra con partículas activadas)'); return false; }
   // sin fluido continuo: el volumen va a la celda (octavos)
   const x = Math.floor(cx), y = Math.floor(cy), z = Math.floor(cz); const id = liq === 1 ? ID.water : ID.lava; const cur = w.get(x, y, z);
-  if (cur !== 0 && cur !== id && !(cur > 0 && REG[cur].replace)) return;
+  if (cur !== 0 && cur !== id && !(cur > 0 && REG[cur].replace)) return false;
   const a = Math.max(1, Math.min(8, Math.round(ml / ML_PER_EIGHTH))); const v = cur === id ? liqAmt(w.getMeta(x, y, z)) : 0;
-  setBlockNet(w, x, y, z, id, liqMeta(Math.min(8, v + a), false, false) | (liq === 1 ? 16 : 0));
+  setBlockNet(w, x, y, z, id, liqMeta(Math.min(8, v + a), false, false) | (liq === 1 ? 16 : 0)); return true;
 }

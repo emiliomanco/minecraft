@@ -128,7 +128,7 @@ const GFX_DEF = { shadows: -1, shadowDist: 1, sunRays: true, bloom: 1, dlights: 
 // físicas: cada apartado tiene modo 'real' (físicas de Minecraft 2) o 'vanilla' (como el juego original) y sus valores
 const PHYS_DEF = {
   oceans: { mode: 'real', waves: 1, foam: true, shore: 3 },
-  liquids: { mode: 'real', waterSpeed: 1, lavaVisc: 1, splash: true, continuous: true },
+  liquids: { mode: 'real', waterSpeed: 1, lavaVisc: 1, splash: true, continuous: true, pbfSize: 1 },
   snow: { mode: 'real', depth: 1 },
   ragdoll: { mode: 'real', corpse: 4, knock: 6, fall: 32, max: 20 },
   fire: { mode: 'real', height: 1, spread: 1 },

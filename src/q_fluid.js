@@ -18,7 +18,14 @@ const FL = {
   rb: { pbo: null, sync: null, frame: 0, pos: null, vel: null, n: 0, ready: false, org: [0, 0, 0] },
   ents: new Float32Array(32), entV: new Float32Array(32), nEnt: 0
 };
-const FL_K = 6, FL_S = 1 / FL_K, FL_H = 0.34, FL_R = 0.066, FL_T = 262144, FL_PPB = FL_K * FL_K * FL_K; // 6×6×6 = 216 partículas por bloque, más pequeñas
+// tamaño de las partículas (Opciones → Físicas → Líquidos → Tamaño de PBF): 1 = pequeñas (12×12×12 = 1728 por bloque),
+// 2 = grandes (6×6×6 = 216). FL_PS escala todas las distancias de la simulación y del dibujo; FL_MIN es el mínimo de
+// partículas para que una celda cuente como líquido de verdad
+let FL_K = 6, FL_S = 1 / FL_K, FL_H = 0.34, FL_R = 0.066, FL_PPB = FL_K * FL_K * FL_K, FL_PS = 1, FL_MIN = 5;
+function flSizeCfg() { const o = SETTINGS.physics && SETTINGS.physics.liquids; return o && o.pbfSize === 2 ? 2 : 1; }
+function flApplySize(sz) { FL_K = sz === 2 ? 6 : 12; FL_PS = 6 / FL_K; FL_S = 1 / FL_K; FL_H = 0.34 * FL_PS; FL_R = 0.066 * FL_PS; FL_PPB = FL_K * FL_K * FL_K; FL_MIN = Math.max(5, Math.round(FL_PPB * 0.023)); FL.size = sz; }
+// constantes de los shaders según el tamaño (sustituye la línea de constantes de GLSL_FLHEAD al compilar)
+function flSub(src) { return src.replace('const float H=0.34, H2=0.1156, RAD=0.066;', `const float H=${FL_H.toFixed(6)}, H2=${(FL_H * FL_H).toFixed(8)}, RAD=${FL_R.toFixed(6)}, PS=${FL_PS.toFixed(4)};`); }
 const GLSL_FLHEAD = `#version 300 es
 precision highp float; precision highp int; precision highp sampler2D; precision highp sampler3D;
 uniform sampler2D u_pos, u_vel, u_pred, u_lam, u_key, u_tab; uniform sampler3D u_vox;
@@ -43,6 +50,8 @@ vec3 seaWave(vec2 p){ float A=(0.16+u_rain*0.55)*u_waveK; float h=0.0; vec2 u=ve
   return vec3(v+u_tide,u); }
 ivec2 tc(int i){ return ivec2(i&255, i>>8); }
 int idx(){ ivec2 f=ivec2(gl_FragCoord.xy); return f.y*256+f.x; }
+// clase de líquido de una partícula: 2 lava, 4 miel, 1 el resto (agua, agua puesta y leche se mezclan como un solo líquido)
+int kindOf(float w){ return (w>1.5&&w<2.5)?2:((w>3.5&&w<4.5)?4:1); }
 uint hashc(ivec3 c){ uvec3 u=uvec3(c+ivec3(4096)); return ((u.x*73856093u)^(u.y*19349663u)^(u.z*83492791u))&262143u; }
 float Wp(float r2){ float d=H2-r2; return d>0.0 ? u_kp*d*d*d : 0.0; }
 vec3 gradW(vec3 r, float rl){ if(rl<1e-5 || rl>=H) return vec3(0.0); float d=H-rl; return u_ks*d*d*r/rl; }
@@ -105,7 +114,7 @@ void main(){
         ivec3 m=c+ivec3(dx/2,0,dz/2); if((abs(dx)==2||abs(dz)==2) && wallAt(m,x.y)) continue;
         if(abs(dx)==1&&abs(dz)==1 && wallAt(c+ivec3(dx,0,0),x.y) && wallAt(c+ivec3(0,0,dz),x.y)) continue; // esquina cerrada
         if(supH(n)<h0-0.1){ best=dd; tgt=vec2(n.xz)+0.5; } }
-      if(best<1e8){ vec2 d=tgt-x.xz; float l=length(d); if(l>1e-3){ float acc=P.w>1.5&&P.w<2.5?2.2:7.0; v.xz+=d/l*acc*u_dt; } }
+      if(best<1e8){ vec2 d=tgt-x.xz; float l=length(d); if(l>1e-3){ float acc=P.w>1.5&&P.w<2.5?2.2:(P.w>3.5&&P.w<4.5?0.7:7.0); v.xz+=d/l*acc*u_dt; } }
     } }
   // orilla: junto a (o sobre) el mar, el oleaje arrastra el agua adelante y atrás
   { ivec3 c=ivec3(floor(x)); bool sea=false; for(int k=0;k<6;k++){ ivec3 o2=k==0?ivec3(0,-1,0):k==1?ivec3(1,-1,0):k==2?ivec3(-1,-1,0):k==3?ivec3(0,-1,1):k==4?ivec3(0,-1,-1):ivec3(0,0,0); if(vox(c+o2)==27.0) sea=true; }
@@ -115,8 +124,9 @@ void main(){
   float ph=P.w;
   if(x1.x<1.0||x1.z<1.0||x1.y<1.0||x1.x>float(u_vdim.x)-1.0||x1.z>float(u_vdim.z)-1.0||x1.y>float(u_vdim.y)-1.0) ph+=30.0;
   else { float vv=vox(ivec3(floor(x1))); float fy=fract(x1.y);
-    if(vv>26.5 && vv<27.5){ vec3 sw=seaWave(x1.xz+u_org.xz); if(fy<0.92+sw.x-0.04) ph+=10.0; }
-    else if(vv>16.5 && vv<25.5){ float a=vv-16.0; float lv=a>8.5?1.0:a/8.0*0.92; if(fy<lv-0.04) ph+=10.0; }
+    bool wl=ph<3.5; // la miel y la leche no tienen versión normal: no se suman al agua quieta (se hunden en ella); la lava sí las quema
+    if(wl && vv>26.5 && vv<27.5){ vec3 sw=seaWave(x1.xz+u_org.xz); if(fy<0.92+sw.x-0.04) ph+=10.0; }
+    else if(wl && vv>16.5 && vv<25.5){ float a=vv-16.0; float lv=a>8.5?1.0:a/8.0*0.92; if(fy<lv-0.04) ph+=10.0; }
     else if(vv>32.5 && vv<41.5){ float a=vv-32.0; float lv=a>8.5?1.0:a/8.0*0.92; if(fy<lv-0.04) ph+=20.0; } }
   o=vec4(x1,ph);
 }`;
@@ -160,28 +170,29 @@ void main(){ int i=idx(); vec4 Pi=texelFetch(u_pred,tc(i),0); if(Pi.w<0.5||Pi.w>
         if(rl<1e-4){ r=vec3(fract(float(i)*0.618)-0.5,0.3,fract(float(j)*0.618)-0.5)*1e-3; rl=length(r); }
         dp+=(li+lj+sc)*gradW(r,rl); } }
   NEIGH_END
-  float l=length(dp); if(l>0.1) dp*=0.1/l;
+  float l=length(dp); if(l>0.1*PS) dp*=0.1*PS/l;
   o=vec4(sweep(Pi.xyz,Pi.xyz+dp),Pi.w); }`;
 // 7) velocidad, viscosidad XSPH, cohesión, rozamiento y temperatura (escribe POS y VEL)
 const FS_FLVEL = GLSL_FLHEAD + `layout(location=0) out vec4 oP; layout(location=1) out vec4 oV;
 void main(){ int i=idx(); vec4 Pi=texelFetch(u_pred,tc(i),0); vec4 Xi=texelFetch(u_pos,tc(i),0); vec4 Vi=texelFetch(u_vel,tc(i),0);
   if(Pi.w<0.5){ oP=Xi; oV=Vi; return; }
   if(Pi.w>=10.0){ oP=Pi; oV=Pi.w>=30.0?Vi:vec4(0.0,0.0,0.0,Vi.w); return; } // las que salen de la región conservan su velocidad (la CPU sigue su trayectoria)
-  float base=Pi.w; bool lava=base>1.5&&base<2.5;
+  float base=Pi.w; bool lava=base>1.5&&base<2.5; bool honey=base>3.5&&base<4.5; int kd=kindOf(base);
   vec3 vi=(Pi.xyz-Xi.xyz)/u_dt; vec3 acc=vec3(0.0); float ws=0.0; vec3 cen=vec3(0.0); float cn=0.0; float Ts=0.0;
   NEIGH_BEGIN(Pi.xyz)
     if(j!=i){ vec4 Pj=texelFetch(u_pred,tc(j),0); vec3 r=Pi.xyz-Pj.xyz; float r2=dot(r,r);
-      if(r2<H2 && (Pj.w>1.5&&Pj.w<2.5)==lava){ vec4 Xj=texelFetch(u_pos,tc(j),0); vec3 vj=(Pj.xyz-Xj.xyz)/u_dt; float w=Wp(r2);
+      if(r2<H2 && kindOf(Pj.w)==kd){ vec4 Xj=texelFetch(u_pos,tc(j),0); vec3 vj=(Pj.xyz-Xj.xyz)/u_dt; float w=Wp(r2);
         acc+=(vj-vi)*w; ws+=w; cen+=Pj.xyz; cn+=1.0; Ts+=texelFetch(u_vel,tc(j),0).w*w; } }
   NEIGH_END
-  vi+=acc*(lava?0.55:0.02);
-  if(cn>0.0){ vec3 tc2=cen/cn-Pi.xyz; float surf=clamp(1.0-cn/26.0,0.0,1.0); vi+=tc2*(lava?9.0:4.0)*surf*u_dt; } // cohesión (tensión superficial)
+  vi+=acc*(lava?0.55:(honey?0.9:0.02)); // viscosidad: la miel muchísimo, la lava bastante, agua y leche casi nada
+  if(cn>0.0){ vec3 tc2=(cen/cn-Pi.xyz)/PS; float surf=clamp(1.0-cn/26.0,0.0,1.0); vi+=tc2*(lava?9.0:(honey?14.0:4.0))*surf*u_dt; } // cohesión (tensión superficial)
   // rozamiento con el suelo (la lava se pega, el agua resbala)
   vec2 sb=span(vox(ivec3(floor(Pi.xyz-vec3(0.0,RAD+0.04,0.0))))); float fb=floor(Pi.y-RAD-0.04);
   bool ground=sb.y>sb.x && Pi.y-RAD-0.04<fb+sb.y;
-  if(ground) vi.xz*=lava?0.80:(cn<7.0?0.86:0.985); // una película fina se queda pegada (la línea de contacto frena el charco)
+  if(ground) vi.xz*=lava?0.80:(honey?0.55:(cn<7.0?0.86:0.985)); // la miel se pega al suelo // una película fina se queda pegada (la línea de contacto frena el charco)
   float T=Vi.w;
   if(lava){ vi*=0.985; if(ws>0.0) T=mix(T,Ts/ws,0.15); T=clamp(T-u_dt*(cn<16.0?0.03:0.002),0.35,1.0); }
+  else if(honey){ vi*=0.93; T=0.0; } // espesa y pegajosa: sin espuma
   else { float sp=length(vi); T=max(T*0.96,clamp((sp-3.0)*0.12,0.0,1.0)*clamp(1.0-cn/22.0,0.0,1.0)); }
   float sp=length(vi); if(sp>20.0) vi*=20.0/sp;
   if(sp<0.45) vi*=mix(0.82,1.0,sp/0.45); // temblor del solver en reposo: se apaga (el líquido quieto queda quieto)
@@ -212,8 +223,11 @@ precision highp float; in vec2 v_q; in vec4 v_c; out vec4 o; void main(){ float 
 function flInit() {
   const gl = R.gl; FL.gl = gl; FL.ok = false;
   if (!gl.getExtension('EXT_color_buffer_float')) return;
-  FL.N = R.q >= 3 ? 262144 : 131072; FL.rows = FL.N / FL.W;
-  const P = {}; const C = (n, vs, fs) => { P[n] = compileRaw(vs, fs); };
+  flApplySize(flSizeCfg());
+  // capacidad: con partículas pequeñas, 4 veces más (hasta lo que permita el tamaño máximo de textura)
+  const maxRows = Math.min(8192, gl.getParameter(gl.MAX_TEXTURE_SIZE)); const want = (R.q >= 3 ? 262144 : 131072) * (FL.size === 1 ? 4 : 1);
+  FL.N = Math.min(want, maxRows * FL.W); FL.rows = FL.N / FL.W;
+  const P = {}; const C = (n, vs, fs) => { P[n] = compileRaw(flSub(vs), flSub(fs)); };
   try {
     C('pred', VS_FLQUAD, FS_FLPRED); C('key', VS_FLQUAD, FS_FLKEY); C('sort', VS_FLQUAD, FS_FLSORT); C('tab', VS_FLTAB, FS_FLTAB);
     C('lam', VS_FLQUAD, FS_FLLAM); C('del', VS_FLQUAD, FS_FLDEL); C('vel', VS_FLQUAD, FS_FLVEL); C('spawn', VS_FLSPAWN, FS_FLSPAWN);
@@ -256,6 +270,17 @@ function flInit() {
   FL.rb.sync = null; FL.rb.ready = false; FL.rb.pos = new Float32Array(FL.N * 4); FL.rb.vel = new Float32Array(FL.N * 4);
   FL.ok = true;
   flRInit(); FL.R.gl = gl; // compilar ya los shaders del render (la primera compilación tarda)
+}
+// cambio de tamaño de partícula: se liberan los recursos de la GPU, se borran las partículas y se vuelve a crear todo
+function flResize() {
+  const gl = R.gl;
+  const T = [...(FL.pos || []), ...(FL.vel || []), ...(FL.pred || []), ...(FL.key || []), FL.lam, FL.tab, FL.scaleTex, FL.vox]; for (const t of T) if (t) gl.deleteTexture(t);
+  const F = [...(FL.fbPV || []), ...(FL.fbPred || []), ...(FL.fbKey || []), FL.fbLam, FL.fbTab, ...(FL.fbPos || []), ...(FL.fbVel || [])]; for (const f of F) if (f) gl.deleteFramebuffer(f);
+  for (const b of [FL.rb.pbo, FL.rb.pbo2]) if (b) gl.deleteBuffer(b);
+  if (FL.P) for (const k in FL.P) if (FL.P[k] && FL.P[k].p) gl.deleteProgram(FL.P[k].p);
+  FL.hi = 0; FL.alive = 0; FL.ptr = 0; FL.spawnQ.length = 0; FL.killQ.length = 0; FL.occ = new Map(); FL.calm = new Map(); FL.acc2 = new Map(); FL.full = new Set();
+  FL.parked = []; FL.parkCells = new Map(); FL.absAcc = [0, 0, 0, 0, 0, 0]; FL.exitAcc = [0, 0, 0, 0, 0, 0]; FL.world = null; FL.pending = null;
+  flInit();
 }
 // ---------------------------------------------------------------- campo de colisión
 let FLVC = null;
@@ -390,6 +415,7 @@ function flRecenter(w, px, py, pz, force) {
 function flUpdate(dt, w) {
   const gl = R.gl; if (!gl || !G.player) return;
   if (FL.gl !== gl) flInit();
+  else if (FL.ok && FL.size !== flSizeCfg()) flResize(); // cambió el tamaño de las partículas: se rehace la simulación
   if (!FL.ok || R.q < 2) return;
   flOceanFillTick();
   const p = G.player; FL.frame++; flRecenter(w, p.x, p.y, p.z, false);
@@ -464,10 +490,10 @@ out vec2 v_q; out vec3 v_ce; out float v_ph; out float v_t; out float v_s; out f
 void main(){ int i=gl_InstanceID; vec4 P=texelFetch(u_pos,ivec2(i&255,i>>8),0); vec4 V=texelFetch(u_vel,ivec2(i&255,i>>8),0);
   vec2 q=vec2(float(gl_VertexID&1),float(gl_VertexID>>1))*2.0-1.0; v_q=q;
   float ph=mod(P.w,10.0); if(P.w<0.5 || P.w>=30.0){ gl_Position=vec4(2.0,2.0,2.0,1.0); return; }
-  v_ph=ph>1.5&&ph<2.5?2.0:1.0; v_t=V.w; v_s=length(V.xyz);
+  v_ph=ph>1.5&&ph<2.5?2.0:(ph>3.5&&ph<4.5?3.0:(ph>4.5&&ph<5.5?4.0:1.0)); v_t=V.w; v_s=length(V.xyz); // 1 agua, 2 lava, 3 miel, 4 leche
   // gotas sueltas (poca densidad alrededor): más pequeñas y blancas, como salpicaduras
   float rho=texelFetch(u_lam,ivec2(i&255,i>>8),0).y; float iso=1.0-smoothstep(0.22,0.36,rho); if(P.w>=10.0) iso=0.0;
-  v_t=max(v_t,iso*(v_ph>1.5?0.0:0.8));
+  v_t=max(v_t,iso*(v_ph<1.5?0.8:0.0));
   float scl=texelFetch(u_scl,ivec2(i&255,i>>8),0).r; // al desaparecer: se encoge y se hunde en el suelo
   vec3 ce=mat3(u_view)*(P.xyz+u_off-vec3(0.0,(1.0-scl)*0.12,0.0)); v_ce=ce; float r=u_rad*(v_ph>1.5?1.15:1.0)*mix(1.0,0.45,iso)*scl; v_r=r; if(scl<0.02){ gl_Position=vec4(2.0,2.0,2.0,1.0); return; }
   gl_Position=u_proj*vec4(ce+vec3(q*r*1.05,0.0),1.0); }`;
@@ -488,7 +514,7 @@ float linD(float d){ float z=d*2.0-1.0; return 2.0*u_near*u_far/(u_far+u_near-z*
 void main(){ float r2=dot(v_q,v_q); if(r2>1.0) discard; float r=v_r;
   float sd=linD(texture(u_depthCopy,gl_FragCoord.xy/u_res).r); if(-v_ce.z-r>sd) discard;
   float th=2.0*r*sqrt(1.0-r2)*0.6; // la red de partículas deja huecos: cada esfera aporta algo menos que su cuerda
-  o=v_ph>1.5?vec4(0.0,th,th*v_t,th*min(v_s,4.0)*0.25):vec4(th,0.0,0.0,th*v_t); }`;
+  o=(v_ph>1.5&&v_ph<2.5)?vec4(0.0,th,th*v_t,th*min(v_s,4.0)*0.25):vec4(th,0.0,0.0,th*(v_ph<1.5?v_t:0.0)); }`;
 // suavizado bilateral separable (en profundidad lineal; respeta saltos grandes)
 const FS_FLSMOOTH = `#version 300 es
 precision highp float; precision highp sampler2D;
@@ -516,7 +542,7 @@ void main(){
     for(int k=0;k<4;k++){ ivec2 o2=ivec2(k&1,k>>1); float dk=texelFetch(u_fd,clamp(b+o2,ivec2(0),sz-1),0).x; if(dk<=0.0||abs(dk-d)>0.25) continue;
       float w=(o2.x==1?f.x:1.0-f.x)*(o2.y==1?f.y:1.0-f.y)+1e-4; s+=dk*w; ws+=w; } if(ws>0.0) db=s/ws; }
   vec4 Th=texture(u_ft,gl_FragCoord.xy/u_res); float tw=Th.r, tl=Th.g;
-  bool lava=F.y>1.5; if((lava?tl:tw)<0.004 && !(u_camIn>0.5 && !lava)) discard;
+  bool lava=F.y>1.5&&F.y<2.5, honey=F.y>2.5&&F.y<3.5, milk=F.y>3.5; if((lava?tl:tw)<0.004 && !(u_camIn>0.5 && !lava)) discard;
   // normal: diferencias con el vecino de menor salto en cada eje
   vec3 P=eyeAt(hp,d);
   float dxp=texelFetch(u_fd,min(hp+ivec2(1,0),sz-1),0).x, dxm=texelFetch(u_fd,max(hp-ivec2(1,0),ivec2(0)),0).x;
@@ -534,11 +560,20 @@ void main(){
     // con la escena de detrás desviada y reflexión total interna al mirar de lado; la niebla submarina hace el resto
     vec2 suv=gl_FragCoord.xy/u_res; vec3 behind=texture(u_sceneCopy,clamp(suv+Ne.xy*0.03,0.001,0.999)).rgb;
     float tir=smoothstep(0.45,0.2,NdV); col=mix(behind,u_fogCol*1.5+u_amb*0.04*u_camSky,tir);
+  } else if(milk){
+    // leche: blanca y opaca (casi todo se dispersa), con un brillo suave
+    vec3 alb=vec3(0.93,0.93,0.9);
+    vec3 dif=alb*(Lsun*max(dot(N,u_sunDir),0.0)*0.85+u_amb*(0.6+0.4*N.y)*u_camSky+dynLights(wp)*0.4);
+    vec3 R=reflect(V,N); if(R.y<0.02) R.y=0.02+abs(R.y)*0.2; R=normalize(R); float fres=0.03+0.97*pow(1.0-NdV,5.0);
+    col=mix(dif,skyColor(R)*mix(0.03,1.0,u_camSky*u_camSky),fres*0.35);
+    vec3 Hm=normalize(u_sunDir-V); col+=Lsun*pow(max(dot(N,Hm),0.0),60.0)*0.25;
+    alpha=smoothstep(0.004,0.03,tw); col=mix(texture(u_sceneCopy,gl_FragCoord.xy/u_res).rgb,col,alpha);
   } else if(!lava){
-    vec2 suv=gl_FragCoord.xy/u_res; vec2 off=Ne.xy*clamp(tw,0.0,1.2)*0.035; // refracción (IOR 1,333): desvía según la normal y el grosor
+    vec2 suv=gl_FragCoord.xy/u_res; vec2 off=Ne.xy*clamp(tw,0.0,1.2)*(honey?0.055:0.035); // refracción (IOR 1,333; la miel desvía más): según la normal y el grosor
     vec3 behind=texture(u_sceneCopy,clamp(suv+off,0.001,0.999)).rgb;
-    vec3 sA=vec3(0.60,0.16,0.19), sS=vec3(0.014,0.024,0.017), sT=sA+sS;
-    vec3 Tv=exp(-sT*tw*1.3);
+    // agua: absorbe sobre todo el rojo; miel: absorbe mucho el azul y dispersa ámbar (dorada y espesa)
+    vec3 sA=honey?vec3(0.22,0.7,2.3):vec3(0.60,0.16,0.19), sS=honey?vec3(0.32,0.2,0.05):vec3(0.014,0.024,0.017), sT=sA+sS;
+    vec3 Tv=exp(-sT*tw*(honey?2.4:1.3));
     vec3 lightIn=u_amb*0.9*u_camSky+Lsun*0.8+dynLights(wp)*0.3;
     vec3 refr=behind*Tv+lightIn*(sS/sT)*(1.0-Tv)*1.15;
     vec3 R=reflect(V,N); if(R.y<0.02) R.y=0.02+abs(R.y)*0.2; R=normalize(R);
@@ -601,7 +636,7 @@ function flRender() {
   gl.bindFramebuffer(gl.READ_FRAMEBUFFER, R.fbo.scene.fb); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, R.fbo.copy.fb);
   const K = FL.rskip || 0;
   if (!(K & 16)) gl.blitFramebuffer(0, 0, R.w, R.h, 0, 0, R.w, R.h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
-  const off = [FL.org[0] - R.cam[0], FL.org[1] - R.cam[1], FL.org[2] - R.cam[2]]; const rad = 0.13;
+  const off = [FL.org[0] - R.cam[0], FL.org[1] - R.cam[1], FL.org[2] - R.cam[2]]; const rad = 0.13 * FL_PS;
   gl.bindVertexArray(FL.vao); gl.disable(gl.CULL_FACE);
   const sphU = P => { gl.useProgram(P.p); gl.uniformMatrix4fv(P.u.u_view, false, R.view); gl.uniformMatrix4fv(P.u.u_proj, false, R.proj); gl.uniform3f(P.u.u_off, off[0], off[1], off[2]); gl.uniform1f(P.u.u_rad, rad);
     flBindTex(P, 'u_pos', 0, FL.pos[FL.cur]); flBindTex(P, 'u_vel', 1, FL.vel[FL.cur]); flBindTex(P, 'u_lam', 2, FL.lam); flBindTex(P, 'u_scl', 9, FL.scaleTex); flBindTex(P, 'u_depthCopy', 3, R.fbo.copy.depth);
@@ -679,6 +714,7 @@ FL.frame = 0; FL.spawnFrame = null; FL.calm = new Map(); FL.acc2 = new Map(); FL
 FL.absAcc = [0, 0, 0]; FL.absAt = [null, null, null];
 function flAbsorb(w, x, y, z, base, flag) {
   const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z);
+  if (base >= 4) { if (flag === 2 && Math.random() < 0.05) fizz(w, bx, by, bz); return; } // miel y leche: la lava las quema (no tienen versión normal)
   const lavaP = base === 2; const into = flag === 1 ? 1 : 2; // líquido quieto en el que entró
   const isInto = b => b > 0 && REG[b] && (REG[b].liquid === into || (into === 1 && REG[b].inWater));
   // la celda donde quedó (o una vecina, si la lectura llegó un poco desfasada)
@@ -743,9 +779,9 @@ function flAfterReadback() {
     if (flag === 1 || flag === 2) { flAbsorb(w, x, y, z, base, flag); flKill(i); if (flag === 1 && Math.random() < 0.3 && typeof ripImpulse === 'function') { const sp = Math.hypot(V[k4], V[k4 + 1], V[k4 + 2]); ripImpulse(x, z, 0.3 + sp * 0.04, Math.min(1.4, 0.15 + sp * 0.18)); } continue; }
     if (flag >= 3) { flPark(w, x, y, z, V[k4], V[k4 + 1], V[k4 + 2], base, V[k4 + 3]); flKill(i); continue; } // salió de la región: sigue como partícula fuera (nunca líquido normal)
     const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z); const key = FLK(bx, by, bz);
-    let c = occ.get(key); if (!c) { c = { x: bx, y: by, z: bz, nw: 0, nl: 0, np: 0, top: -1e9, vx: 0, vy: 0, vz: 0, vmax: 0, idx: [] }; occ.set(key, c); }
+    let c = occ.get(key); if (!c) { c = { x: bx, y: by, z: bz, nw: 0, nl: 0, np: 0, nh: 0, nm: 0, top: -1e9, vx: 0, vy: 0, vz: 0, vmax: 0, idx: [] }; occ.set(key, c); }
     const vx = V[k4], vy = V[k4 + 1], vz = V[k4 + 2]; const sp = Math.hypot(vx, vy, vz);
-    if (base === 2) c.nl++; else { c.nw++; if (base === 3) c.np++; }
+    if (base === 2) c.nl++; else if (base === 4) c.nh++; else { c.nw++; if (base === 3) c.np++; if (base === 5) c.nm++; } // la leche cuenta como agua (se nada en ella)
     if (y > c.top) c.top = y; c.vx += vx; c.vy += vy; c.vz += vz; c.vs = (c.vs || 0) + sp; if (sp > c.vmax) c.vmax = sp; c.idx.push(i);
   }
   for (const c of occ.values()) { const m = c.idx.length; c.vx /= m; c.vy /= m; c.vz /= m; }
@@ -863,7 +899,7 @@ function flParkTick(w, dt) {
         const nx = q.x + q.vx * h, ny = q.y + q.vy * h, nz = q.z + q.vz * h; const bx = Math.floor(nx), by = Math.floor(ny), bz = Math.floor(nz);
         const b = w.get(bx, by, bz);
         if (b < 0) { flParkSettle(q, Math.floor(q.x), Math.floor(q.y), Math.floor(q.z)); break; } // chunk sin cargar: se queda ahí
-        if (b > 0 && REG[b].liquid) { flAbsorb(w, nx, ny, nz, q.ph, REG[b].liquid === 1 ? 1 : 2); alive = false; break; }
+        if (b > 0 && REG[b].liquid && !(q.ph >= 4 && REG[b].liquid === 1)) { flAbsorb(w, nx, ny, nz, q.ph, REG[b].liquid === 1 ? 1 : 2); alive = false; break; } // miel y leche atraviesan el agua (se hunden)
         if (b > 0 && REG[b].solid) {
           const fb = w.get(Math.floor(q.x), by, Math.floor(q.z)); // ¿cae encima (el bloque está debajo) o choca de lado?
           if (q.vy < 0 && fb > 0 && REG[fb].solid && Math.floor(q.y) > by) { flParkSettle(q, Math.floor(q.x), by + 1, Math.floor(q.z)); break; }
@@ -880,21 +916,31 @@ function flParkTick(w, dt) {
 // consultas para la física de las entidades (de la última lectura)
 // ¿celda con líquido de verdad? Pocas partículas sueltas sin nada debajo (gotas sobre la cabeza, salpicaduras) no cuentan
 function flCellWet(world, c) {
-  const n = c.idx.length; if (n < 5) return false; if (n >= FL_PPB * 0.5) return true;
+  const n = c.idx.length; if (n < FL_MIN) return false; if (n >= FL_PPB * 0.5) return true;
   const b = world.get(c.x, c.y - 1, c.z); if (b < 0 || (b > 0 && (REG[b].solid || REG[b].liquid))) return true;
   const d = FL.occ.get(FLK(c.x, c.y - 1, c.z)); return !!d && d.idx.length >= FL_PPB * 0.3;
 }
+// líquido que domina en la celda: 2 lava, 4 miel, 1 agua (o leche)
+function flKind(c) { if (c.nh > c.nw && c.nh > c.nl) return 4; return c.nl > c.nw ? 2 : 1; }
 function flLiquidAt(world, x, y, z) {
   if (world !== FL.world || !FL.occ.size) return 0; const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z); const c = FL.occ.get(FLK(bx, by, bz));
-  if (c && y < c.top + 0.12 && flCellWet(world, c)) return c.nl > c.nw ? 2 : 1;
-  const u = FL.occ.get(FLK(bx, by + 1, bz)); if (u && c && c.idx.length >= 5 && flCellWet(world, u) && flCellWet(world, c)) return u.nl > u.nw ? 2 : 1; // la celda de arriba también tiene: estamos dentro
-  return 0;
+  let k = 0;
+  if (c && y < c.top + 0.12 && flCellWet(world, c)) k = flKind(c);
+  else { const u = FL.occ.get(FLK(bx, by + 1, bz)); if (u && c && c.idx.length >= FL_MIN && flCellWet(world, u) && flCellWet(world, c)) k = flKind(u); } // la celda de arriba también tiene: estamos dentro
+  return k === 4 ? 0 : k; // en la miel no se nada (frena: flHoneyAt)
 }
+// ¿hay miel (o leche) en ese punto? (para frenar a las entidades / anular efectos)
+function flTypeAt(world, x, y, z, key) {
+  if (typeof FL === 'undefined' || world !== FL.world || !FL.occ || !FL.occ.size) return false; const c = FL.occ.get(FLK(Math.floor(x), Math.floor(y), Math.floor(z)));
+  return !!c && c[key] >= Math.max(3, FL_MIN * 0.5) && y < c.top + 0.15;
+}
+function flHoneyAt(world, x, y, z) { return flTypeAt(world, x, y, z, 'nh'); }
+function flMilkAt(world, x, y, z) { return flTypeAt(world, x, y, z, 'nm'); }
 function flSurfIn(world, bx, by, bz) {
-  if (world !== FL.world) return 0; const c = FL.occ.get(FLK(bx, by, bz)); if (!c || c.idx.length < 5) return 0;
-  const u = FL.occ.get(FLK(bx, by + 1, bz)); if (u && u.idx.length >= 5) return 1; return clamp(c.top + 0.12 - by, 0, 1);
+  if (world !== FL.world) return 0; const c = FL.occ.get(FLK(bx, by, bz)); if (!c || c.idx.length < FL_MIN) return 0;
+  const u = FL.occ.get(FLK(bx, by + 1, bz)); if (u && u.idx.length >= FL_MIN) return 1; return clamp(c.top + 0.12 - by, 0, 1);
 }
-function flFlowAt(world, bx, by, bz) { if (world !== FL.world) return null; const c = FL.occ.get(FLK(bx, by, bz)); return c && c.idx.length >= 5 ? [c.vx, c.vy, c.vz] : null; }
+function flFlowAt(world, bx, by, bz) { if (world !== FL.world) return null; const c = FL.occ.get(FLK(bx, by, bz)); return c && c.idx.length >= FL_MIN ? [c.vx, c.vy, c.vz] : null; }
 function flDepositAll_old(w) {
   if (!FL.ok || w !== FL.world || !FL.rb.ready) return; FL.calm = new Map(); const occ = FL.occ; const seen = new Set();
   for (const [k0, c0] of occ) { if (seen.has(k0) || !c0.idx.length) continue; const comp = []; const q = [c0]; seen.add(k0); const lava = c0.nl > c0.nw;

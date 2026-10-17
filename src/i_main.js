@@ -621,6 +621,7 @@ function optPhysics(ui) {
   ui.slider('Velocidad del agua', ...PK('liquids', 'waterSpeed'), 0.5, 2, 0.05, pct, 'Lo rápido que fluye y se nivela el agua.');
   ui.slider('Viscosidad de la lava', ...PK('liquids', 'lavaVisc'), 0.5, 3, 0.05, pct, 'Más viscosidad = la lava avanza más despacio.');
   ui.cycle('Fluido continuo (partículas)', ...PK('liquids', 'continuous'), [true, false], ['Sí', 'No'], 'Calidad Alta o Ultra: el agua y la lava se mueven como fluido real (partículas en la GPU) en vez de por celdas.', { off: v });
+  ui.cycle('Tamaño de PBF', ...PK('liquids', 'pbfSize'), [1, 2], ['1 (pequeñas)', '2 (grandes)'], 'Tamaño de las partículas del fluido continuo. 1: la mitad de tamaño, con 8 veces más partículas por bloque (más detalle, más carga para la GPU). 2: el tamaño anterior. Al cambiarlo se borran las partículas que haya.', { off: v });
   ui.cycle('Salpicaduras', ...PK('liquids', 'splash'), [true, false], ['Sí', 'No'], 'Gotas al caer agua y al moverse los líquidos.', { off: v });
   ui.sec('Nieve');
   v = mode('snow', 'la nieve está suelta y se compacta solo donde pisan el jugador y los mobs (huellas y rastros).', 'capas de nieve sólidas, sin huellas.');
