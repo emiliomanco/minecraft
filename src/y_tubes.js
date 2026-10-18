@@ -13,7 +13,7 @@ const PEN = { tube: null, lastUse: 0, eraseT: 0, sndT: 0 };
 function tubeR(n) { return n * (typeof FL_S === 'number' ? FL_S : 1 / 12) / 2; } // radio interior (cambia con el tamaño de PBF)
 function tubeWall(r) { return 0.03 + 0.12 * r; } // grosor de la pared (el mismo que usa el shader)
 function tubeMode(s) { return s && TUBE_MODES.includes(s.mode) ? s.mode : 'fino'; }
-function tubeChanged(t) { TUBES.ver++; if (t) tubeFreeMesh(t); }
+function tubeChanged(t) { TUBES.ver++; if (t) { tubeFreeMesh(t); t.extP = null; } }
 const tv = { sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]], mul: (a, s) => [a[0] * s, a[1] * s, a[2] * s], dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], len: a => Math.hypot(a[0], a[1], a[2]), norm: a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; }, cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]] };
 // punto más cercano de un tramo a un punto
 function tubeSegPt(p, a, b) { const ab = tv.sub(b, a); const t = clamp(tv.dot(tv.sub(p, a), ab) / Math.max(tv.dot(ab, ab), 1e-9), 0, 1); return tv.add(a, tv.mul(ab, t)); }
@@ -28,7 +28,7 @@ function tubeSegSeg(p0, p1, q0, q1) {
 // punta de la pluma: delante de los ojos; si hay un bloque más cerca, se queda pegada a su superficie
 function tubeTip(p, r) {
   const dir = lookDir(p); const h = G.hit; let d = 3 + r;
-  if (h && !h.ent && typeof h.t === 'number') d = Math.min(d, h.t - r - tubeWall(r) - 0.03);
+  if (h && !h.ent && typeof h.t === 'number') d = Math.min(d, h.id === ID.tube_adapter ? h.t : h.t - r - tubeWall(r) - 0.03); // en un adaptador, la boca toca su cara
   d = Math.max(0.9, d); return [p.x + dir[0] * d, p.eye + dir[1] * d, p.z + dir[2] * d];
 }
 // clic derecho mantenido: dibujar (o borrar) mientras se mantiene
@@ -84,6 +84,47 @@ function tubeNextMode(p, s) {
   const i = TUBE_MODES.indexOf(tubeMode(s)); s.mode = TUBE_MODES[(i + 1) % TUBE_MODES.length]; p.swing = 0.01;
   const m = s.mode; showActionMsg('Tubificador3000: ' + TUBE_MODE_NAME[m] + (m === 'borrar' ? '' : ' (' + TUBE_N[m] + ' partículas de diámetro)')); showItemName(); playSound('click', p.x, p.eye, p.z, 0.4);
 }
+// ---------------------------------------------------------------- adaptadores de tubos
+// Un adaptador es un bloque sólido en el que, donde le llega un tubo, queda un hueco exacto del tamaño del tubo: si la
+// boca de un tubo toca su cara (o apunta a ella a menos de su radio + pared + 0,6 bloques, sin otro bloque en medio), el
+// tubo se prolonga en línea recta por dentro del adaptador (o de varios seguidos, hasta 16) y su boca pasa a la otra
+// cara. Así el líquido entra y sale del tubo sin escaparse por el hueco entre el tubo y los bloques.
+// devuelve el punto de salida, null si no hay adaptador, undefined si falta un chunk por cargar
+function tubeExt(w, M, d, r) {
+  const gap = r + tubeWall(r) + 0.6; let inA = false;
+  for (let s = 0; s <= gap + 16; s += 0.04) {
+    const x = M[0] + d[0] * s, y = M[1] + d[1] * s, z = M[2] + d[2] * s; const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z);
+    if (!w.chunk(bx >> 4, bz >> 4)) return undefined;
+    const b = w.get(bx, by, bz);
+    if (b === ID.tube_adapter) { inA = true; continue; }
+    if (inA) return [x + d[0] * 0.04, y + d[1] * 0.04, z + d[2] * 0.04]; // salió por la otra cara: ahí queda la boca
+    if (s > gap) return null;
+    if (b > 0 && REG[b] && REG[b].solid && !REG[b].liquid) return null; // otro bloque en medio
+  }
+  return null;
+}
+// dirección de una boca: la de los últimos ~0,6 bloques del tubo (un tramo corto de la pluma puede torcerse)
+function tubeEndDir(P, first) {
+  const n = P.length; const e = first ? P[0] : P[n - 1]; let q = e;
+  for (let k = 1; k < n; k++) { q = first ? P[k] : P[n - 1 - k]; if (tv.len(tv.sub(e, q)) >= 0.6) break; }
+  return tv.norm(tv.sub(e, q));
+}
+// puntos del tubo con sus prolongaciones por los adaptadores (lo que usan la simulación y el dibujo)
+function tubePtsW(t) {
+  if (t.extP) return t.extP; const w = G.worlds && G.worlds[t.dim]; if (!w || t.pts.length < 2) return t.pts;
+  const P = t.pts, r = tubeR(t.n); const a = tubeExt(w, P[0], tubeEndDir(P, true), r), b = tubeExt(w, P[P.length - 1], tubeEndDir(P, false), r);
+  const out = a || b ? [...(a ? [a] : []), ...P, ...(b ? [b] : [])] : P;
+  if (a !== undefined && b !== undefined) t.extP = out; else TUBES.recheck = true; // falta un chunk: volver a mirar
+  return out;
+}
+// un bloque cambió (o pasó un rato: chunks recién cargados, cambios por red o por /set): rehacer las prolongaciones
+function tubeOnBlock(w, x, y, z) { for (const t of TUBES.list) { if (t.dim !== w.dim) continue; const m = tubeR(t.n) + 19; for (const e of [t.pts[0], t.pts[t.pts.length - 1]]) if (e && Math.abs(e[0] - x) < m && Math.abs(e[1] - y) < m && Math.abs(e[2] - z) < m) { TUBES.recheck = true; return; } } }
+function tubeExtCheck() {
+  const now = performance.now(); if (!TUBES.recheck && now - (TUBES.chkT || 0) < 1500) return; TUBES.recheck = false; TUBES.chkT = now;
+  for (const t of TUBES.list) { const old = t.extP; t.extP = null; const P = tubePtsW(t);
+    const same = old && old.length === P.length && old.every((q, i) => q[0] === P[i][0] && q[1] === P[i][1] && q[2] === P[i][2]);
+    if (same) t.extP = old; else { TUBES.ver++; tubeFreeMesh(t); } }
+}
 // ---------------------------------------------------------------- datos para el shader del fluido
 // Tramos de los tubos de la dimensión simulada, en coordenadas de la región, repartidos en celdas de 2 bloques
 const TUBEG = { key: '', n: 0, TD: [1, 1, 1], cell: null, list: null, seg: null };
@@ -93,14 +134,14 @@ function tubeGpuSync() {
   if (!TUBEG.cell || TUBEG.gl !== gl) { TUBEG.gl = gl; TUBEG.cell = gl.createTexture(); TUBEG.list = gl.createTexture(); TUBEG.seg = gl.createTexture(); TUBEG.key = '';
     tubeTex(TUBEG.cell, gl.RG32F, gl.RG, 1, 1, new Float32Array(2)); tubeTex(TUBEG.list, gl.R32F, gl.RED, 1, 1, new Float32Array(1)); tubeTex(TUBEG.seg, gl.RGBA32F, gl.RGBA, 2, 1, new Float32Array(8)); }
   const w = FL.world; if (!w) { TUBEG.n = 0; return; }
-  const key = TUBES.ver + '|' + FL.org.join(',') + '|' + w.dim + '|' + FL_S; if (key === TUBEG.key) return; TUBEG.key = key;
+  tubeExtCheck(); const key = TUBES.ver + '|' + FL.org.join(',') + '|' + w.dim + '|' + FL_S; if (key === TUBEG.key) return; TUBEG.key = key;
   const [vx, vy, vz] = FL.vdim, o = FL.org; const TD = [vx >> 1, vy >> 1, vz >> 1]; const NC = TD[0] * TD[1] * TD[2];
   const segs = []; const lists = new Map(); let over = 0;
   for (const t of TUBES.list) { if (t.dim !== w.dim || t.pts.length < 2) continue; const r = tubeR(t.n), m = r + tubeWall(r) + 0.7; // margen: lo que se mueve una partícula en un paso
-    for (let i = 0; i < t.pts.length - 1; i++) { const a = t.pts[i], b = t.pts[i + 1];
+    const TP = tubePtsW(t); for (let i = 0; i < TP.length - 1; i++) { const a = TP[i], b = TP[i + 1];
       const lo = [0, 1, 2].map(k => Math.min(a[k], b[k]) - m - o[k]), hi = [0, 1, 2].map(k => Math.max(a[k], b[k]) + m - o[k]);
       if (hi[0] < 0 || hi[1] < 0 || hi[2] < 0 || lo[0] > vx || lo[1] > vy || lo[2] > vz) continue;
-      const si = segs.length / 8; const fl = (i === 0 ? 1 : 0) | (i === t.pts.length - 2 ? 2 : 0); // bocas abiertas: el primer y el último tramo
+      const si = segs.length / 8; const fl = (i === 0 ? 1 : 0) | (i === TP.length - 2 ? 2 : 0); // bocas abiertas: el primer y el último tramo
       segs.push(a[0] - o[0], a[1] - o[1], a[2] - o[2], r, b[0] - o[0], b[1] - o[1], b[2] - o[2], fl);
       const c0 = lo.map((v, k) => clamp(Math.floor(v / 2), 0, TD[k] - 1)), c1 = hi.map((v, k) => clamp(Math.floor(v / 2), 0, TD[k] - 1));
       for (let z = c0[2]; z <= c1[2]; z++) for (let y = c0[1]; y <= c1[1]; y++) for (let x = c0[0]; x <= c1[0]; x++) { const c = x + TD[0] * (y + TD[1] * z); let L = lists.get(c); if (!L) lists.set(c, L = []); if (L.length < 48) L.push(si); else over++; }
@@ -128,7 +169,7 @@ void main(){ vec3 n=normalize(v_n); vec3 vd=normalize(-v_p); if(dot(n,vd)<0.0) n
   vec3 col=u_tint.rgb*dif*mix(0.35,1.0,u_day); o=vec4((col+sp*1.5)*u_k, clamp(u_tint.a+0.5*fr+sp*0.6,0.0,0.95)); }`;
 function tubeFreeMesh(t) { const m = t.mesh; if (!m) return; const gl = R.gl; if (gl) { gl.deleteBuffer(m.vb); gl.deleteBuffer(m.ib); gl.deleteVertexArray(m.vao); } t.mesh = null; }
 function tubeMesh(t) {
-  const gl = R.gl; const P = t.pts, n = P.length; if (n < 2) return null; const r = tubeR(t.n), ro = r + tubeWall(r); const K = r >= 0.45 ? 18 : 12; const o = P[0];
+  const gl = R.gl; const P = tubePtsW(t), n = P.length; if (n < 2) return null; const r = tubeR(t.n), ro = r + tubeWall(r); const K = r >= 0.45 ? 18 : 12; const o = P[0];
   const T = P.map((q, i) => tv.norm(tv.sub(P[Math.min(n - 1, i + 1)], P[Math.max(0, i - 1)])));
   let N = Math.abs(T[0][1]) < 0.9 ? tv.norm(tv.cross(T[0], [0, 1, 0])) : tv.norm(tv.cross(T[0], [1, 0, 0]));
   const V = [], I = []; const ring = (c, rad, Nn, B, nrm) => { for (let k = 0; k < K; k++) { const a = k / K * Math.PI * 2; const d = tv.add(tv.mul(Nn, Math.cos(a)), tv.mul(B, Math.sin(a))); const q = tv.add(tv.sub(c, o), tv.mul(d, rad)); const nn = nrm || d; V.push(q[0], q[1], q[2], nn[0], nn[1], nn[2]); } };
@@ -144,7 +185,7 @@ function tubeMesh(t) {
   return { vao, vb, ib, count: I.length, o, r };
 }
 function tubeDraw() {
-  const p = G.player; if (!p || !TUBES.list.length) return; const gl = R.gl;
+  const p = G.player; if (!p || !TUBES.list.length) return; const gl = R.gl; tubeExtCheck();
   if (!R.progs.tube) R.progs.tube = compile(VS_TUBE, FS_TUBE); const P = R.progs.tube; gl.useProgram(P.p);
   gl.uniformMatrix4fv(P.u.u_vp, false, R.vp); const s = ENV.sunReal || [0.3, 0.8, 0.2]; gl.uniform3f(P.u.u_sun, s[0], s[1], s[2]); const day = p.dim === 'overworld' ? (ENV.day ?? 1) : 0.6;
   gl.uniform1f(P.u.u_day, day); gl.uniform1f(P.u.u_k, 0.85 / Math.max(0.15, R.expo || 1)); gl.uniform4f(P.u.u_tint, 0.80, 0.93, 1.0, 0.10);

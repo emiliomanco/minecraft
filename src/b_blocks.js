@@ -257,6 +257,7 @@ for (const [n, dn, tool] of [['oak', 'roble', 'axe'], ['spruce', 'abeto', 'axe']
   defB(n + '_door', 'Puerta de ' + dn, { render: 'shape', shape: 'door', solid: true, trans: 1, tex: n + '_door_bottom', texTop: n + '_door_top', hard: n === 'iron' ? 5 : 3, tool, lvl: n === 'iron' ? 1 : 0, drop: n + '_door' });
   defB(n + '_trapdoor', 'Trampilla de ' + dn, { render: 'shape', shape: 'trapdoor', solid: true, trans: 1, tex: n + '_trapdoor', hard: n === 'iron' ? 5 : 3, tool, lvl: n === 'iron' ? 1 : 0 });
 }
+defB('tube_adapter', 'Adaptador de tubos', { hard: 3, tool: 'pickaxe', tex: 'tube_adapter' }); /* donde le llega un tubo del tubificador queda un hueco exacto del tamaño del tubo */
 defB('glass_pane', 'Panel de cristal', { render: 'shape', shape: 'pane', trans: 1, tex: 'glass', solid: true, hard: 0.3, drop: null });
 defB('oak_fence_gate', 'Puerta de valla de roble', { render: 'shape', shape: 'gate', solid: true, tex: 'oak_planks', hard: 2, tool: 'axe' });
 defB('campfire', 'Fogata', { render: 'box', box: [0, 0, 0, 16, 7, 16], tex: { top: 'campfire_top', side: 'campfire_side', bottom: 'oak_log' }, light: 15, hard: 2, tool: 'axe', drop: 'charcoal', dropN: 2, hurt: 1, campfire: true });
@@ -930,6 +931,7 @@ Object.assign(TEXGEN, {
     for (let i = 0; i < 16; i++) { p.set(i, 0, e); p.set(i, 15, texShade(e, 0.82)); p.set(0, i, e); p.set(15, i, texShade(e, 0.82)); }
     for (let i = 0; i < 5; i++) { p.set(3 + i, 2 + i, [255, 255, 255], 170); p.set(4 + i, 2 + i, [255, 255, 255], 110); } for (let i = 0; i < 3; i++) p.set(10 + i, 9 + i, [255, 255, 255], 140); },
   stone_bricks: p => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const row = y >> 3, ly = y & 7; const lx = (x + (row ? 8 : 0)) & 15; let k = 0.94 + (p.r() - 0.5) * 0.09; if (ly === 7 || lx === 15) k = 0.56; else if (ly === 0 || lx === 0) k = 1.14; else if (ly === 6 || lx === 14) k = 0.8; p.set(x, y, texShade([124, 124, 124], k)); } },
+  tube_adapter: p => { metalBlock(p, [128, 138, 150]); for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) { const d = Math.hypot(x - 7.5, y - 7.5); if (d < 5.6 && d >= 4.2) p.set(x, y, texShade([150, 215, 240], 1.15 - (x + y) / 60)); else if (d < 4.2) p.set(x, y, texShade([40, 46, 56], 0.8 + d * 0.06)); } for (const [x, y] of [[2, 2], [13, 2], [2, 13], [13, 13]]) { p.set(x, y, [205, 210, 220]); p.set(x + 1, y + 1, [70, 76, 86]); } },
   iron_block: p => metalBlock(p, [214, 214, 214], { inner: true }), gold_block: p => metalBlock(p, [246, 208, 62], { streak: true }), diamond_block: p => metalBlock(p, [100, 222, 214], { facets: true }),
   emerald_block: p => metalBlock(p, [60, 200, 110], { facets: true }), lapis_block: p => { metalBlock(p, [40, 78, 188]); p.speck([90, 130, 230], 14, 10); }, redstone_block: p => { metalBlock(p, [176, 24, 14]); p.speck([240, 60, 40], 16, 10); },
   netherite_block: p => metalBlock(p, [72, 64, 68], { inner: true }), copper_block: p => { metalBlock(p, [194, 108, 80]); p.speck([226, 146, 108], 14, 10); },
