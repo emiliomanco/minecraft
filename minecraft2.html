@@ -9202,7 +9202,7 @@ function flApplySize(sz) { FL.iters = sz === 2 ? 3 : 5; /* con partículas peque
 function flSub(src) { return src.replace('const float H=0.34, H2=0.1156, RAD=0.066;', `const float H=${FL_H.toFixed(6)}, H2=${(FL_H * FL_H).toFixed(8)}, RAD=${FL_R.toFixed(6)}, PS=${FL_PS.toFixed(4)};`); }
 const GLSL_FLHEAD = `#version 300 es
 precision highp float; precision highp int; precision highp sampler2D; precision highp sampler3D;
-uniform sampler2D u_pos, u_vel, u_pred, u_lam, u_key, u_tab; uniform sampler3D u_vox;
+uniform sampler2D u_pos, u_vel, u_pred, u_lam, u_key, u_tab, u_shp; uniform sampler3D u_vox;
 uniform ivec3 u_vdim; uniform int u_M; uniform float u_dt, u_kp, u_ks, u_eps;
 const float H=0.34, H2=0.1156, RAD=0.066;
 uniform float u_time, u_rain, u_tide; uniform vec3 u_org;
@@ -9230,8 +9230,14 @@ uint hashc(ivec3 c){ uvec3 u=uvec3(c+ivec3(4096)); return ((u.x*73856093u)^(u.y*
 float Wp(float r2){ float d=H2-r2; return d>0.0 ? u_kp*d*d*d : 0.0; }
 vec3 gradW(vec3 r, float rl){ if(rl<1e-5 || rl>=H) return vec3(0.0); float d=H-rl; return u_ks*d*d*r/rl; }
 float vox(ivec3 c){ if(c.x<0||c.y<0||c.z<0||c.x>=u_vdim.x||c.y>=u_vdim.y||c.z>=u_vdim.z) return 0.0; return floor(texelFetch(u_vox,c,0).r*255.0+0.5); }
-// parte sólida de la celda en vertical (y0,y1); vacía si y1<=y0
-vec2 span(float v){ if(v==1.0) return vec2(0.0,1.0); if(v>=100.0){ float k=v-100.0; float a=floor(k/9.0); return vec2(a,k-a*9.0)/8.0; } return vec2(1.0,0.0); }
+// formas de bloque (códigos 51..255 de la textura de vóxeles): hasta 3 cajas por celda en 1/16 (puertas, trampillas, cristal,
+// vallas, escaleras, losas...). Fila = código; texel 2k/2k+1 = caja k (mín/máx; .w del primero = nº de cajas), texel 6 = suelo
+vec4 shT(int r,int c){ return floor(texelFetch(u_shp,ivec2(c,r),0)*255.0+0.5); }
+int shpN(float v){ if(v==1.0) return 1; if(v<50.5) return 0; return int(shT(int(v),0).w); }
+void shpBox(float v,int k,out vec3 lo,out vec3 hi){ if(v==1.0){ lo=vec3(0.0); hi=vec3(1.0); return; } int r=int(v); lo=shT(r,k*2).xyz/16.0; hi=shT(r,k*2+1).xyz/16.0; }
+// parte de la celda que hace de suelo o de pared en vertical (y0,y1); vacía si y1<=y0 (formas finas como el cristal o una
+// puerta no cuentan: el líquido las rodea por los huecos)
+vec2 span(float v){ if(v==1.0) return vec2(0.0,1.0); if(v<50.5) return vec2(1.0,0.0); return shT(int(v),6).xy/16.0; }
 // altura del suelo bajo la columna de la celda c (parte sólida de c o tope del bloque de abajo); hueco de 1+ bloques: c.y-1.5
 float supH(ivec3 c){ float v=vox(c); if(v>49.5&&v<50.5) return float(c.y)+1.0; vec2 s=span(v); if(s.y>s.x) return float(c.y)+s.y; float vb=vox(c-ivec3(0,1,0)); if(vb>49.5&&vb<50.5) return float(c.y); vec2 b=span(vb); if(b.y>b.x) return float(c.y-1)+b.y; return float(c.y)-1.5; } // 50 = celda de aire ya llena de partículas
 // ¿la celda tapa el paso a la altura y? (su parte sólida sube por encima)
@@ -9245,13 +9251,15 @@ float sweepAxis(vec3 p, int ax, float to){
   ivec3 A=ivec3(floor(lo)), B=ivec3(floor(hi-vec3(1e-5)));
   float res=to;
   for(int z=A.z; z<=B.z; z++) for(int y=A.y; y<=B.y; y++) for(int x=A.x; x<=B.x; x++){
-    vec2 s=span(vox(ivec3(x,y,z))); if(s.y<=s.x) continue;
-    vec3 bmin=vec3(float(x),float(y)+s.x,float(z)), bmax=vec3(float(x+1),float(y)+s.y,float(z+1));
-    bool ov=true; // solape en los otros dos ejes (en la posición actual)
-    for(int k=0;k<3;k++){ if(k==ax) continue; float c=cmp(p,k); if(c+RAD<=cmp(bmin,k)+1e-5 || c-RAD>=cmp(bmax,k)-1e-5) ov=false; }
-    if(!ov) continue;
-    if(to>from){ float lim=cmp(bmin,ax)-RAD; if(lim>=from-1e-3) res=min(res,lim); }
-    else { float lim=cmp(bmax,ax)+RAD; if(lim<=from+1e-3) res=max(res,lim); }
+    float vv=vox(ivec3(x,y,z)); int nb=shpN(vv);
+    for(int q=0;q<3;q++){ if(q>=nb) break;
+      vec3 bmin, bmax; shpBox(vv,q,bmin,bmax); bmin+=vec3(float(x),float(y),float(z)); bmax+=vec3(float(x),float(y),float(z));
+      bool ov=true; // solape en los otros dos ejes (en la posición actual)
+      for(int k=0;k<3;k++){ if(k==ax) continue; float c=cmp(p,k); if(c+RAD<=cmp(bmin,k)+1e-5 || c-RAD>=cmp(bmax,k)-1e-5) ov=false; }
+      if(!ov) continue;
+      if(to>from){ float lim=cmp(bmin,ax)-RAD; if(lim>=from-1e-3) res=min(res,lim); }
+      else { float lim=cmp(bmax,ax)+RAD; if(lim<=from+1e-3) res=max(res,lim); }
+    }
   }
   return res;
 }
@@ -9268,7 +9276,13 @@ void main(){
   int i=idx(); vec4 P=texelFetch(u_pos,tc(i),0); if(P.w<0.5 || P.w>=10.0){ o=P; return; }
   vec3 v=texelFetch(u_vel,tc(i),0).xyz; vec3 x=P.xyz;
   // dentro de un bloque (lo pusieron encima): salir por arriba
-  { ivec3 c=ivec3(floor(x)); vec2 s=span(vox(c)); if(s.y>s.x && x.y>=float(c.y)+s.x && x.y<float(c.y)+s.y){ x.y=float(c.y)+s.y+RAD+0.01; v=vec3(0.0); } }
+  { ivec3 c=ivec3(floor(x)); float vc=vox(c); int nb=shpN(vc);
+    for(int q=0;q<3;q++){ if(q>=nb) break; vec3 lo, hi; shpBox(vc,q,lo,hi); lo+=vec3(c); hi+=vec3(c);
+      if(!(all(greaterThanEqual(x,lo)) && all(lessThan(x,hi)))) continue;
+      if(hi.x-lo.x>0.99 && hi.z-lo.z>0.99) x.y=hi.y+RAD+0.01; // cubre toda la celda: por arriba
+      else { vec3 dl=x-lo, dh=hi-x; float m=min(min(min(dl.x,dh.x),min(dl.z,dh.z)),dh.y); // forma fina: por la cara más cercana
+        if(m==dh.y) x.y=hi.y+RAD+0.01; else if(m==dl.x) x.x=lo.x-RAD-0.01; else if(m==dh.x) x.x=hi.x+RAD+0.01; else if(m==dl.z) x.z=lo.z-RAD-0.01; else x.z=hi.z+RAD+0.01; }
+      v=vec3(0.0); break; } }
   v.y-=9.81*u_dt;
   for(int e=0;e<8;e++){ if(e>=u_nEnt) break; vec4 E=u_ent[e], EV=u_entV[e];
     float t=clamp(x.y-E.y,-EV.w,EV.w); vec3 c=vec3(E.x,E.y+t,E.z); vec3 d=x-c; float dl=length(d);
@@ -9454,7 +9468,7 @@ function flInit() {
 // cambio de tamaño de partícula: se liberan los recursos de la GPU, se borran las partículas y se vuelve a crear todo
 function flResize() {
   const gl = R.gl;
-  const T = [...(FL.pos || []), ...(FL.vel || []), ...(FL.pred || []), ...(FL.key || []), FL.lam, FL.tab, FL.scaleTex, FL.vox]; for (const t of T) if (t) gl.deleteTexture(t);
+  const T = [...(FL.pos || []), ...(FL.vel || []), ...(FL.pred || []), ...(FL.key || []), FL.lam, FL.tab, FL.scaleTex, FL.vox, FL.shpTex]; for (const t of T) if (t) gl.deleteTexture(t); FL.shpTex = null;
   const F = [...(FL.fbPV || []), ...(FL.fbPred || []), ...(FL.fbKey || []), FL.fbLam, FL.fbTab, ...(FL.fbPos || []), ...(FL.fbVel || [])]; for (const f of F) if (f) gl.deleteFramebuffer(f);
   for (const b of [FL.rb.pbo, FL.rb.pbo2]) if (b) gl.deleteBuffer(b);
   if (FL.P) for (const k in FL.P) if (FL.P[k] && FL.P[k].p) gl.deleteProgram(FL.P[k].p);
@@ -9463,20 +9477,66 @@ function flResize() {
   flInit();
 }
 // ---------------------------------------------------------------- campo de colisión
-let FLVC = null;
+let FLVC = null, FLSH = null;
 function flVoxTable() {
-  FLVC = new Uint8Array(REG.length);
+  FLVC = new Uint8Array(REG.length); FLSH = new Uint8Array(REG.length); // FLSH: 1 forma según meta/vecinos, 2 capa de nieve
   for (let b = 1; b < REG.length; b++) { const d = REG[b]; if (!d) continue;
     if (d.liquid) { FLVC[b] = 0; continue; }
     if (!d.solid) { FLVC[b] = 0; continue; }
-    if (d.render === 'box' && d.box && d.box[0] <= 0 && d.box[2] <= 0 && d.box[3] >= 16 && d.box[5] >= 16) { const y0 = Math.round(d.box[1] / 2), y1 = Math.round(d.box[4] / 2); FLVC[b] = y1 > y0 ? 100 + y0 * 9 + y1 : 0; continue; }
+    if (d.render === 'snow') { FLSH[b] = 2; continue; }
+    if (d.shape) { FLSH[b] = 1; continue; }
+    if (d.box && d.box[0] <= 0 && d.box[2] <= 0 && d.box[3] >= 16 && d.box[5] >= 16) { const y0 = Math.round(d.box[1] / 2), y1 = Math.round(d.box[4] / 2); FLVC[b] = y1 > y0 ? 100 + y0 * 9 + y1 : 0; continue; }
+    if (d.box || d.id === ID.cactus) { FLSH[b] = 1; continue; }
     FLVC[b] = 1; }
 }
-function flVoxVal(cb, cm, i, H) {
+// ---- formas de bloque para la colisión del fluido: las mismas cajas que usan las entidades (puertas, trampillas, cristal,
+// vallas, escaleras...), recortadas a la celda y reducidas a 3 como mucho. Cada forma distinta recibe un código de la
+// textura de vóxeles (181..255 y 51..99) y una fila de la tabla FL.shpTex
+const FLSHP = { map: new Map(), free: null, rows: new Uint8Array(256 * 7 * 4), dirty: true };
+function flShpInit() {
+  const R8 = FLSHP.rows; R8.fill(0);
+  const put = (r, boxes, sp) => { const o = r * 28; R8[o + 3] = boxes.length; boxes.forEach((b, k) => { for (let a = 0; a < 3; a++) { R8[o + k * 8 + a] = b[a]; R8[o + k * 8 + 4 + a] = b[a + 3]; } }); R8[o + 24] = sp[0]; R8[o + 25] = sp[1]; };
+  put(1, [[0, 0, 0, 16, 16, 16]], [0, 16]);
+  for (let a = 0; a <= 8; a++) for (let b = 0; b <= 8; b++) if (b > a) put(100 + a * 9 + b, [[0, a * 2, 0, 16, b * 2, 16]], [a * 2, b * 2]);
+  for (const [key, r] of FLSHP.map) { const v = JSON.parse(key); put(r, v.b, v.s); }
+  FLSHP.put = put; FLSHP.dirty = true;
+}
+const _fsb = [];
+function flShapeCode(w, id, meta, x, y, z) {
+  if (!FLSHP.put) flShpInit();
+  _fsb.length = 0; blockBoxes(id, meta, x, y, z, _fsb, w);
+  let bx = []; for (const b of _fsb) { const q = [b[0] - x, b[1] - y, b[2] - z, b[3] - x, b[4] - y, b[5] - z].map(t => clamp(Math.round(t * 16), 0, 16)); if (q[3] > q[0] && q[4] > q[1] && q[5] > q[2]) bx.push(q); }
+  if (!bx.length) return 0;
+  if (bx.length === 1 && bx[0][0] === 0 && bx[0][2] === 0 && bx[0][3] === 16 && bx[0][5] === 16 && !(bx[0][1] & 1) && !(bx[0][4] & 1)) return bx[0][1] === 0 && bx[0][4] === 16 ? 1 : 100 + bx[0][1] / 2 * 9 + bx[0][4] / 2; // losa: código fijo
+  const occ = new Uint8Array(4096); for (const b of bx) for (let a = b[1]; a < b[4]; a++) for (let c = b[2]; c < b[5]; c++) for (let e = b[0]; e < b[3]; e++) occ[e + 16 * (c + 16 * a)] = 1;
+  while (bx.length > 3) { // juntar el par cuya caja común añade menos volumen que no era sólido
+    let best = null, bw = 1e9;
+    for (let i = 0; i < bx.length; i++) for (let j = i + 1; j < bx.length; j++) { const u = [0, 1, 2].map(a => Math.min(bx[i][a], bx[j][a])).concat([3, 4, 5].map(a => Math.max(bx[i][a], bx[j][a])));
+      let waste = 0; for (let a = u[1]; a < u[4]; a++) for (let c = u[2]; c < u[5]; c++) for (let e = u[0]; e < u[3]; e++) if (!occ[e + 16 * (c + 16 * a)]) waste++;
+      if (waste < bw) { bw = waste; best = [i, j, u]; } }
+    bx = bx.filter((_, k) => k !== best[0] && k !== best[1]); bx.push(best[2]);
+  }
+  // suelo/pared para el flujo por laderas: solo si la forma tapa casi toda la planta de la celda
+  let cov = 0, y0 = 16, y1 = 0; for (let c = 0; c < 16; c++) for (let e = 0; e < 16; e++) { let lo = -1, hi = -1; for (let a = 0; a < 16; a++) if (occ[e + 16 * (c + 16 * a)]) { if (lo < 0) lo = a; hi = a + 1; } if (lo >= 0) { cov++; y0 = Math.min(y0, lo); y1 = Math.max(y1, hi); } }
+  const sp = cov >= 154 ? [y0, y1] : [16, 0];
+  const key = JSON.stringify({ b: bx, s: sp }); let r = FLSHP.map.get(key); if (r !== undefined) return r;
+  if (!FLSHP.free) { FLSHP.free = []; for (let k = 181; k <= 255; k++) FLSHP.free.push(k); for (let k = 51; k <= 99; k++) FLSHP.free.push(k); }
+  if (!FLSHP.free.length) return sp[1] > sp[0] ? 1 : 0; // sin códigos libres (no debería pasar): bloque entero o hueco
+  r = FLSHP.free.shift(); FLSHP.map.set(key, r); FLSHP.put(r, bx, sp); FLSHP.dirty = true; return r;
+}
+function flShpUpload() {
+  const gl = R.gl; if (!FLSHP.put) flShpInit();
+  if (!FL.shpTex) { FL.shpTex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, FL.shpTex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 7, 256, 0, gl.RGBA, gl.UNSIGNED_BYTE, null); for (const p of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, p, gl.NEAREST); FLSHP.dirty = true; }
+  if (!FLSHP.dirty) return; gl.bindTexture(gl.TEXTURE_2D, FL.shpTex); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4); gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 7, 256, gl.RGBA, gl.UNSIGNED_BYTE, FLSHP.rows); gl.bindTexture(gl.TEXTURE_2D, null); FLSHP.dirty = false;
+}
+function flVoxVal(cb, cm, i, H, w, wx, wz) {
   const b = cb[i]; if (!b) return 0; const d = REG[b];
   if (d && d.liquid && (cm[i] & LIQ_PLACED)) return 0;
   if (d && d.liquid) { const up = (i >> 8) + 1 < H ? cb[i + 256] : 0; const cov = up && REG[up] && REG[up].liquid === d.liquid; if (d.liquid === 1 && !cov && (cm[i] & LIQ_OCEAN)) return 27; const a = cov ? 9 : liqAmt(cm[i]); return (d.liquid === 1 ? 16 : 32) + a; }
   if (d && d.inWater) return 16 + 9;
+  const f = FLSH[b];
+  if (f === 2) { const m = Math.max(1, cm[i] & 15); return m >= 8 ? 1 : 100 + m; } // capa de nieve: el líquido se apoya encima
+  if (f === 1) return w ? flShapeCode(w, b, cm[i], wx, i >> 8, wz) : 1;
   return FLVC[b];
 }
 function flVoxFill(w) {
@@ -9486,7 +9546,7 @@ function flVoxFill(w) {
     const base = (wx & 15) | ((wz & 15) << 4);
     for (let y = 0; y < vy; y++) { const wy = oy + y; const k = x + vx * (y + vy * z);
       if (!c) { D[k] = 1; continue; } if (wy < 0) { D[k] = 1; continue; } if (wy >= H) { D[k] = 0; continue; }
-      D[k] = flVoxVal(c.blocks, c.meta, base | (wy << 8), H); } } }
+      D[k] = flVoxVal(c.blocks, c.meta, base | (wy << 8), H, w, wx, wz); } } }
   const gl = R.gl; gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1); gl.bindTexture(gl.TEXTURE_3D, FL.vox); gl.texSubImage3D(gl.TEXTURE_3D, 0, 0, 0, 0, vx, vy, vz, gl.RED, gl.UNSIGNED_BYTE, D); gl.bindTexture(gl.TEXTURE_3D, null); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
   FL.voxDirty.length = 0; FL.voxLoaded = new Set(); FL.full = new Set();
   for (let cz = oz >> 4; cz <= (oz + vz - 1) >> 4; cz++) for (let cx = ox >> 4; cx <= (ox + vx - 1) >> 4; cx++) if (w.chunk(cx, cz)) FL.voxLoaded.add(cx + ',' + cz);
@@ -9499,21 +9559,21 @@ function flVoxChunks(w) {
     const x0 = Math.max(ox, cx * 16), x1 = Math.min(ox + vx, cx * 16 + 16), z0 = Math.max(oz, cz * 16), z1 = Math.min(oz + vz, cz * 16 + 16); if (x1 <= x0 || z1 <= z0) continue;
     const bw = x1 - x0, bd = z1 - z0; const box = new Uint8Array(bw * vy * bd);
     for (let z = z0; z < z1; z++) for (let x = x0; x < x1; x++) { const base = (x & 15) | ((z & 15) << 4);
-      for (let y = 0; y < vy; y++) { const wy = oy + y; const v = wy < 0 ? 1 : wy >= H ? 0 : flVoxVal(c.blocks, c.meta, base | (wy << 8), H);
+      for (let y = 0; y < vy; y++) { const wy = oy + y; const v = wy < 0 ? 1 : wy >= H ? 0 : flVoxVal(c.blocks, c.meta, base | (wy << 8), H, w, x, z);
         D[(x - ox) + vx * (y + vy * (z - oz))] = v; box[(x - x0) + bw * (y + vy * (z - z0))] = v; } }
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1); gl.bindTexture(gl.TEXTURE_3D, FL.vox); gl.texSubImage3D(gl.TEXTURE_3D, 0, x0 - ox, 0, z0 - oz, bw, vy, bd, gl.RED, gl.UNSIGNED_BYTE, box); gl.bindTexture(gl.TEXTURE_3D, null); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
     if (++up >= 4) return; // como mucho 4 por vez
   }
 }
 // un bloque cambió: actualizar su celda y la de abajo (cubierta o no)
-function flOnBlock(w, x, y, z) { if (!FL.ok || w !== FL.world) return; FL.voxDirty.push(x, y, z, x, y - 1, z); }
+function flOnBlock(w, x, y, z) { if (!FL.ok || w !== FL.world) return; FL.voxDirty.push(x, y, z, x, y - 1, z, x + 1, y, z, x - 1, y, z, x, y, z + 1, x, y, z - 1); } // los vecinos: cristal y vallas conectan
 function flVoxFlush(w) {
   if (!FL.voxDirty.length) return; if (FL.voxDirty.length > 3 * 4000) { flVoxFill(w); return; } const gl = R.gl; const [vx, vy, vz] = FL.vdim, [ox, oy, oz] = FL.org; const one = new Uint8Array(1);
   gl.bindTexture(gl.TEXTURE_3D, FL.vox); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
   const seen = new Set();
   for (let i = 0; i < FL.voxDirty.length; i += 3) { const x = FL.voxDirty[i] - ox, y = FL.voxDirty[i + 1] - oy, z = FL.voxDirty[i + 2] - oz;
     if (x < 0 || y < 0 || z < 0 || x >= vx || y >= vy || z >= vz) continue; const k = x + vx * (y + vy * z); if (seen.has(k)) continue; seen.add(k);
-    const wx = x + ox, wy = y + oy, wz = z + oz; const c = w.chunk(wx >> 4, wz >> 4); const v = c && wy >= 0 && wy < w.H ? flVoxVal(c.blocks, c.meta, (wx & 15) | ((wz & 15) << 4) | (wy << 8), w.H) : 1;
+    const wx = x + ox, wy = y + oy, wz = z + oz; const c = w.chunk(wx >> 4, wz >> 4); const v = c && wy >= 0 && wy < w.H ? flVoxVal(c.blocks, c.meta, (wx & 15) | ((wz & 15) << 4) | (wy << 8), w.H, w, wx, wz) : 1;
     FL.voxData[k] = v; one[0] = v; gl.texSubImage3D(gl.TEXTURE_3D, 0, x, y, z, 1, 1, 1, gl.RED, gl.UNSIGNED_BYTE, one); }
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4); gl.bindTexture(gl.TEXTURE_3D, null); FL.voxDirty.length = 0;
 }
@@ -9547,7 +9607,7 @@ function flCommon(P) { const gl = R.gl; const u = P.u;
   if (u.u_waveK) gl.uniform1f(u.u_waveK, R.gfxU ? R.gfxU[0] : 1);
   if (u.u_org) gl.uniform3f(u.u_org, FL.org[0], FL.org[1], FL.org[2]);
   if (u.u_kp) gl.uniform1f(u.u_kp, FL.kp); if (u.u_ks) gl.uniform1f(u.u_ks, FL.ks); if (u.u_eps) gl.uniform1f(u.u_eps, FL.eps);
-  flBindTex(P, 'u_vox', 8, FL.vox, gl.TEXTURE_3D); if (u.u_wdist) wdBind(P); }
+  flBindTex(P, 'u_vox', 8, FL.vox, gl.TEXTURE_3D); if (u.u_shp !== undefined) { flShpUpload(); flBindTex(P, 'u_shp', 10, FL.shpTex); } if (u.u_wdist) wdBind(P); }
 function flPass(P, fb, rows) { const gl = R.gl; gl.bindFramebuffer(gl.FRAMEBUFFER, fb); gl.viewport(0, 0, FL.W, rows); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
 function flStep() {
   const gl = R.gl; const rows = FL.M / FL.W; const T = FL.pos, V = FL.vel;
