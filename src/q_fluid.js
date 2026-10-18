@@ -777,11 +777,13 @@ function flImpactCheck(w, occ) {
     const hw = (e.w || 0.6) / 2 + 0.25, h = e.h || 1.8; let m = 0, px = 0, py = 0, pz = 0;
     for (let y = Math.floor(e.y); y <= Math.floor(e.y + h); y++) for (let z = Math.floor(e.z - hw); z <= Math.floor(e.z + hw); z++) for (let x = Math.floor(e.x - hw); x <= Math.floor(e.x + hw); x++) {
       const c = occ.get(FLK(x, y, z)); if (!c || c.nw < FL_MIN) continue;
-      const rx = c.vx - (e.vx || 0), ry = c.vy - (e.vy || 0), rz = c.vz - (e.vz || 0); if (Math.hypot(rx, ry, rz) < 3) continue;
+      // solo agua que viene rápida por sí misma: caer o correr dentro de una piscina quieta no tumba
+      const sp = Math.hypot(c.vx, c.vy, c.vz); if (sp < 4.5) continue;
+      const rx = c.vx - (e.vx || 0), ry = c.vy - (e.vy || 0), rz = c.vz - (e.vz || 0); if (Math.hypot(rx, ry, rz) < 3 || rx * c.vx + ry * c.vy + rz * c.vz <= 0) continue;
       const mm = c.nw / FL_PPB; m += mm; px += mm * rx; py += mm * ry; pz += mm * rz;
     }
-    const P = Math.hypot(px, py, pz); const thr = 2.2 * clamp(((e.w || 0.6) * (e.h || 1.8)) / 1.08, 0.35, 3); // los grandes aguantan más
-    if (m < 0.3 || P < thr) continue;
+    const P = Math.hypot(px, py, pz); const thr = 4 * clamp(((e.w || 0.6) * (e.h || 1.8)) / 1.08, 0.35, 3); // los grandes aguantan más
+    if (m < 0.4 || P < thr) continue;
     const ix = px / m, iy = py / m, iz = pz / m; e._wImpT = now + 2500;
     startRagdoll(e, [ix * 0.55, Math.max(1.2, iy * 0.35 + 1.8), iz * 0.55], true, 1.4 + Math.min(2.2, P * 0.12));
     if (e === G.player) showActionMsg('¡El agua te ha tumbado!');
