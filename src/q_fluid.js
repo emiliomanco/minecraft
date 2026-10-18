@@ -130,7 +130,7 @@ const VS_FLQUAD = `#version 300 es
 void main(){ vec2 p=vec2(float((gl_VertexID&1)*2-1), float((gl_VertexID>>1)*2-1)); gl_Position=vec4(p,0.0,1.0); }`;
 // 1) predicción: gravedad, empuje de entidades, colisión barrida; marca absorción por líquido quieto y salida de la región
 const FS_FLPRED = GLSL_FLHEAD + `
-uniform vec4 u_ent[8], u_entV[8]; uniform int u_nEnt; out vec4 o;
+uniform vec4 u_ent[8], u_entV[8]; uniform int u_nEnt, u_cli; out vec4 o;
 void main(){
   int i=idx(); vec4 P=texelFetch(u_pos,tc(i),0); if(P.w<0.5 || P.w>=10.0){ o=P; return; }
   vec3 v=texelFetch(u_vel,tc(i),0).xyz; vec3 x=P.xyz; bool inT=tubeIn(x);
@@ -172,8 +172,8 @@ void main(){
   float sp=length(v); if(sp>20.0) v*=20.0/sp;
   vec3 x1=inT?tubeFix(x,x+v*u_dt,true):tubeFix(x,sweep(x,x+v*u_dt),false);
   float ph=P.w;
-  if(x1.x<1.0||x1.z<1.0||x1.y<1.0||x1.x>float(u_vdim.x)-1.0||x1.z>float(u_vdim.z)-1.0||x1.y>float(u_vdim.y)-1.0) ph+=30.0;
-  else if(!inT){ float vv=vox(ivec3(floor(x1))); float fy=fract(x1.y);
+  if(x1.x<1.0||x1.z<1.0||x1.y<1.0||x1.x>float(u_vdim.x)-1.0||x1.z>float(u_vdim.z)-1.0||x1.y>float(u_vdim.y)-1.0){ if(u_cli==1) x1=x; else ph+=30.0; } // cliente: se queda quieta hasta que el anfitrión la mueva
+  else if(!inT && u_cli==0){ float vv=vox(ivec3(floor(x1))); float fy=fract(x1.y);
     // dentro de líquido normal (por debajo de su superficie): la CPU decide. Del mismo tipo, la partícula desaparece (nunca
     // pasa a líquido normal); de otro tipo, reaccionan (lava + agua → piedra u obsidiana). Miel y leche se hunden en el agua
     bool wl=ph<3.5;
@@ -336,7 +336,7 @@ function flResize() {
   if (FL.P) for (const k in FL.P) if (FL.P[k] && FL.P[k].p) gl.deleteProgram(FL.P[k].p);
   FL.hi = 0; FL.alive = 0; FL.ptr = 0; FL.spawnQ.length = 0; FL.killQ.length = 0; FL.occ = new Map(); FL.calm = new Map(); FL.acc2 = new Map(); FL.full = new Set();
   FL.parked = []; FL.parkCells = new Map(); FL.exitAcc = [0, 0, 0, 0, 0, 0]; FL.world = null; FL.pending = null;
-  flInit();
+  flInit(); if (G.net && G.net.role === 'client') netSend({ t: 'flr' }); // cliente: que el anfitrión mande todas otra vez
 }
 // ---------------------------------------------------------------- campo de colisión
 let FLVC = null, FLSH = null;
@@ -469,7 +469,7 @@ function flCommon(P) { const gl = R.gl; const u = P.u;
   if (u.u_waveK) gl.uniform1f(u.u_waveK, R.gfxU ? R.gfxU[0] : 1);
   if (u.u_org) gl.uniform3f(u.u_org, FL.org[0], FL.org[1], FL.org[2]);
   if (u.u_kp) gl.uniform1f(u.u_kp, FL.kp); if (u.u_ks) gl.uniform1f(u.u_ks, FL.ks); if (u.u_eps) gl.uniform1f(u.u_eps, FL.eps);
-  flBindTex(P, 'u_vox', 8, FL.vox, gl.TEXTURE_3D); if (u.u_shp !== undefined) { flShpUpload(); flBindTex(P, 'u_shp', 10, FL.shpTex); } if (u.u_tOn !== undefined) tubeBind(P); if (u.u_wdist) wdBind(P); }
+  flBindTex(P, 'u_vox', 8, FL.vox, gl.TEXTURE_3D); if (u.u_shp !== undefined) { flShpUpload(); flBindTex(P, 'u_shp', 10, FL.shpTex); } if (u.u_tOn !== undefined) tubeBind(P); if (u.u_cli !== undefined) gl.uniform1i(u.u_cli, G.net && G.net.role === 'client' ? 1 : 0); if (u.u_wdist) wdBind(P); }
 function flPass(P, fb, rows) { const gl = R.gl; gl.bindFramebuffer(gl.FRAMEBUFFER, fb); gl.viewport(0, 0, FL.W, rows); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
 function flStep() {
   const gl = R.gl; const rows = FL.M / FL.W; const T = FL.pos, V = FL.vel;
@@ -521,6 +521,7 @@ function flUpdate(dt, w) {
   if (!FL.ok || R.q < 2) return;
   flOceanFillTick();
   const p = G.player; FL.frame++; flRecenter(w, p.x, p.y, p.z, false);
+  flNetApply();
   if (FL.pending && FL.pending.dim === w.dim) { const a = FL.pending.p; FL.pending = null; for (let i = 0; i + 4 < a.length; i += 5) if (flSpawn(a[i], a[i + 1], a[i + 2], 0, 0, 0, a[i + 3], a[i + 4]) < 0) break; }
   flParkTick(w, dt);
   if (FL.frame % 20 === 0) flVoxChunks(w);
@@ -544,7 +545,7 @@ function flEntities(w) {
   const E = FL.ents, V = FL.entV; let n = 0; const o = FL.org;
   const add = (e, r, hh, cy = hh) => { if (n >= 8) return; const k = n * 4; E[k] = e.x - o[0]; E[k + 1] = e.y + cy - o[1]; E[k + 2] = e.z - o[2]; E[k + 3] = r; V[k] = e.vx || 0; V[k + 1] = e.vy || 0; V[k + 2] = e.vz || 0; V[k + 3] = hh; n++; };
   const p = G.player; if (p && !p.dead && G.gameMode !== 'spectator') { if (typeof broomColliders === 'function') broomColliders(add); add(p, 0.35, 0.55, 0.9); } // cápsula de 0 a 1,8: no sobresale por encima de la cabeza
-  for (const e of G.entities.values()) { if (n >= 8) break; if (e.removed || e.dead || e.dim !== p.dim) continue; if (Math.abs(e.x - p.x) > 24 || Math.abs(e.z - p.z) > 24) continue; if (e instanceof Mob) { const r = Math.max(0.25, (e.w || 0.6) * 0.5), h = e.h || 1.8; add(e, r, Math.max(0.02, h * 0.5 - r), h * 0.5); } else if (e.type === 'item') add(e, 0.15, 0.12); }
+  for (const e of G.entities.values()) { if (n >= 8) break; if (e.removed || e.dead || e.dim !== p.dim) continue; if (Math.abs(e.x - p.x) > 24 || Math.abs(e.z - p.z) > 24) continue; if (e instanceof Mob) { const r = Math.max(0.25, (e.w || 0.6) * 0.5), h = e.h || 1.8; add(e, r, Math.max(0.02, h * 0.5 - r), h * 0.5); } else if (e.type === 'item') add(e, 0.15, 0.12); else if (e.remotePlayer && !e.dead && !e.spectator) add(e, 0.35, 0.55, 0.9); }
   FL.nEnt = n;
 }
 // lectura asíncrona de POS y VEL (cada ~6 cuadros); FL.rb.pos/vel quedan con la última foto (coordenadas del mundo en flParticles)
@@ -888,11 +889,12 @@ function flImpactCheck(w, occ) {
 function flAfterReadback() {
   const rb = FL.rb, w = FL.world; if (!w || !FL.spawnFrame) return; const n = rb.count, o = rb.orgNow, P = rb.pos, V = rb.vel, F = rb.frameAt;
   const now = (G.wclock ?? performance.now() / 1000) * 1000; const dtR = Math.min(1, (now - (FL.lastRB || now)) / 1000); FL.lastRB = now;
-  const occ = new Map();
+  const occ = new Map(); const cli = !!(G.net && G.net.role === 'client'); // cliente: las partículas son copia de las del anfitrión
   for (let i = 0; i < n; i++) {
     const ph = FL.phase[i]; if (!ph || FL.spawnFrame[i] > F) continue; const k4 = i * 4; const pw = P[k4 + 3]; if (pw < 0.5) continue;
     const flag = Math.floor(pw / 10 + 1e-4); const base = Math.round(pw - flag * 10);
     const x = P[k4] + o[0], y = P[k4 + 1] + o[1], z = P[k4 + 2] + o[2];
+    if (flag && cli) continue;
     if (flag === 1 || flag === 2) { const ab = flAbsorb(w, x, y, z, base, flag); flKill(i); if (!ab) { flSpawn(x, y + 0.02, z, 0, 0, 0, base, V[k4 + 3]); continue; } if (flag === 1 && Math.random() < 0.3 && typeof ripImpulse === 'function') { const sp = Math.hypot(V[k4], V[k4 + 1], V[k4 + 2]); ripImpulse(x, z, 0.3 + sp * 0.04, Math.min(1.4, 0.15 + sp * 0.18)); } continue; }
     if (flag >= 3) { flPark(w, x, y, z, V[k4], V[k4 + 1], V[k4 + 2], base, V[k4 + 3]); flKill(i); continue; } // salió de la región: sigue como partícula fuera (nunca líquido normal)
     const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z); const key = FLK(bx, by, bz);
@@ -909,6 +911,7 @@ function flAfterReadback() {
   flImpactCheck(w, occ);
   // la lava en movimiento ilumina (las celdas con más lava, como luces dinámicas)
   FL.lavaPts = []; for (const c of occ.values()) if (c.nl >= 12) FL.lavaPts.push([c.x + 0.5, c.y, c.z + 0.5]);
+  if (cli) return; // lo que cambia el mundo (piedra, fuego, apagar, nivelar) lo hace solo el anfitrión
   // agua y lava en la misma celda
   for (const c of occ.values()) if (c.nw > 0 && c.nl > 0) {
     const b = w.get(c.x, c.y, c.z); if (b === 0 || (b > 0 && REG[b].replace && !REG[b].solid)) w.set(c.x, c.y, c.z, c.nl >= 24 ? ID.obsidian : ID.cobblestone);
@@ -1102,3 +1105,54 @@ function rainPuddleTick(w, dt) {
   for (let i = 0; i < FL.hi && k > 0; i++) if (FL.rainTag[i] && FL.phase[i] && !FL.dying.has(i)) { FL.dying.set(i, now); FL.rainTag[i] = 0; RAINP.n--; k--; }
 }
 
+
+// ---------------------------------------------------------------- multijugador
+// El anfitrión simula el fluido. A cada cliente le manda, por ranura, las partículas que hay cerca de él que son nuevas o
+// se han movido desde el último envío, y las que ya no están (binario: 16 bytes por partícula, con un tope por envío; lo
+// que no cabe va en el siguiente). El cliente las mete en su propia simulación, sin tocar el mundo: entre envíos se
+// mueven solas y el anfitrión las va corrigiendo. El cliente usa las mismas ranuras que el anfitrión.
+const FLNET = { budget: 2000, bx: 46, by: 30 };
+function flNetHostTick(n) {
+  if (!FL.ok || !FL.rb.ready || !FL.world || !FL.spawnFrame) return; const rb = FL.rb, o = rb.orgNow, w = FL.world;
+  for (const c of n.conns.values()) {
+    const e = c.ent; if (!e || !c.ready) continue; let S = c.flS;
+    if (!S || S.N !== FL.N || S.size !== FL.size || S.dim !== w.dim) { S = c.flS = { N: FL.N, size: FL.size, dim: w.dim, ph: new Uint8Array(FL.N), pos: new Float32Array(FL.N * 3), t: new Float32Array(FL.N), cur: 0, hi: 0 }; netSendTo(c, { t: 'flp', reset: 1 }); }
+    const bx0 = Math.floor(e.x) - FLNET.bx, by0 = Math.floor(e.y) - FLNET.by, bz0 = Math.floor(e.z) - FLNET.bx; const same = e.dim === w.dim;
+    const kills = [], ents = new Uint8Array(FLNET.budget * 16), dv = new DataView(ents.buffer); let ne = 0;
+    const N = Math.max(rb.count, S.hi); if (!N) continue; let i = S.cur % N, steps = 0; const now = performance.now() / 1000;
+    for (; steps < N && ne < FLNET.budget && kills.length < 20000; steps++, i = (i + 1) % N) {
+      const ph = i < rb.count ? FL.phase[i] : 0; let ok = false, x = 0, y = 0, z = 0;
+      if (ph && same) { const k = i * 4, pw = rb.pos[k + 3]; if (pw >= 0.5 && pw < 10) { x = rb.pos[k] + o[0]; y = rb.pos[k + 1] + o[1]; z = rb.pos[k + 2] + o[2]; const lx = x - bx0, ly = y - by0, lz = z - bz0; ok = lx >= 0 && ly >= 0 && lz >= 0 && lx < FLNET.bx * 2 && ly < FLNET.by * 2 && lz < FLNET.bx * 2; } }
+      if (!ok) { if (S.ph[i]) { S.ph[i] = 0; kills.push(i); } continue; }
+      const k3 = i * 3; if (S.ph[i] === ph && now - S.t[i] < 4 && Math.abs(S.pos[k3] - x) < 0.05 && Math.abs(S.pos[k3 + 1] - y) < 0.05 && Math.abs(S.pos[k3 + 2] - z) < 0.05) continue; // las quietas también, cada 4 s (la copia del cliente puede desviarse)
+      S.ph[i] = ph; S.pos[k3] = x; S.pos[k3 + 1] = y; S.pos[k3 + 2] = z; S.t[i] = now;
+      const b = ne * 16, k = i * 4; const q = v => clamp(Math.round(v * 6.35), -127, 127);
+      dv.setUint32(b, i, true); dv.setUint16(b + 4, Math.round((x - bx0) * 512), true); dv.setUint16(b + 6, Math.round((y - by0) * 512), true); dv.setUint16(b + 8, Math.round((z - bz0) * 512), true);
+      dv.setInt8(b + 10, q(rb.vel[k])); dv.setInt8(b + 11, q(rb.vel[k + 1])); dv.setInt8(b + 12, q(rb.vel[k + 2])); ents[b + 13] = ph; ents[b + 14] = clamp(Math.round(rb.vel[k + 3] * 255), 0, 255); ne++;
+    }
+    S.cur = i; S.hi = Math.max(S.hi, rb.count);
+    if (ne || kills.length) netSendTo(c, { t: 'flp', o: [bx0, by0, bz0], k: kills, s: ents.slice(0, ne * 16) });
+  }
+}
+function flNetBytes(x) { if (!x) return null; if (x instanceof ArrayBuffer) return new Uint8Array(x); if (ArrayBuffer.isView(x)) return new Uint8Array(x.buffer, x.byteOffset, x.byteLength); if (Array.isArray(x)) return Uint8Array.from(x); return null; }
+function flNetRecv(m) { const Q = FL.netIn || (FL.netIn = []); Q.push(m); if (Q.length > 400) Q.splice(0, Q.length - 400); }
+// en el cliente, dentro de flUpdate (ya movida la región): de cada ranura vale lo último que llegó
+function flNetApply() {
+  const Q = FL.netIn; if (!Q || !Q.length || !FL.ok) return; FL.netIn = []; const last = new Map();
+  for (const m of Q) {
+    if (m.reset) { last.clear(); for (let i = 0; i < FL.hi; i++) if (FL.phase[i]) flKill(i); continue; }
+    if (m.k) for (const i of m.k) last.set(i | 0, null);
+    const u8 = flNetBytes(m.s); if (!u8 || !m.o) continue; const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength); const [bx, by, bz] = m.o;
+    for (let b = 0; b + 16 <= u8.length; b += 16) last.set(dv.getUint32(b, true), [bx + dv.getUint16(b + 4, true) / 512, by + dv.getUint16(b + 6, true) / 512, bz + dv.getUint16(b + 8, true) / 512, dv.getInt8(b + 10) / 6.35, dv.getInt8(b + 11) / 6.35, dv.getInt8(b + 12) / 6.35, u8[b + 13], u8[b + 14] / 255]);
+  }
+  FL.netN = (FL.netN || 0) + last.size; // recibidas (para depurar)
+  for (const [i, a] of last) {
+    if (i >= FL.N) continue;
+    if (!a) { flKill(i); continue; }
+    if (!FL.phase[i]) FL.alive++; FL.phase[i] = a[6]; FL.spawnFrame[i] = FL.frame + 1; if (i + 1 > FL.hi) FL.hi = i + 1;
+    if (FL.scale[i] !== 255) { FL.scale[i] = 255; FL.scaleDirty = true; } FL.dying.delete(i);
+    FL.spawnQ.push(i, a[0] - FL.org[0], a[1] - FL.org[1], a[2] - FL.org[2], a[6], a[3], a[4], a[5], a[7]);
+  }
+}
+// el cliente recogió partículas con un cubo: el anfitrión quita esas mismas ranuras
+function flNetKillSlots(c, l) { const e = c.ent; if (!e || !Array.isArray(l) || !FL.ok || !FL.world || e.dim !== FL.world.dim) return; for (const i of l.slice(0, 400)) { const k = i | 0; if (k >= 0 && k < FL.N && FL.phase[k]) flKill(k); } }

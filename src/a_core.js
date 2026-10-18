@@ -151,7 +151,7 @@ for (const k in PHYS_DEF) {
 if (!SETTINGS._ragFall2) { SETTINGS._ragFall2 = true; SETTINGS.physics.ragdoll.fall = Math.max(SETTINGS.physics.ragdoll.fall || 0, 32); }
 // valores efectivos de un apartado de físicas; real = false si está en modo vanilla
 function physCfg(sec) { const o = Object.assign({}, PHYS_DEF[sec], (SETTINGS.physics || {})[sec] || {}); o.real = o.mode !== 'vanilla'; return o; }
-function saveSettings() { try { localStorage.setItem('mc2-settings', JSON.stringify(SETTINGS)); } catch (e) { } }
+function saveSettings() { try { const own = typeof G !== 'undefined' && G.netPhysOwn; localStorage.setItem('mc2-settings', JSON.stringify(own ? Object.assign({}, SETTINGS, { physics: own }) : SETTINGS)); } catch (e) { } } // en el mundo de otro: se guardan las físicas propias, no las del anfitrión
 function keyLabel(code) {
   if (!code) return '-';
   if (code.startsWith('Mouse')) return ['Botón izq.', 'Botón central', 'Botón der.', 'Botón 4', 'Botón 5'][+code.slice(5)] || code;

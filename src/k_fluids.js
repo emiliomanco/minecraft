@@ -306,8 +306,9 @@ function bucketCollect(w, p, dir, cont, room) {
       const cell = FL.occ.get(FLK(bx + dx, by + dy, bz + dz)); if (!cell) continue;
       for (const i of cell.idx) { if (n >= want) break; const ph = FL.phase[i]; if (!ph || phLiq(ph) !== liq || FL.dying.has(i)) continue; const k = i * 4;
         if (Math.abs(rb.pos[k] + o[0] - c[0]) > 0.6 || Math.abs(rb.pos[k + 1] + o[1] - c[1]) > 0.6 || Math.abs(rb.pos[k + 2] + o[2] - c[2]) > 0.6) continue;
-        flKill(i); n++; }
+        flKill(i); n++; if (G.net && G.net.role === 'client') (BKT_ACC.slots || (BKT_ACC.slots = [])).push(i); }
     }
+    if (BKT_ACC.slots && BKT_ACC.slots.length) { netSend({ t: 'pkill', l: BKT_ACC.slots }); BKT_ACC.slots = null; } // multijugador: el anfitrión quita las mismas
     return { liq, ml: n * mlPerPart() };
   }
   // agua o lava quieta: 1 L cada décima de segundo; el mar no se gasta; un lago pierde 1/8 de bloque cada 1,25 L
@@ -328,10 +329,15 @@ function bucketPourMl(w, p, dir, hit, liq, ml) {
   let d = 1.6; if (hit && !hit.ent && hit.t !== undefined) d = Math.max(0.6, Math.min(d, hit.t - 0.4));
   const cx = p.x + dir[0] * d, cy = p.eye + dir[1] * d - 0.2, cz = p.z + dir[2] * d;
   if (liq === 1 && p.dim === 'nether') { fizz(w, Math.floor(cx), Math.floor(cy), Math.floor(cz)); return; }
+  // multijugador: con el fluido continuo del anfitrión activado, vierte él (y las partículas llegan por la red)
+  if (G.net && G.net.role === 'client' && physCfg('liquids').continuous !== false) { netSend({ t: 'pour', c: [cx, cy, cz].map(v => +v.toFixed(2)), d: dir.map(v => +v.toFixed(3)), l: liq, ml, v: [p.vx || 0, p.vz || 0] }); if (liq === 1 || liq === 5) splashFX(w, Math.floor(cx), Math.floor(cy), Math.floor(cz), 4); return true; }
+  return bucketPourAt(w, cx, cy, cz, dir, liq, ml, p.vx || 0, p.vz || 0);
+}
+function bucketPourAt(w, cx, cy, cz, dir, liq, ml, pvx, pvz) {
   if (typeof flCanSim === 'function' && flCanSim(w, Math.floor(cx), Math.floor(cy), Math.floor(cz))) {
     const n = Math.max(1, Math.round(ml / mlPerPart())); const r = Math.cbrt(n * FL_S * FL_S * FL_S * 3 / (4 * Math.PI)) + 0.05;
     for (let i = 0; i < n; i++) { let ox, oy, oz; do { ox = Math.random() * 2 - 1; oy = Math.random() * 2 - 1; oz = Math.random() * 2 - 1; } while (ox * ox + oy * oy + oz * oz > 1);
-      flSpawn(cx + ox * r, cy + oy * r, cz + oz * r, dir[0] * 2.5 + (p.vx || 0), dir[1] * 2.5 + 0.5, dir[2] * 2.5 + (p.vz || 0), liqPh(liq)); }
+      flSpawn(cx + ox * r, cy + oy * r, cz + oz * r, dir[0] * 2.5 + pvx, dir[1] * 2.5 + 0.5, dir[2] * 2.5 + pvz, liqPh(liq)); }
     if (liq === 1 || liq === 5) splashFX(w, Math.floor(cx), Math.floor(cy), Math.floor(cz), 4); return true;
   }
   if (liq >= 4) { showActionMsg((LIQ_NAME[liq] || 'Este líquido') + ' solo existe como fluido continuo (calidad Alta o Ultra con partículas activadas)'); return false; }

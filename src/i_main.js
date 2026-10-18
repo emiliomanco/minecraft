@@ -182,7 +182,7 @@ function showCredits() {
 async function quitToTitle(save = true) {
   if (save) await saveWorld(true); stopNet(); closeScreen();
   for (const d in G.worlds || {}) { G.worlds[d].dead = true; WK.worlds.delete(G.worlds[d]._wid); for (const c of G.worlds[d].chunks.values()) freeMesh(c); }
-  G.worlds = null; G.player = null; G.mode = 'menu'; G.entities = new Map(); G.particles = []; $('hud').style.display = 'none'; $('chatLog').innerHTML = '';
+  netRestorePhys(); G.worlds = null; G.player = null; G.mode = 'menu'; G.entities = new Map(); G.particles = []; $('hud').style.display = 'none'; $('chatLog').innerHTML = '';
   goMenu();
 }
 function disconnected(msg) { quitToTitle(false).then(() => { showScreen('sMulti'); $('mErr').textContent = msg || 'Desconectado'; }); }
@@ -617,6 +617,10 @@ function optGraphics(ui) {
 }
 const PK = (sec, k) => [() => SETTINGS.physics[sec][k], v => { SETTINGS.physics[sec][k] = v; }];
 function optPhysics(ui) {
+  if (G.net && G.net.role === 'client') { // en el mundo de otro jugador: se ven sus ajustes, pero no se pueden cambiar
+    ui.note('<span style="color:#fc8">Estás en el mundo de otro jugador: las físicas las decide el anfitrión. Aquí ves sus ajustes; los tuyos vuelven al salir.</span>');
+    const base = ui; ui = Object.assign({}, base, { button() { }, slider(l, g, s, a, b, st, f, h, o = {}) { const d = base.slider(l, g, () => { }, a, b, st, f, h, Object.assign({}, o, { off: true })); const inp = d.querySelector('input'); if (inp) inp.disabled = true; return d; }, cycle(l, g, s, v, n, h, o = {}) { const b = base.cycle(l, g, () => { }, v, n, h, Object.assign({}, o, { off: true })); b.disabled = true; return b; } });
+  }
   ui.note('Cada apartado puede ir en modo <b>Realista</b> (físicas de Minecraft 2) o <b>Vanilla</b> (como el juego original). En multijugador mandan los ajustes del anfitrión.');
   ui.button('Todo realista', () => { for (const k in PHYS_DEF) SETTINGS.physics[k].mode = 'real'; saveSettings(); optRebuild(); }, 'Pone todos los apartados en modo realista.');
   ui.button('Todo vanilla', () => { for (const k in PHYS_DEF) SETTINGS.physics[k].mode = 'vanilla'; saveSettings(); optRebuild(); }, 'Pone todos los apartados como en el Minecraft original.');
@@ -699,7 +703,7 @@ function optControls(ui) {
 // «Restablecer pestaña»: valores por defecto de la pestaña abierta
 function optResetTab() {
   if (OPT.tab === 'gfx') { Object.assign(SETTINGS.gfx, GFX_DEF); Object.assign(SETTINGS, { fov: 70, gui: 2, brightness: 0.5, clouds: true, particles: 2, fpsCap: 0, bob: true, dynres: true, resScale: 1, autoExp: true }); delete SETTINGS.cpuMode; applyGui(); applyRenderMode(false); }
-  else if (OPT.tab === 'phys') { for (const k in PHYS_DEF) SETTINGS.physics[k] = Object.assign({}, PHYS_DEF[k]); }
+  else if (OPT.tab === 'phys') { if (G.net && G.net.role === 'client') return; for (const k in PHYS_DEF) SETTINGS.physics[k] = Object.assign({}, PHYS_DEF[k]); }
   else if (OPT.tab === 'audio') { Object.assign(SETTINGS.audio, AUDIO_DEF); SETTINGS.vol = 0.7; if (AU.master) AU.master.gain.value = 0.7; }
   else if (OPT.tab === 'ctl') { Object.assign(SETTINGS.ctl, CTL_DEF); SETTINGS.keys = Object.assign({}, DEFAULT_KEYS); SETTINGS.sens = 0.5; SETTINGS.invertY = false; }
   saveSettings(); optRebuild();
