@@ -284,7 +284,7 @@ function waterSurfaceAt(w, x, y, z) {
 }
 // ---- cubos con capacidad: 10 L (10000 ml) = un bloque de líquido; cada partícula del fluido continuo son 0,08 L
 const BUCKET_ML = 10000, ML_PER_EIGHTH = 1250; const mlPerPart = () => BUCKET_ML / (typeof FL_PPB !== 'undefined' ? FL_PPB : 216); // un cubo (10 L) = un bloque = FL_PPB partículas (216 o 1728 según el tamaño)
-function bucketLabel(s) { const d = s && REG[s.id]; if (d && d.diffuser) return s.mode === 'pbf' ? ' (modo PBF)' : ' (modo Líquido)'; if (!d || d.bucket === undefined || !d.bucket) return ''; return ' (' + (((s.ml ?? BUCKET_ML)) / 1000).toFixed(1) + ' L)'; }
+function bucketLabel(s) { const d = s && REG[s.id]; if (d && d.diffuser) return s.mode === 'pbf' ? ' (modo PBF)' : ' (modo Líquido)'; if (d && d.tubeTool) return ' (' + TUBE_MODE_NAME[tubeMode(s)] + ')'; if (!d || d.bucket === undefined || !d.bucket) return ''; return ' (' + (((s.ml ?? BUCKET_ML)) / 1000).toFixed(1) + ' L)'; }
 const BKT_ACC = new Map();
 // recoge hasta `room` ml del líquido que hay en una caja pequeña e invisible alrededor de donde apunta el jugador
 // cont: 0 vacío (acepta el primero que encuentre), 1 agua, 2 lava (solo ese). Devuelve { liq, ml }

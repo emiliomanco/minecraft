@@ -28,7 +28,7 @@ function flApplySize(sz) { FL.iters = sz === 2 ? 3 : 5; /* con partículas peque
 function flSub(src) { return src.replace('const float H=0.34, H2=0.1156, RAD=0.066;', `const float H=${FL_H.toFixed(6)}, H2=${(FL_H * FL_H).toFixed(8)}, RAD=${FL_R.toFixed(6)}, PS=${FL_PS.toFixed(4)};`); }
 const GLSL_FLHEAD = `#version 300 es
 precision highp float; precision highp int; precision highp sampler2D; precision highp sampler3D;
-uniform sampler2D u_pos, u_vel, u_pred, u_lam, u_key, u_tab, u_shp; uniform sampler3D u_vox;
+uniform sampler2D u_pos, u_vel, u_pred, u_lam, u_key, u_tab, u_shp, u_tcell, u_tlist, u_tseg; uniform sampler3D u_vox; uniform ivec3 u_tdim; uniform int u_tOn;
 uniform ivec3 u_vdim; uniform int u_M; uniform float u_dt, u_kp, u_ks, u_eps;
 const float H=0.34, H2=0.1156, RAD=0.066;
 uniform float u_time, u_rain, u_tide; uniform vec3 u_org;
@@ -64,6 +64,39 @@ void shpBox(float v,int k,out vec3 lo,out vec3 hi){ if(v==1.0){ lo=vec3(0.0); hi
 // parte de la celda que hace de suelo o de pared en vertical (y0,y1); vacía si y1<=y0 (formas finas como el cristal o una
 // puerta no cuentan: el líquido las rodea por los huecos)
 vec2 span(float v){ if(v==1.0) return vec2(0.0,1.0); if(v<50.5) return vec2(1.0,0.0); return shT(int(v),6).xy/16.0; }
+// ¿el punto cae dentro de la parte sólida de su celda?
+bool solidPt(vec3 p){ ivec3 c=ivec3(floor(p)); float vc=vox(c); int nb=shpN(vc);
+  for(int q=0;q<3;q++){ if(q>=nb) break; vec3 lo, hi; shpBox(vc,q,lo,hi); lo+=vec3(c); hi+=vec3(c); if(all(greaterThanEqual(p,lo)) && all(lessThan(p,hi))) return true; }
+  return false; }
+// tubos del Tubificador3000: tramos (a, b, radio interior, bocas abiertas) repartidos en una rejilla de celdas de 2 bloques.
+// Por dentro son huecos (el líquido va por ellos aunque crucen bloques); la pared no deja pasar de fuera a dentro ni al
+// revés; por las bocas abiertas se entra y se sale
+ivec2 t2(int k){ return ivec2(k&1023, k>>10); }
+vec2 tCell(vec3 p){ ivec3 c=ivec3(floor(p*0.5)); if(any(lessThan(c,ivec3(0))) || any(greaterThanEqual(c,u_tdim))) return vec2(0.0); int k=c.x+u_tdim.x*(c.y+u_tdim.y*c.z); return texelFetch(u_tcell,ivec2(k&255,k>>8),0).xy; }
+float tWall(float r){ return 0.03+0.12*r; }
+// q: punto más cercano del eje; perp: distancia a la recta del tramo. false: el punto queda más allá de una boca abierta
+bool tSeg(int s, vec3 p, out vec3 q, out float r, out float perp){
+  vec4 A=texelFetch(u_tseg,t2(s*2),0), B=texelFetch(u_tseg,t2(s*2+1),0); vec3 ab=B.xyz-A.xyz; float t=dot(p-A.xyz,ab)/max(dot(ab,ab),1e-8); int fl=int(B.w+0.5);
+  r=A.w; perp=length(p-(A.xyz+ab*t)); q=A.xyz+ab*clamp(t,0.0,1.0);
+  return !((t<0.0 && (fl&1)!=0) || (t>1.0 && (fl&2)!=0)); }
+bool tubeIn(vec3 p){ if(u_tOn==0) return false; vec2 se=tCell(p); int st=int(se.x), n=int(se.y);
+  for(int k=0;k<48;k++){ if(k>=n) break; int s=int(texelFetch(u_tlist,t2(st+k),0).x); vec3 q; float r, pp; if(tSeg(s,p,q,r,pp) && length(p-q)<r) return true; }
+  return false; }
+vec3 tubeFix(vec3 x0, vec3 x1, bool inT){
+  if(u_tOn==0) return x1; vec2 se=tCell(x0); int st=int(se.x), n=int(se.y); if(n==0) return x1;
+  if(inT){ // dentro: seguir dentro (salvo que salga por una boca)
+    bool hit=false; float bd=1e9; vec3 bq=x1; float br=0.0;
+    for(int k=0;k<48;k++){ if(k>=n) break; int s=int(texelFetch(u_tlist,t2(st+k),0).x); vec3 q; float r, pp;
+      if(!tSeg(s,x1,q,r,pp)){ if(pp<r) return x1; continue; }
+      hit=true; float d=length(x1-q); if(d<r-RAD) return x1; if(d-r<bd){ bd=d-r; bq=q; br=r; } }
+    if(!hit) return x1;
+    vec3 nn=x1-bq; float l=length(nn); nn=l>1e-5?nn/l:vec3(0.0,1.0,0.0); return bq+nn*(br-RAD);
+  }
+  for(int k=0;k<48;k++){ if(k>=n) break; int s=int(texelFetch(u_tlist,t2(st+k),0).x); vec3 q; float r, pp; // fuera: no cruzar la pared
+    if(!tSeg(s,x1,q,r,pp)) continue; float ro=r+tWall(r)+RAD; float d=length(x1-q); if(d>=ro) continue;
+    vec3 q0; float r0, p0; if(!tSeg(s,x0,q0,r0,p0)) continue; // viene de más allá de la boca: entra por ella
+    vec3 nn=x1-q; float l=length(nn); if(l<1e-5){ nn=x0-q0; l=length(nn); } nn=l>1e-5?nn/l:vec3(0.0,1.0,0.0); x1=q+nn*ro; }
+  return x1; }
 // altura del suelo bajo la columna de la celda c (parte sólida de c o tope del bloque de abajo); hueco de 1+ bloques: c.y-1.5
 float supH(ivec3 c){ float v=vox(c); if(v>49.5&&v<50.5) return float(c.y)+1.0; vec2 s=span(v); if(s.y>s.x) return float(c.y)+s.y; float vb=vox(c-ivec3(0,1,0)); if(vb>49.5&&vb<50.5) return float(c.y); vec2 b=span(vb); if(b.y>b.x) return float(c.y-1)+b.y; return float(c.y)-1.5; } // 50 = celda de aire ya llena de partículas
 // ¿la celda tapa el paso a la altura y? (su parte sólida sube por encima)
@@ -100,15 +133,18 @@ const FS_FLPRED = GLSL_FLHEAD + `
 uniform vec4 u_ent[8], u_entV[8]; uniform int u_nEnt; out vec4 o;
 void main(){
   int i=idx(); vec4 P=texelFetch(u_pos,tc(i),0); if(P.w<0.5 || P.w>=10.0){ o=P; return; }
-  vec3 v=texelFetch(u_vel,tc(i),0).xyz; vec3 x=P.xyz;
-  // dentro de un bloque (lo pusieron encima): salir por arriba
-  { ivec3 c=ivec3(floor(x)); float vc=vox(c); int nb=shpN(vc);
+  vec3 v=texelFetch(u_vel,tc(i),0).xyz; vec3 x=P.xyz; bool inT=tubeIn(x);
+  // dentro de un bloque (apareció dentro o le pusieron uno encima): salir por la cara con hueco libre más cercana (a un
+  // lado, abajo o arriba), no siempre hacia arriba
+  if(!inT){ ivec3 c=ivec3(floor(x)); float vc=vox(c); int nb=shpN(vc);
     for(int q=0;q<3;q++){ if(q>=nb) break; vec3 lo, hi; shpBox(vc,q,lo,hi); lo+=vec3(c); hi+=vec3(c);
       if(!(all(greaterThanEqual(x,lo)) && all(lessThan(x,hi)))) continue;
-      if(hi.x-lo.x>0.99 && hi.z-lo.z>0.99) x.y=hi.y+RAD+0.01; // cubre toda la celda: por arriba
-      else { vec3 dl=x-lo, dh=hi-x; float m=min(min(min(dl.x,dh.x),min(dl.z,dh.z)),dh.y); // forma fina: por la cara más cercana
-        if(m==dh.y) x.y=hi.y+RAD+0.01; else if(m==dl.x) x.x=lo.x-RAD-0.01; else if(m==dh.x) x.x=hi.x+RAD+0.01; else if(m==dl.z) x.z=lo.z-RAD-0.01; else x.z=hi.z+RAD+0.01; }
-      v=vec3(0.0); break; } }
+      float e=RAD+0.01; float best=1e9; vec3 bp=vec3(x.x,hi.y+e,x.z);
+      for(int f=0;f<6;f++){ vec3 t=x; float d; // los lados primero: a igual distancia gana un lado
+        if(f==0){ t.x=hi.x+e; d=hi.x-x.x; } else if(f==1){ t.x=lo.x-e; d=x.x-lo.x; } else if(f==2){ t.z=hi.z+e; d=hi.z-x.z; }
+        else if(f==3){ t.z=lo.z-e; d=x.z-lo.z; } else if(f==4){ t.y=lo.y-e; d=x.y-lo.y; } else { t.y=hi.y+e; d=hi.y-x.y; }
+        if(d<best && !solidPt(t)){ best=d; bp=t; } }
+      x=bp; v=vec3(0.0); break; } }
   v.y-=9.81*u_dt;
   for(int e=0;e<8;e++){ if(e>=u_nEnt) break; vec4 E=u_ent[e], EV=u_entV[e];
     float t=clamp(x.y-E.y,-EV.w,EV.w); vec3 c=vec3(E.x,E.y+t,E.z); vec3 d=x-c; float dl=length(d);
@@ -119,7 +155,7 @@ void main(){
   // ladera: en reposo sobre el suelo, buscar (radio 2 bloques) la celda alcanzable más cercana con el suelo más bajo y
   // correr hacia ella; las vecinas del mismo líquido vienen detrás por la cohesión y la viscosidad (XSPH). Si no hay
   // ninguna más baja, la superficie es plana y se queda quieta.
-  { ivec3 c=ivec3(floor(x)); float h0=supH(c);
+  if(!inT){ ivec3 c=ivec3(floor(x)); float h0=supH(c);
     if(x.y-h0<0.45){
       float best=1e9; vec2 tgt=vec2(0.0);
       for(int dz=-2;dz<=2;dz++) for(int dx=-2;dx<=2;dx++){
@@ -132,12 +168,12 @@ void main(){
     } }
   // orilla: junto a (o sobre) el mar, el oleaje arrastra el agua adelante y atrás
   { ivec3 c=ivec3(floor(x)); bool sea=false; for(int k=0;k<6;k++){ ivec3 o2=k==0?ivec3(0,-1,0):k==1?ivec3(1,-1,0):k==2?ivec3(-1,-1,0):k==3?ivec3(0,-1,1):k==4?ivec3(0,-1,-1):ivec3(0,0,0); if(vox(c+o2)==27.0) sea=true; }
-    if(sea && P.w>0.5 && P.w<2.5 || sea && P.w>2.5 && P.w<3.5){ vec3 sw=seaWave(x.xz+u_org.xz); v.xz=mix(v.xz,v.xz+sw.yz*2.2,0.25); } }
+    if(!inT && (sea && P.w>0.5 && P.w<2.5 || sea && P.w>2.5 && P.w<3.5)){ vec3 sw=seaWave(x.xz+u_org.xz); v.xz=mix(v.xz,v.xz+sw.yz*2.2,0.25); } }
   float sp=length(v); if(sp>20.0) v*=20.0/sp;
-  vec3 x1=sweep(x,x+v*u_dt);
+  vec3 x1=inT?tubeFix(x,x+v*u_dt,true):tubeFix(x,sweep(x,x+v*u_dt),false);
   float ph=P.w;
   if(x1.x<1.0||x1.z<1.0||x1.y<1.0||x1.x>float(u_vdim.x)-1.0||x1.z>float(u_vdim.z)-1.0||x1.y>float(u_vdim.y)-1.0) ph+=30.0;
-  else { float vv=vox(ivec3(floor(x1))); float fy=fract(x1.y);
+  else if(!inT){ float vv=vox(ivec3(floor(x1))); float fy=fract(x1.y);
     // dentro de líquido normal (por debajo de su superficie): la CPU decide. Del mismo tipo, la partícula desaparece (nunca
     // pasa a líquido normal); de otro tipo, reaccionan (lava + agua → piedra u obsidiana). Miel y leche se hunden en el agua
     bool wl=ph<3.5;
@@ -187,7 +223,7 @@ void main(){ int i=idx(); vec4 Pi=texelFetch(u_pred,tc(i),0); if(Pi.w<0.5||Pi.w>
         dp+=(li+lj+sc)*gradW(r,rl); } }
   NEIGH_END
   float l=length(dp); if(l>0.1*PS) dp*=0.1*PS/l;
-  o=vec4(sweep(Pi.xyz,Pi.xyz+dp),Pi.w); }`;
+  vec3 np=Pi.xyz+dp; o=vec4(tubeIn(Pi.xyz)?tubeFix(Pi.xyz,np,true):tubeFix(Pi.xyz,sweep(Pi.xyz,np),false),Pi.w); }`;
 // 7) velocidad, viscosidad XSPH, cohesión, rozamiento y temperatura (escribe POS y VEL)
 const FS_FLVEL = GLSL_FLHEAD + `layout(location=0) out vec4 oP; layout(location=1) out vec4 oV;
 void main(){ int i=idx(); vec4 Pi=texelFetch(u_pred,tc(i),0); vec4 Xi=texelFetch(u_pos,tc(i),0); vec4 Vi=texelFetch(u_vel,tc(i),0);
@@ -204,7 +240,7 @@ void main(){ int i=idx(); vec4 Pi=texelFetch(u_pred,tc(i),0); vec4 Xi=texelFetch
   if(cn>0.0){ vec3 tc2=(cen/cn-Pi.xyz)/PS; float surf=clamp(1.0-cn/26.0,0.0,1.0); vi+=tc2*(lava?9.0:(honey?14.0:4.0))*surf*u_dt; } // cohesión (tensión superficial)
   // rozamiento con el suelo (la lava se pega, el agua resbala)
   vec2 sb=span(vox(ivec3(floor(Pi.xyz-vec3(0.0,RAD+0.04,0.0))))); float fb=floor(Pi.y-RAD-0.04);
-  bool ground=sb.y>sb.x && Pi.y-RAD-0.04<fb+sb.y;
+  bool ground=sb.y>sb.x && Pi.y-RAD-0.04<fb+sb.y && !tubeIn(Pi.xyz);
   if(ground) vi.xz*=lava?0.80:(honey?0.55:(cn<7.0?0.86:0.985)); // la miel se pega al suelo // una película fina se queda pegada (la línea de contacto frena el charco)
   float T=Vi.w;
   if(lava){ vi*=0.985; if(ws>0.0) T=mix(T,Ts/ws,0.15); T=clamp(T-u_dt*(cn<16.0?0.03:0.002),0.35,1.0); }
@@ -433,7 +469,7 @@ function flCommon(P) { const gl = R.gl; const u = P.u;
   if (u.u_waveK) gl.uniform1f(u.u_waveK, R.gfxU ? R.gfxU[0] : 1);
   if (u.u_org) gl.uniform3f(u.u_org, FL.org[0], FL.org[1], FL.org[2]);
   if (u.u_kp) gl.uniform1f(u.u_kp, FL.kp); if (u.u_ks) gl.uniform1f(u.u_ks, FL.ks); if (u.u_eps) gl.uniform1f(u.u_eps, FL.eps);
-  flBindTex(P, 'u_vox', 8, FL.vox, gl.TEXTURE_3D); if (u.u_shp !== undefined) { flShpUpload(); flBindTex(P, 'u_shp', 10, FL.shpTex); } if (u.u_wdist) wdBind(P); }
+  flBindTex(P, 'u_vox', 8, FL.vox, gl.TEXTURE_3D); if (u.u_shp !== undefined) { flShpUpload(); flBindTex(P, 'u_shp', 10, FL.shpTex); } if (u.u_tOn !== undefined) tubeBind(P); if (u.u_wdist) wdBind(P); }
 function flPass(P, fb, rows) { const gl = R.gl; gl.bindFramebuffer(gl.FRAMEBUFFER, fb); gl.viewport(0, 0, FL.W, rows); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
 function flStep() {
   const gl = R.gl; const rows = FL.M / FL.W; const T = FL.pos, V = FL.vel;

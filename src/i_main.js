@@ -97,7 +97,7 @@ function serializeWorld() {
   const players = Object.assign({}, G.playerStates || {}); players.__local = playerState(G.player); players.__local.name = G.player.name;
   if (G.net && G.net.role === 'host') for (const c of G.net.conns.values()) if (c.ent && c.ent.state) players[c.ent.name] = c.ent.state;
   const ents = []; for (const e of G.entities.values()) { if (e.proxy || e.remotePlayer || e.removed || e.dead) continue; if (e instanceof Mob && (e.persist || !e.def.hostile)) ents.push({ k: 'mob', ty: e.type, d: e.dim, x: e.x, y: e.y, z: e.z, hp: e.hp, c: e.color, p: e.persist, n: e.name }); else if (e.type === 'item') ents.push({ k: 'item', d: e.dim, x: e.x, y: e.y, z: e.z, s: e.stack }); else if (e.isBoat) ents.push({ k: 'boat', d: e.dim, x: e.x, y: e.y, z: e.z, r: e.rot }); }
-  return { format: 'minecraft2-world', version: 3, name: G.worldName, seed: G.seed, seedStr: G.seedStr, gameMode: G.defaultMode || G.gameMode, curMode: G.gameMode, difficulty: G.difficulty, cheats: G.cheats, time: G.time, rain: G.rain, rainTimer: G.rainTimer, worldSpawn: G.worldSpawn, dragonKilled: G.dragonKilled, endInit: G.endInit, gateway: G.gateway, keepInventory: G.keepInventory, doWaterDespawn: !!G.doWaterDespawn, doDaylightCycle: G.doDaylightCycle !== false, doWeatherCycle: G.doWeatherCycle !== false, containers: G.containers, spawned: [...G.spawned], dims, players, entities: ents, created: G.created || Date.now(), lastPlayed: Date.now(), structures: G.structures !== false, climate: G.climate || 1, dynTrees: !!G.dynTrees, fluid: typeof flSerialize === 'function' ? flSerialize() : null };
+  return { format: 'minecraft2-world', version: 3, name: G.worldName, seed: G.seed, seedStr: G.seedStr, gameMode: G.defaultMode || G.gameMode, curMode: G.gameMode, difficulty: G.difficulty, cheats: G.cheats, time: G.time, rain: G.rain, rainTimer: G.rainTimer, worldSpawn: G.worldSpawn, dragonKilled: G.dragonKilled, endInit: G.endInit, gateway: G.gateway, keepInventory: G.keepInventory, doWaterDespawn: !!G.doWaterDespawn, doDaylightCycle: G.doDaylightCycle !== false, doWeatherCycle: G.doWeatherCycle !== false, containers: G.containers, spawned: [...G.spawned], dims, players, entities: ents, created: G.created || Date.now(), lastPlayed: Date.now(), structures: G.structures !== false, climate: G.climate || 1, dynTrees: !!G.dynTrees, fluid: typeof flSerialize === 'function' ? flSerialize() : null, tubes: tubeSerialize() };
 }
 function worldIcon() { try { const c = document.createElement('canvas'); c.width = 64; c.height = 64; c.getContext('2d').drawImage($('gl'), ($('gl').width - $('gl').height) / 2, 0, $('gl').height, $('gl').height, 0, 0, 64, 64); return c.toDataURL('image/jpeg', 0.7); } catch (e) { return null; } }
 async function saveWorld(silent) {
@@ -128,7 +128,7 @@ function migrateWorld(data) { // v2 -> v3: los objetos pasaron de id 256+ a 1000
 }
 function startWorld(data, isNew, netWelcome) {
   data = migrateWorld(data); resetGameState(); audioInit();
-  G.worldName = data.name; G.seed = data.seed >>> 0; G.seedStr = data.seedStr; G.difficulty = data.difficulty ?? 2; G.cheats = data.cheats !== false; G.time = data.time ?? 1000; G.keepInventory = !!data.keepInventory; G.doWaterDespawn = !!data.doWaterDespawn; G.doDaylightCycle = data.doDaylightCycle !== false; G.doWeatherCycle = data.doWeatherCycle !== false; if (typeof flRestore === 'function') flRestore(data.fluid || null);
+  G.worldName = data.name; G.seed = data.seed >>> 0; G.seedStr = data.seedStr; G.difficulty = data.difficulty ?? 2; G.cheats = data.cheats !== false; G.time = data.time ?? 1000; G.keepInventory = !!data.keepInventory; G.doWaterDespawn = !!data.doWaterDespawn; G.doDaylightCycle = data.doDaylightCycle !== false; G.doWeatherCycle = data.doWeatherCycle !== false; if (typeof flRestore === 'function') flRestore(data.fluid || null); tubeRestore(netWelcome && G.net ? G.net.tubesPending : data && data.tubes);
   G.defaultMode = data.gameMode || 'survival'; G.gameMode = data.curMode || data.gameMode || 'survival'; G.created = data.created || Date.now(); G.structures = data.structures !== false;
   G.climate = data.climate ?? (isNew ? 3 : 1); // biomas por clima en mundos nuevos; los antiguos siguen con los clásicos
   G.worlds = { overworld: new World('overworld', G.seed, G.climate), nether: new World('nether', G.seed, G.climate), end: new World('end', G.seed, G.climate) };
@@ -461,6 +461,7 @@ function updateLights(dt) {
 // ------------------------------------------------------------ superposiciones y mano
 function drawOverlays(trans) {
   const gl = R.gl; const p = G.player; const w = G.world;
+  if (trans) { tubeDraw(); return; } // tubos del tubificador (vidrio, encima del fluido que llevan dentro)
   if (!trans) {
     const h = G.hit; const lines = [];
     if (h && !h.ent && !hudHidden && G.gameMode !== 'spectator') {
@@ -482,6 +483,7 @@ function drawOverlays(trans) {
       if (WE.p2) drawLines(boxLines(WE.p2[0] - 0.01, WE.p2[1] - 0.01, WE.p2[2] - 0.01, WE.p2[0] + 1.01, WE.p2[1] + 1.01, WE.p2[2] + 1.01), [0.5, 0.75, 1, 1]);
       if (WE.p1 && WE.p2) drawLines(boxLines(Math.min(WE.p1[0], WE.p2[0]) - 0.02, Math.min(WE.p1[1], WE.p2[1]) - 0.02, Math.min(WE.p1[2], WE.p2[2]) - 0.02, Math.max(WE.p1[0], WE.p2[0]) + 1.02, Math.max(WE.p1[1], WE.p2[1]) + 1.02, Math.max(WE.p1[2], WE.p2[2]) + 1.02), [1, 0.9, 0.3, 1]);
     } }
+    tubeGuide();
     const beams = entityBeams(p.dim); if (beams.length) drawLines(beams, [0.9, 0.4, 1, 1]);
     if (F3B) { const L = []; for (const e of G.entities.values()) if (e.dim === p.dim && Math.abs(e.x - p.x) < 48 && Math.abs(e.z - p.z) < 48) L.push(...boxLines(e.x - e.w / 2, e.y, e.z - e.w / 2, e.x + e.w / 2, e.y + e.h, e.z + e.w / 2)); if (L.length) drawLines(L, [1, 1, 1, 1]); }
     if (F3G) { const L = []; const cx = (Math.floor(p.x) >> 4) * 16, cz = (Math.floor(p.z) >> 4) * 16; for (const [x, z] of [[cx, cz], [cx + 16, cz], [cx, cz + 16], [cx + 16, cz + 16]]) L.push(x - R.cam[0], -R.cam[1], z - R.cam[2], x - R.cam[0], w.H - R.cam[1], z - R.cam[2]); for (let y = 0; y <= w.H; y += 16) L.push(...boxLines(cx, y, cz, cx + 16, y, cz + 16)); drawLines(L, [1, 1, 0, 1]); }

@@ -268,7 +268,7 @@ const CREATIVE_TABS = [['Construcción', i => { const d = REG[i]; return d.isBlo
   ['Colores', i => REG[i].isBlock && /wool|terracotta|glass|concrete|carpet/.test(REG[i].name)],
   ['Naturales', i => { const d = REG[i]; return d.isBlock && (/ore|log|leaves|sand|gravel|dirt|grass|nylium|sapling|flower|mushroom|cactus|snow|ice|stone$|netherrack|soul|end_stone|moss|sculk|dripstone|clay|mud|basalt|blackstone|kelp|seagrass|lily|vine|fungus|roots|stem|wart|melon|pumpkin|bush|fern|poppy|dandelion|orchid|cornflower|daisy|amethyst|cane|chorus|petals|debris/.test(d.name)); }],
   ['Funcionales', i => { const d = REG[i]; return d.isBlock && (d.ui || d.light || /portal|spawner|vault|bed|tnt|bars|rail|ladder|scaffold|lever|button|plate|rod|lamp|detector|target|note|slime|honey|sponge|bedrock/.test(d.name)) && !/stairs|slab|_wall$|fence|door/.test(d.name); }],
-  ['Herramientas', i => { const d = REG[i]; return !d.isBlock && (d.tool && d.tool.type !== 'sword' || /bucket|flint_and|extinguisher|flamethrower|sponge_item|diffuser|edit_tool|shears|compass|clock|spyglass|map|lead|brush|broom|boat|fishing|rocket|saddle|name_tag|bone_meal|eye_of|ender_pearl/.test(d.name)); }],
+  ['Herramientas', i => { const d = REG[i]; return !d.isBlock && (d.tool && d.tool.type !== 'sword' || /bucket|flint_and|extinguisher|flamethrower|sponge_item|diffuser|tubificador|edit_tool|shears|compass|clock|spyglass|map|lead|brush|broom|boat|fishing|rocket|saddle|name_tag|bone_meal|eye_of|ender_pearl/.test(d.name)); }],
   ['Combate', i => { const d = REG[i]; return !d.isBlock && (d.armor || (d.tool && d.tool.type === 'sword') || /bow|arrow|shield|trident|mace|totem|elytra|snowball|obliterator/.test(d.name) || (d.tool && d.tool.type === 'axe')); }],
   ['Comida', i => !REG[i].isBlock && !!REG[i].food],
   ['Ingredientes', i => { const d = REG[i]; return !d.isBlock && !d.food && !d.tool && !d.armor && !d.dur && !d.bucket && !/bow|arrow|shield|trident|mace|totem|elytra/.test(d.name); }],
@@ -299,7 +299,7 @@ const CR_GROUPS = [
   /ice$|snow/, /netherrack|nylium|soul_s|wart_block|shroomlight|magma_block|glowstone$/, /^end_stone$|chorus|dragon_egg/, /dripstone|amethyst|sculk/,
   /crafting_table|furnace|smoker|smithing|anvil|enchanting|bookshelf|barrel|chest$/, /torch|lantern|campfire|end_rod|sea_lantern|froglight|lamp/, /bed$|ladder|scaffolding|bars$|rail/,
   /redstone|lever|button|pressure_plate|target|daylight|note_block|lightning_rod|tnt|piston|observer|hopper|dispenser|dropper/,
-  /_shovel$|_pickaxe$|_axe$|_hoe$/, /bucket/, /flint_and_steel|fire_charge|bone_meal|shears|brush|fishing_rod|compass|clock|spyglass|map$|lead|name_tag|saddle|boat|broom|extinguisher|flamethrower|sponge_item|diffuser|edit_tool/,
+  /_shovel$|_pickaxe$|_axe$|_hoe$/, /bucket/, /flint_and_steel|fire_charge|bone_meal|shears|brush|fishing_rod|compass|clock|spyglass|map$|lead|name_tag|saddle|boat|broom|extinguisher|flamethrower|sponge_item|diffuser|tubificador|edit_tool/,
   /_sword$/, /bow$|crossbow|arrow|trident|mace|shield|totem|obliterator/, /_helmet$|_chestplate$|_leggings$|_boots$/, /elytra/
 ];
 const _crKey = new Map();
@@ -525,6 +525,7 @@ function placeBlock(hit, stack) {
 function useItem(hit) {
   const p = G.player; const w = p.world; const s = p.held(); const d = s ? REG[s.id] : null;
   if (d && d.editTool) { if (G.gameMode === 'creative' && hit && !hit.ent) weSetPos(2, hit.x, hit.y, hit.z); return true; } // world edit: pos2 (antes de abrir cofres o puertas)
+  if (d && d.tubeTool) { tubeUse(p, s); return 'hold'; } // tubificador: dibuja (o borra) mientras se mantiene, sin abrir puertas ni cofres
   // interacción con entidades
   if (hit && hit.ent) {
     const e = hit.ent;
@@ -653,6 +654,8 @@ function updateInteraction(dt) {
   if (p.swing > 0) { p.swing += dt * 6; if (p.swing > 1) p.swing = 0; }
   // difusor en la mano: golpear el aire cambia de modo (Líquido ↔ PBF)
   { const s = p.held(); if (attack && !MINE.atkPrev && !tgt && s && REG[s.id].diffuser && G.gameMode !== 'spectator') { s.mode = s.mode === 'pbf' ? 'liquid' : 'pbf'; p.swing = 0.01; showActionMsg('Difusor: modo ' + (s.mode === 'pbf' ? 'PBF (líquido normal → partículas)' : 'Líquido (partículas → líquido normal)')); showItemName(); playSound('hit', p.x, p.eye, p.z, 0.3, ID.iron_block); } }
+  // tubificador en la mano: golpear el aire cambia de modo (fino → medio → ancho → eliminar)
+  { const s = p.held(); if (attack && !MINE.atkPrev && !tgt && s && REG[s.id].tubeTool && G.gameMode !== 'spectator') tubeNextMode(p, s); }
   // Edit Tool (creativo): clic izquierdo en un bloque marca pos1 y no lo rompe
   const editHeld = (() => { const s = p.held(); return !!(s && REG[s.id].editTool); })();
   if (editHeld && attack && !MINE.atkPrev && tgt && !tgt.ent && G.gameMode === 'creative') { weSetPos(1, tgt.x, tgt.y, tgt.z); p.swing = 0.01; }
@@ -685,6 +688,7 @@ function updateInteraction(dt) {
     if (p.bowT > 0) { const pw = Math.min(1, p.bowT / 1); p.bowT = 0; if (pw > 0.1) { const dir = lookDir(p); if (s && REG[s.id].trident) { shoot('trident', p.dim, p.x, p.eye - 0.1, p.z, dir[0] * 30 * pw, dir[1] * 30 * pw, dir[2] * 30 * pw, p, { itemD: (s.d || 0) + 1 }); if (G.gameMode !== 'creative') p.inv[p.sel] = null; } else { const a = shoot('arrow', p.dim, p.x, p.eye - 0.1, p.z, dir[0] * 55 * pw, dir[1] * 55 * pw, dir[2] * 55 * pw, p, { power: pw * (1 + 0.25 * enchLvl(s, 'power')), pickable: G.gameMode !== 'creative' }); if (G.gameMode !== 'creative') takeItem(p, ID.arrow, 1); damageItem(p.inv, p.sel, 1); } playSound('bow', p.x, p.y, p.z, 0.8); updateHUD(); } }
     p.eatT = 0; p.spy = false; MINE.useCool = Math.min(MINE.useCool, 0);
   }
+  tubeTick(use); // el trazo del tubificador termina al soltar
   // elegir bloque
   if (held('pick') && !MINE.picked && tgt && !tgt.ent) { MINE.picked = true; const id = tgt.id === ID.furnace_lit ? ID.furnace : tgt.id; const idx = p.inv.findIndex(s => s && s.id === id); if (idx >= 0 && idx < 9) p.sel = idx; else if (G.gameMode === 'creative') { const free = p.inv.slice(0, 9).findIndex(s => !s); p.inv[free >= 0 ? free : p.sel] = { id, c: 1 }; if (free >= 0) p.sel = free; } else if (idx >= 9) { const t = p.inv[p.sel]; p.inv[p.sel] = p.inv[idx]; p.inv[idx] = t; } updateHUD(); showItemName(); }
   if (!held('pick')) MINE.picked = false;

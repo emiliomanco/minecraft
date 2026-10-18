@@ -60,7 +60,7 @@ function hostHandle(c, m) {
       G.entities.set(e.id, e); c.ent = e; n.peers = n.conns.size;
       c.send({ t: 'welcome', id: e.id, name, seed: G.seed, climate: G.climate, dyn: !!G.dynTrees, seedStr: G.seedStr, worldName: G.worldName, gm: G.gameMode, time: G.time, diff: G.difficulty, dk: G.dragonKilled, ei: G.endInit, gw: G.gateway, st: st || null, spawn: sp, hostName: G.player.name, hostId: G.player.id, keep: G.keepInventory, rules: { dc: G.doDaylightCycle !== false, wc: G.doWeatherCycle !== false, wd: !!G.doWaterDespawn } });
       const chunks = modifiedChunks(); for (let i = 0; i < chunks.length; i += 8) c.send({ t: 'chunks', list: chunks.slice(i, i + 8) });
-      c.send({ t: 'ready' });
+      c.send({ t: 'tubes', l: tubeSerialize() }); c.send({ t: 'ready' });
       chatMsg(name + ' se unió al juego', '#ff8'); netBroadcast({ t: 'chat', m: name + ' se unió al juego', sys: true }, c);
       break;
     }
@@ -76,6 +76,7 @@ function hostHandle(c, m) {
     case 'tnt': { if (!w) return; igniteTNT(w, m.x, m.y, m.z); break; }
     case 'boat': boatNetRecv(c, m); break;
     case 'flm': { const e = c.ent; if (e && Array.isArray(m.o) && Array.isArray(m.dir)) flamerEmit(G.worlds[e.dim] || G.world, m.o.map(Number), m.dir.map(Number), clamp(+m.dt || 0.05, 0, 0.1), e); break; }
+    case 'tubes': if (Array.isArray(m.l)) { tubeNetRecv(m.l); tubeNetSend(c); } break;
     case 'dif': { const e = c.ent; if (e && Array.isArray(m.p) && Math.hypot(m.p[0] - e.x, m.p[2] - e.z) < 8) diffuserAt(G.worlds[e.dim] || G.world, m.p.map(Number), m.m === 'pbf' ? 'pbf' : 'liquid', 1.6); break; }
     case 'spg': { const e = c.ent; if (e && Array.isArray(m.p) && Math.hypot(m.p[0] - e.x, m.p[2] - e.z) < 8) spongeAt(G.worlds[e.dim] || G.world, m.p.map(Number), 1.6); break; }
     case 'brm': { const e = c.ent; if (e && Array.isArray(m.h) && Array.isArray(m.v)) broomPush(e, Math.floor(e.y + 0.01), clamp(+m.dt || 0.05, 0, 0.1), { head: m.h, v: m.v }); break; }
@@ -132,6 +133,7 @@ function clientHandle(m, resolve, reject) {
     case 'welcome': n.welcome = m; n.chunks = []; break;
     case 'chunks': for (const c of m.list) (n.chunks || (n.chunks = [])).push(c); if (G.worlds) for (const c of m.list) applyNetChunk(c); break;
     case 'ready': n.clearTO && n.clearTO(); resolve && resolve(n.welcome); break;
+    case 'tubes': if (Array.isArray(m.l)) { if (G.worlds) tubeNetRecv(m.l); else n.tubesPending = m.l; } break;
     case 'bb': { G.applyingNet = true; for (const [d, x, y, z, id, meta] of m.l) { const w = G.worlds && G.worlds[d]; if (!w) continue; if (w.chunk(x >> 4, z >> 4)) w.set(x, y, z, id, meta); else { const k = ckey(x >> 4, z >> 4); const c = w.ensure(x >> 4, z >> 4); c.blocks[(x & 15) | ((z & 15) << 4) | (y << 8)] = id; c.meta[(x & 15) | ((z & 15) << 4) | (y << 8)] = meta; c.modified = true; } } G.applyingNet = false; break; }
     case 'ps': updateProxyPlayers(m.l); break;
     case 'es': updateProxyEntities(m.d, m.l); break;

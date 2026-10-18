@@ -769,6 +769,7 @@ defI('one_hit_obliterator', 'One-Hit Obliterator', { stack: 1, dmg: 1e9, obliter
 defI('flamethrower', 'Lanzallamas', { stack: 1, dur: 600, flamethrower: true });
 defI('edit_tool', 'Edit Tool', { stack: 1, editTool: true }); /* solo creativo: pos1 (clic izquierdo) y pos2 (clic derecho) para /set */
 defI('diffuser', 'Difusor', { stack: 1, diffuser: true }); /* agua y lava: partículas ↔ líquido normal (dos modos, se cambian golpeando el aire) */
+defI('tubificador', 'Tubificador3000', { stack: 1, tubeTool: true }); /* pluma 3D de tubos huecos para el fluido de partículas (4 modos, se cambian golpeando el aire) */
 defI('sponge_item', 'Esponja', { stack: 1, pbfSponge: true }); /* borra agua y lava: partículas del fluido continuo y líquido normal */
 // ---- codificación del meta de líquidos (agua/lava), compartida por simulación (k_fluids), mallado y render:
 //  bits 0-2: volumen en octavos (0 = bloque lleno 8/8, 1..7 = n/8)
@@ -1294,6 +1295,7 @@ function itemTexAuto(p, name) {
     flamethrower: () => { for (let i = 0; i < 9; i++) { p.set(4 + i, 11 - i, [90, 90, 98]); p.set(5 + i, 11 - i, [140, 140, 150]); } p.rect(2, 9, 6, 14, [190, 70, 30]); p.rect(3, 10, 4, 13, [235, 125, 60]); p.rect(6, 12, 8, 13, [60, 60, 66]); p.set(14, 2, [120, 170, 255]); p.set(13, 1, [255, 190, 80]); p.set(14, 1, [255, 235, 150]); p.set(15, 1, [255, 150, 40]); p.set(15, 0, [255, 120, 30]); outline(p); },
     edit_tool: () => { for (let k = 0; k < 9; k++) { p.set(2 + k, 14 - k, [120, 84, 44]); p.set(3 + k, 14 - k, [92, 62, 32]); } p.rect(9, 1, 14, 6, [190, 80, 230]); p.rect(10, 2, 13, 5, [235, 150, 255]); p.set(11, 3, [255, 235, 255]); p.set(12, 4, [255, 255, 255]); outline(p); },
     diffuser: () => { for (let k = 0; k < 7; k++) { p.set(2 + k, 14 - k, [125, 88, 46]); p.set(3 + k, 14 - k, [96, 66, 34]); } for (let y = 2; y < 9; y++) for (let x = 7; x < 14; x++) { const d = Math.abs((x - 10.5) + (y - 5.5)); if (d < 3) p.set(x, y, [212, 216, 222].map(v => v - d * 28)); } for (const [x, y] of [[13, 1], [14, 2], [12, 0], [15, 3], [14, 0]]) p.set(x, y, [150, 210, 255]); outline(p); },
+    tubificador: () => { for (let a = 0; a < 16; a++) { const t = a / 16 * Math.PI * 2; p.set(Math.round(5 + Math.cos(t) * 3.2), Math.round(5 + Math.sin(t) * 2.6), [150, 215, 245]); } for (let k = 0; k < 9; k++) { p.set(3 + k, 14 - k, [240, 196, 64]); p.set(4 + k, 14 - k, [184, 138, 30]); } p.set(12, 4, [255, 225, 120]); p.set(13, 3, [120, 235, 240]); p.set(13, 2, [200, 255, 255]); p.set(14, 2, [80, 200, 215]); p.set(14, 1, [230, 255, 255]); outline(p); },
     sponge_item: () => { for (let y = 4; y < 13; y++) for (let x = 2; x < 14; x++) if (Math.hypot((x - 7.5) / 5.6, (y - 8.5) / 4.4) < 1) p.set(x, y, [228, 208, 75].map(v => v + (p.r() - 0.5) * 22)); for (let k = 0; k < 12; k++) p.set(4 + ((p.r() * 8) | 0), 6 + ((p.r() * 6) | 0), [165, 140, 38]); outline(p); },
     experience_bottle: () => { for (let y = 5; y < 15; y++) for (let x = 4; x < 12; x++) if (Math.hypot(x - 7.5, y - 10) < 4.2) p.set(x, y, [120, 230, 90]); p.rect(7, 2, 8, 5, [200, 220, 240]); outline(p); },
     saddle: () => blob([120, 70, 40], 5), name_tag: () => { p.rect(3, 5, 12, 10, [220, 210, 180]); outline(p); }, netherite_upgrade: () => { p.rect(3, 2, 12, 13, [60, 50, 50]); p.rect(5, 4, 10, 11, [110, 90, 85]); outline(p); },
@@ -6209,7 +6211,7 @@ shaped('gold_ingot', 1, ['NNN', 'NNN', 'NNN'], { N: 'gold_nugget' }); shapeless(
 shaped('iron_ingot', 1, ['NNN', 'NNN', 'NNN'], { N: 'iron_nugget' }); shapeless('iron_nugget', 9, ['iron_ingot']);
 shaped('bucket', 1, ['I I', ' I '], { I: 'iron_ingot' }); shapeless('flint_and_steel', 1, ['iron_ingot', 'flint']);
 shaped('fire_extinguisher', 1, ['INI', 'I I', 'INI'], { I: 'iron_ingot', N: 'iron_nugget' });
-shaped('flamethrower', 1, ['  F', 'IBI', 'II '], { I: 'iron_ingot', B: 'blaze_rod', F: 'flint_and_steel' }); shapeless('sponge_item', 2, ['sponge']); shaped('diffuser', 1, [' HP', ' PH', 'P  '], { P: 'stick', H: 'iron_ingot' });
+shaped('flamethrower', 1, ['  F', 'IBI', 'II '], { I: 'iron_ingot', B: 'blaze_rod', F: 'flint_and_steel' }); shapeless('sponge_item', 2, ['sponge']); shaped('tubificador', 1, ['GDG', 'DPD', ' P '], { G: 'gold_ingot', D: 'diamond', P: 'stick' }); shaped('diffuser', 1, [' HP', ' PH', 'P  '], { P: 'stick', H: 'iron_ingot' });
 shaped('shears', 1, [' I', 'I '], { I: 'iron_ingot' }); shaped('compass', 1, [' I ', 'IRI', ' I '], { I: 'iron_ingot', R: 'redstone' }); shaped('clock', 1, [' G ', 'GRG', ' G '], { G: 'gold_ingot', R: 'redstone' });
 shaped('bow', 1, [' TS', 'T S', ' TS'], { T: 'stick', S: 'string' }); shaped('arrow', 4, ['F', 'S', 'E'], { F: 'flint', S: 'stick', E: 'feather' });
 shaped('crossbow', 1, ['STS', 'TIT', ' S '], { S: 'stick', T: 'string', I: 'iron_ingot' });
@@ -7005,7 +7007,7 @@ const CREATIVE_TABS = [['Construcción', i => { const d = REG[i]; return d.isBlo
   ['Colores', i => REG[i].isBlock && /wool|terracotta|glass|concrete|carpet/.test(REG[i].name)],
   ['Naturales', i => { const d = REG[i]; return d.isBlock && (/ore|log|leaves|sand|gravel|dirt|grass|nylium|sapling|flower|mushroom|cactus|snow|ice|stone$|netherrack|soul|end_stone|moss|sculk|dripstone|clay|mud|basalt|blackstone|kelp|seagrass|lily|vine|fungus|roots|stem|wart|melon|pumpkin|bush|fern|poppy|dandelion|orchid|cornflower|daisy|amethyst|cane|chorus|petals|debris/.test(d.name)); }],
   ['Funcionales', i => { const d = REG[i]; return d.isBlock && (d.ui || d.light || /portal|spawner|vault|bed|tnt|bars|rail|ladder|scaffold|lever|button|plate|rod|lamp|detector|target|note|slime|honey|sponge|bedrock/.test(d.name)) && !/stairs|slab|_wall$|fence|door/.test(d.name); }],
-  ['Herramientas', i => { const d = REG[i]; return !d.isBlock && (d.tool && d.tool.type !== 'sword' || /bucket|flint_and|extinguisher|flamethrower|sponge_item|diffuser|edit_tool|shears|compass|clock|spyglass|map|lead|brush|broom|boat|fishing|rocket|saddle|name_tag|bone_meal|eye_of|ender_pearl/.test(d.name)); }],
+  ['Herramientas', i => { const d = REG[i]; return !d.isBlock && (d.tool && d.tool.type !== 'sword' || /bucket|flint_and|extinguisher|flamethrower|sponge_item|diffuser|tubificador|edit_tool|shears|compass|clock|spyglass|map|lead|brush|broom|boat|fishing|rocket|saddle|name_tag|bone_meal|eye_of|ender_pearl/.test(d.name)); }],
   ['Combate', i => { const d = REG[i]; return !d.isBlock && (d.armor || (d.tool && d.tool.type === 'sword') || /bow|arrow|shield|trident|mace|totem|elytra|snowball|obliterator/.test(d.name) || (d.tool && d.tool.type === 'axe')); }],
   ['Comida', i => !REG[i].isBlock && !!REG[i].food],
   ['Ingredientes', i => { const d = REG[i]; return !d.isBlock && !d.food && !d.tool && !d.armor && !d.dur && !d.bucket && !/bow|arrow|shield|trident|mace|totem|elytra/.test(d.name); }],
@@ -7036,7 +7038,7 @@ const CR_GROUPS = [
   /ice$|snow/, /netherrack|nylium|soul_s|wart_block|shroomlight|magma_block|glowstone$/, /^end_stone$|chorus|dragon_egg/, /dripstone|amethyst|sculk/,
   /crafting_table|furnace|smoker|smithing|anvil|enchanting|bookshelf|barrel|chest$/, /torch|lantern|campfire|end_rod|sea_lantern|froglight|lamp/, /bed$|ladder|scaffolding|bars$|rail/,
   /redstone|lever|button|pressure_plate|target|daylight|note_block|lightning_rod|tnt|piston|observer|hopper|dispenser|dropper/,
-  /_shovel$|_pickaxe$|_axe$|_hoe$/, /bucket/, /flint_and_steel|fire_charge|bone_meal|shears|brush|fishing_rod|compass|clock|spyglass|map$|lead|name_tag|saddle|boat|broom|extinguisher|flamethrower|sponge_item|diffuser|edit_tool/,
+  /_shovel$|_pickaxe$|_axe$|_hoe$/, /bucket/, /flint_and_steel|fire_charge|bone_meal|shears|brush|fishing_rod|compass|clock|spyglass|map$|lead|name_tag|saddle|boat|broom|extinguisher|flamethrower|sponge_item|diffuser|tubificador|edit_tool/,
   /_sword$/, /bow$|crossbow|arrow|trident|mace|shield|totem|obliterator/, /_helmet$|_chestplate$|_leggings$|_boots$/, /elytra/
 ];
 const _crKey = new Map();
@@ -7262,6 +7264,7 @@ function placeBlock(hit, stack) {
 function useItem(hit) {
   const p = G.player; const w = p.world; const s = p.held(); const d = s ? REG[s.id] : null;
   if (d && d.editTool) { if (G.gameMode === 'creative' && hit && !hit.ent) weSetPos(2, hit.x, hit.y, hit.z); return true; } // world edit: pos2 (antes de abrir cofres o puertas)
+  if (d && d.tubeTool) { tubeUse(p, s); return 'hold'; } // tubificador: dibuja (o borra) mientras se mantiene, sin abrir puertas ni cofres
   // interacción con entidades
   if (hit && hit.ent) {
     const e = hit.ent;
@@ -7390,6 +7393,8 @@ function updateInteraction(dt) {
   if (p.swing > 0) { p.swing += dt * 6; if (p.swing > 1) p.swing = 0; }
   // difusor en la mano: golpear el aire cambia de modo (Líquido ↔ PBF)
   { const s = p.held(); if (attack && !MINE.atkPrev && !tgt && s && REG[s.id].diffuser && G.gameMode !== 'spectator') { s.mode = s.mode === 'pbf' ? 'liquid' : 'pbf'; p.swing = 0.01; showActionMsg('Difusor: modo ' + (s.mode === 'pbf' ? 'PBF (líquido normal → partículas)' : 'Líquido (partículas → líquido normal)')); showItemName(); playSound('hit', p.x, p.eye, p.z, 0.3, ID.iron_block); } }
+  // tubificador en la mano: golpear el aire cambia de modo (fino → medio → ancho → eliminar)
+  { const s = p.held(); if (attack && !MINE.atkPrev && !tgt && s && REG[s.id].tubeTool && G.gameMode !== 'spectator') tubeNextMode(p, s); }
   // Edit Tool (creativo): clic izquierdo en un bloque marca pos1 y no lo rompe
   const editHeld = (() => { const s = p.held(); return !!(s && REG[s.id].editTool); })();
   if (editHeld && attack && !MINE.atkPrev && tgt && !tgt.ent && G.gameMode === 'creative') { weSetPos(1, tgt.x, tgt.y, tgt.z); p.swing = 0.01; }
@@ -7422,6 +7427,7 @@ function updateInteraction(dt) {
     if (p.bowT > 0) { const pw = Math.min(1, p.bowT / 1); p.bowT = 0; if (pw > 0.1) { const dir = lookDir(p); if (s && REG[s.id].trident) { shoot('trident', p.dim, p.x, p.eye - 0.1, p.z, dir[0] * 30 * pw, dir[1] * 30 * pw, dir[2] * 30 * pw, p, { itemD: (s.d || 0) + 1 }); if (G.gameMode !== 'creative') p.inv[p.sel] = null; } else { const a = shoot('arrow', p.dim, p.x, p.eye - 0.1, p.z, dir[0] * 55 * pw, dir[1] * 55 * pw, dir[2] * 55 * pw, p, { power: pw * (1 + 0.25 * enchLvl(s, 'power')), pickable: G.gameMode !== 'creative' }); if (G.gameMode !== 'creative') takeItem(p, ID.arrow, 1); damageItem(p.inv, p.sel, 1); } playSound('bow', p.x, p.y, p.z, 0.8); updateHUD(); } }
     p.eatT = 0; p.spy = false; MINE.useCool = Math.min(MINE.useCool, 0);
   }
+  tubeTick(use); // el trazo del tubificador termina al soltar
   // elegir bloque
   if (held('pick') && !MINE.picked && tgt && !tgt.ent) { MINE.picked = true; const id = tgt.id === ID.furnace_lit ? ID.furnace : tgt.id; const idx = p.inv.findIndex(s => s && s.id === id); if (idx >= 0 && idx < 9) p.sel = idx; else if (G.gameMode === 'creative') { const free = p.inv.slice(0, 9).findIndex(s => !s); p.inv[free >= 0 ? free : p.sel] = { id, c: 1 }; if (free >= 0) p.sel = free; } else if (idx >= 9) { const t = p.inv[p.sel]; p.inv[p.sel] = p.inv[idx]; p.inv[idx] = t; } updateHUD(); showItemName(); }
   if (!held('pick')) MINE.picked = false;
@@ -7553,7 +7559,7 @@ function hostHandle(c, m) {
       G.entities.set(e.id, e); c.ent = e; n.peers = n.conns.size;
       c.send({ t: 'welcome', id: e.id, name, seed: G.seed, climate: G.climate, dyn: !!G.dynTrees, seedStr: G.seedStr, worldName: G.worldName, gm: G.gameMode, time: G.time, diff: G.difficulty, dk: G.dragonKilled, ei: G.endInit, gw: G.gateway, st: st || null, spawn: sp, hostName: G.player.name, hostId: G.player.id, keep: G.keepInventory, rules: { dc: G.doDaylightCycle !== false, wc: G.doWeatherCycle !== false, wd: !!G.doWaterDespawn } });
       const chunks = modifiedChunks(); for (let i = 0; i < chunks.length; i += 8) c.send({ t: 'chunks', list: chunks.slice(i, i + 8) });
-      c.send({ t: 'ready' });
+      c.send({ t: 'tubes', l: tubeSerialize() }); c.send({ t: 'ready' });
       chatMsg(name + ' se unió al juego', '#ff8'); netBroadcast({ t: 'chat', m: name + ' se unió al juego', sys: true }, c);
       break;
     }
@@ -7569,6 +7575,7 @@ function hostHandle(c, m) {
     case 'tnt': { if (!w) return; igniteTNT(w, m.x, m.y, m.z); break; }
     case 'boat': boatNetRecv(c, m); break;
     case 'flm': { const e = c.ent; if (e && Array.isArray(m.o) && Array.isArray(m.dir)) flamerEmit(G.worlds[e.dim] || G.world, m.o.map(Number), m.dir.map(Number), clamp(+m.dt || 0.05, 0, 0.1), e); break; }
+    case 'tubes': if (Array.isArray(m.l)) { tubeNetRecv(m.l); tubeNetSend(c); } break;
     case 'dif': { const e = c.ent; if (e && Array.isArray(m.p) && Math.hypot(m.p[0] - e.x, m.p[2] - e.z) < 8) diffuserAt(G.worlds[e.dim] || G.world, m.p.map(Number), m.m === 'pbf' ? 'pbf' : 'liquid', 1.6); break; }
     case 'spg': { const e = c.ent; if (e && Array.isArray(m.p) && Math.hypot(m.p[0] - e.x, m.p[2] - e.z) < 8) spongeAt(G.worlds[e.dim] || G.world, m.p.map(Number), 1.6); break; }
     case 'brm': { const e = c.ent; if (e && Array.isArray(m.h) && Array.isArray(m.v)) broomPush(e, Math.floor(e.y + 0.01), clamp(+m.dt || 0.05, 0, 0.1), { head: m.h, v: m.v }); break; }
@@ -7625,6 +7632,7 @@ function clientHandle(m, resolve, reject) {
     case 'welcome': n.welcome = m; n.chunks = []; break;
     case 'chunks': for (const c of m.list) (n.chunks || (n.chunks = [])).push(c); if (G.worlds) for (const c of m.list) applyNetChunk(c); break;
     case 'ready': n.clearTO && n.clearTO(); resolve && resolve(n.welcome); break;
+    case 'tubes': if (Array.isArray(m.l)) { if (G.worlds) tubeNetRecv(m.l); else n.tubesPending = m.l; } break;
     case 'bb': { G.applyingNet = true; for (const [d, x, y, z, id, meta] of m.l) { const w = G.worlds && G.worlds[d]; if (!w) continue; if (w.chunk(x >> 4, z >> 4)) w.set(x, y, z, id, meta); else { const k = ckey(x >> 4, z >> 4); const c = w.ensure(x >> 4, z >> 4); c.blocks[(x & 15) | ((z & 15) << 4) | (y << 8)] = id; c.meta[(x & 15) | ((z & 15) << 4) | (y << 8)] = meta; c.modified = true; } } G.applyingNet = false; break; }
     case 'ps': updateProxyPlayers(m.l); break;
     case 'es': updateProxyEntities(m.d, m.l); break;
@@ -8328,7 +8336,7 @@ function waterSurfaceAt(w, x, y, z) {
 }
 // ---- cubos con capacidad: 10 L (10000 ml) = un bloque de líquido; cada partícula del fluido continuo son 0,08 L
 const BUCKET_ML = 10000, ML_PER_EIGHTH = 1250; const mlPerPart = () => BUCKET_ML / (typeof FL_PPB !== 'undefined' ? FL_PPB : 216); // un cubo (10 L) = un bloque = FL_PPB partículas (216 o 1728 según el tamaño)
-function bucketLabel(s) { const d = s && REG[s.id]; if (d && d.diffuser) return s.mode === 'pbf' ? ' (modo PBF)' : ' (modo Líquido)'; if (!d || d.bucket === undefined || !d.bucket) return ''; return ' (' + (((s.ml ?? BUCKET_ML)) / 1000).toFixed(1) + ' L)'; }
+function bucketLabel(s) { const d = s && REG[s.id]; if (d && d.diffuser) return s.mode === 'pbf' ? ' (modo PBF)' : ' (modo Líquido)'; if (d && d.tubeTool) return ' (' + TUBE_MODE_NAME[tubeMode(s)] + ')'; if (!d || d.bucket === undefined || !d.bucket) return ''; return ' (' + (((s.ml ?? BUCKET_ML)) / 1000).toFixed(1) + ' L)'; }
 const BKT_ACC = new Map();
 // recoge hasta `room` ml del líquido que hay en una caja pequeña e invisible alrededor de donde apunta el jugador
 // cont: 0 vacío (acepta el primero que encuentre), 1 agua, 2 lava (solo ese). Devuelve { liq, ml }
@@ -9202,7 +9210,7 @@ function flApplySize(sz) { FL.iters = sz === 2 ? 3 : 5; /* con partículas peque
 function flSub(src) { return src.replace('const float H=0.34, H2=0.1156, RAD=0.066;', `const float H=${FL_H.toFixed(6)}, H2=${(FL_H * FL_H).toFixed(8)}, RAD=${FL_R.toFixed(6)}, PS=${FL_PS.toFixed(4)};`); }
 const GLSL_FLHEAD = `#version 300 es
 precision highp float; precision highp int; precision highp sampler2D; precision highp sampler3D;
-uniform sampler2D u_pos, u_vel, u_pred, u_lam, u_key, u_tab, u_shp; uniform sampler3D u_vox;
+uniform sampler2D u_pos, u_vel, u_pred, u_lam, u_key, u_tab, u_shp, u_tcell, u_tlist, u_tseg; uniform sampler3D u_vox; uniform ivec3 u_tdim; uniform int u_tOn;
 uniform ivec3 u_vdim; uniform int u_M; uniform float u_dt, u_kp, u_ks, u_eps;
 const float H=0.34, H2=0.1156, RAD=0.066;
 uniform float u_time, u_rain, u_tide; uniform vec3 u_org;
@@ -9238,6 +9246,39 @@ void shpBox(float v,int k,out vec3 lo,out vec3 hi){ if(v==1.0){ lo=vec3(0.0); hi
 // parte de la celda que hace de suelo o de pared en vertical (y0,y1); vacía si y1<=y0 (formas finas como el cristal o una
 // puerta no cuentan: el líquido las rodea por los huecos)
 vec2 span(float v){ if(v==1.0) return vec2(0.0,1.0); if(v<50.5) return vec2(1.0,0.0); return shT(int(v),6).xy/16.0; }
+// ¿el punto cae dentro de la parte sólida de su celda?
+bool solidPt(vec3 p){ ivec3 c=ivec3(floor(p)); float vc=vox(c); int nb=shpN(vc);
+  for(int q=0;q<3;q++){ if(q>=nb) break; vec3 lo, hi; shpBox(vc,q,lo,hi); lo+=vec3(c); hi+=vec3(c); if(all(greaterThanEqual(p,lo)) && all(lessThan(p,hi))) return true; }
+  return false; }
+// tubos del Tubificador3000: tramos (a, b, radio interior, bocas abiertas) repartidos en una rejilla de celdas de 2 bloques.
+// Por dentro son huecos (el líquido va por ellos aunque crucen bloques); la pared no deja pasar de fuera a dentro ni al
+// revés; por las bocas abiertas se entra y se sale
+ivec2 t2(int k){ return ivec2(k&1023, k>>10); }
+vec2 tCell(vec3 p){ ivec3 c=ivec3(floor(p*0.5)); if(any(lessThan(c,ivec3(0))) || any(greaterThanEqual(c,u_tdim))) return vec2(0.0); int k=c.x+u_tdim.x*(c.y+u_tdim.y*c.z); return texelFetch(u_tcell,ivec2(k&255,k>>8),0).xy; }
+float tWall(float r){ return 0.03+0.12*r; }
+// q: punto más cercano del eje; perp: distancia a la recta del tramo. false: el punto queda más allá de una boca abierta
+bool tSeg(int s, vec3 p, out vec3 q, out float r, out float perp){
+  vec4 A=texelFetch(u_tseg,t2(s*2),0), B=texelFetch(u_tseg,t2(s*2+1),0); vec3 ab=B.xyz-A.xyz; float t=dot(p-A.xyz,ab)/max(dot(ab,ab),1e-8); int fl=int(B.w+0.5);
+  r=A.w; perp=length(p-(A.xyz+ab*t)); q=A.xyz+ab*clamp(t,0.0,1.0);
+  return !((t<0.0 && (fl&1)!=0) || (t>1.0 && (fl&2)!=0)); }
+bool tubeIn(vec3 p){ if(u_tOn==0) return false; vec2 se=tCell(p); int st=int(se.x), n=int(se.y);
+  for(int k=0;k<48;k++){ if(k>=n) break; int s=int(texelFetch(u_tlist,t2(st+k),0).x); vec3 q; float r, pp; if(tSeg(s,p,q,r,pp) && length(p-q)<r) return true; }
+  return false; }
+vec3 tubeFix(vec3 x0, vec3 x1, bool inT){
+  if(u_tOn==0) return x1; vec2 se=tCell(x0); int st=int(se.x), n=int(se.y); if(n==0) return x1;
+  if(inT){ // dentro: seguir dentro (salvo que salga por una boca)
+    bool hit=false; float bd=1e9; vec3 bq=x1; float br=0.0;
+    for(int k=0;k<48;k++){ if(k>=n) break; int s=int(texelFetch(u_tlist,t2(st+k),0).x); vec3 q; float r, pp;
+      if(!tSeg(s,x1,q,r,pp)){ if(pp<r) return x1; continue; }
+      hit=true; float d=length(x1-q); if(d<r-RAD) return x1; if(d-r<bd){ bd=d-r; bq=q; br=r; } }
+    if(!hit) return x1;
+    vec3 nn=x1-bq; float l=length(nn); nn=l>1e-5?nn/l:vec3(0.0,1.0,0.0); return bq+nn*(br-RAD);
+  }
+  for(int k=0;k<48;k++){ if(k>=n) break; int s=int(texelFetch(u_tlist,t2(st+k),0).x); vec3 q; float r, pp; // fuera: no cruzar la pared
+    if(!tSeg(s,x1,q,r,pp)) continue; float ro=r+tWall(r)+RAD; float d=length(x1-q); if(d>=ro) continue;
+    vec3 q0; float r0, p0; if(!tSeg(s,x0,q0,r0,p0)) continue; // viene de más allá de la boca: entra por ella
+    vec3 nn=x1-q; float l=length(nn); if(l<1e-5){ nn=x0-q0; l=length(nn); } nn=l>1e-5?nn/l:vec3(0.0,1.0,0.0); x1=q+nn*ro; }
+  return x1; }
 // altura del suelo bajo la columna de la celda c (parte sólida de c o tope del bloque de abajo); hueco de 1+ bloques: c.y-1.5
 float supH(ivec3 c){ float v=vox(c); if(v>49.5&&v<50.5) return float(c.y)+1.0; vec2 s=span(v); if(s.y>s.x) return float(c.y)+s.y; float vb=vox(c-ivec3(0,1,0)); if(vb>49.5&&vb<50.5) return float(c.y); vec2 b=span(vb); if(b.y>b.x) return float(c.y-1)+b.y; return float(c.y)-1.5; } // 50 = celda de aire ya llena de partículas
 // ¿la celda tapa el paso a la altura y? (su parte sólida sube por encima)
@@ -9274,15 +9315,18 @@ const FS_FLPRED = GLSL_FLHEAD + `
 uniform vec4 u_ent[8], u_entV[8]; uniform int u_nEnt; out vec4 o;
 void main(){
   int i=idx(); vec4 P=texelFetch(u_pos,tc(i),0); if(P.w<0.5 || P.w>=10.0){ o=P; return; }
-  vec3 v=texelFetch(u_vel,tc(i),0).xyz; vec3 x=P.xyz;
-  // dentro de un bloque (lo pusieron encima): salir por arriba
-  { ivec3 c=ivec3(floor(x)); float vc=vox(c); int nb=shpN(vc);
+  vec3 v=texelFetch(u_vel,tc(i),0).xyz; vec3 x=P.xyz; bool inT=tubeIn(x);
+  // dentro de un bloque (apareció dentro o le pusieron uno encima): salir por la cara con hueco libre más cercana (a un
+  // lado, abajo o arriba), no siempre hacia arriba
+  if(!inT){ ivec3 c=ivec3(floor(x)); float vc=vox(c); int nb=shpN(vc);
     for(int q=0;q<3;q++){ if(q>=nb) break; vec3 lo, hi; shpBox(vc,q,lo,hi); lo+=vec3(c); hi+=vec3(c);
       if(!(all(greaterThanEqual(x,lo)) && all(lessThan(x,hi)))) continue;
-      if(hi.x-lo.x>0.99 && hi.z-lo.z>0.99) x.y=hi.y+RAD+0.01; // cubre toda la celda: por arriba
-      else { vec3 dl=x-lo, dh=hi-x; float m=min(min(min(dl.x,dh.x),min(dl.z,dh.z)),dh.y); // forma fina: por la cara más cercana
-        if(m==dh.y) x.y=hi.y+RAD+0.01; else if(m==dl.x) x.x=lo.x-RAD-0.01; else if(m==dh.x) x.x=hi.x+RAD+0.01; else if(m==dl.z) x.z=lo.z-RAD-0.01; else x.z=hi.z+RAD+0.01; }
-      v=vec3(0.0); break; } }
+      float e=RAD+0.01; float best=1e9; vec3 bp=vec3(x.x,hi.y+e,x.z);
+      for(int f=0;f<6;f++){ vec3 t=x; float d; // los lados primero: a igual distancia gana un lado
+        if(f==0){ t.x=hi.x+e; d=hi.x-x.x; } else if(f==1){ t.x=lo.x-e; d=x.x-lo.x; } else if(f==2){ t.z=hi.z+e; d=hi.z-x.z; }
+        else if(f==3){ t.z=lo.z-e; d=x.z-lo.z; } else if(f==4){ t.y=lo.y-e; d=x.y-lo.y; } else { t.y=hi.y+e; d=hi.y-x.y; }
+        if(d<best && !solidPt(t)){ best=d; bp=t; } }
+      x=bp; v=vec3(0.0); break; } }
   v.y-=9.81*u_dt;
   for(int e=0;e<8;e++){ if(e>=u_nEnt) break; vec4 E=u_ent[e], EV=u_entV[e];
     float t=clamp(x.y-E.y,-EV.w,EV.w); vec3 c=vec3(E.x,E.y+t,E.z); vec3 d=x-c; float dl=length(d);
@@ -9293,7 +9337,7 @@ void main(){
   // ladera: en reposo sobre el suelo, buscar (radio 2 bloques) la celda alcanzable más cercana con el suelo más bajo y
   // correr hacia ella; las vecinas del mismo líquido vienen detrás por la cohesión y la viscosidad (XSPH). Si no hay
   // ninguna más baja, la superficie es plana y se queda quieta.
-  { ivec3 c=ivec3(floor(x)); float h0=supH(c);
+  if(!inT){ ivec3 c=ivec3(floor(x)); float h0=supH(c);
     if(x.y-h0<0.45){
       float best=1e9; vec2 tgt=vec2(0.0);
       for(int dz=-2;dz<=2;dz++) for(int dx=-2;dx<=2;dx++){
@@ -9306,12 +9350,12 @@ void main(){
     } }
   // orilla: junto a (o sobre) el mar, el oleaje arrastra el agua adelante y atrás
   { ivec3 c=ivec3(floor(x)); bool sea=false; for(int k=0;k<6;k++){ ivec3 o2=k==0?ivec3(0,-1,0):k==1?ivec3(1,-1,0):k==2?ivec3(-1,-1,0):k==3?ivec3(0,-1,1):k==4?ivec3(0,-1,-1):ivec3(0,0,0); if(vox(c+o2)==27.0) sea=true; }
-    if(sea && P.w>0.5 && P.w<2.5 || sea && P.w>2.5 && P.w<3.5){ vec3 sw=seaWave(x.xz+u_org.xz); v.xz=mix(v.xz,v.xz+sw.yz*2.2,0.25); } }
+    if(!inT && (sea && P.w>0.5 && P.w<2.5 || sea && P.w>2.5 && P.w<3.5)){ vec3 sw=seaWave(x.xz+u_org.xz); v.xz=mix(v.xz,v.xz+sw.yz*2.2,0.25); } }
   float sp=length(v); if(sp>20.0) v*=20.0/sp;
-  vec3 x1=sweep(x,x+v*u_dt);
+  vec3 x1=inT?tubeFix(x,x+v*u_dt,true):tubeFix(x,sweep(x,x+v*u_dt),false);
   float ph=P.w;
   if(x1.x<1.0||x1.z<1.0||x1.y<1.0||x1.x>float(u_vdim.x)-1.0||x1.z>float(u_vdim.z)-1.0||x1.y>float(u_vdim.y)-1.0) ph+=30.0;
-  else { float vv=vox(ivec3(floor(x1))); float fy=fract(x1.y);
+  else if(!inT){ float vv=vox(ivec3(floor(x1))); float fy=fract(x1.y);
     // dentro de líquido normal (por debajo de su superficie): la CPU decide. Del mismo tipo, la partícula desaparece (nunca
     // pasa a líquido normal); de otro tipo, reaccionan (lava + agua → piedra u obsidiana). Miel y leche se hunden en el agua
     bool wl=ph<3.5;
@@ -9361,7 +9405,7 @@ void main(){ int i=idx(); vec4 Pi=texelFetch(u_pred,tc(i),0); if(Pi.w<0.5||Pi.w>
         dp+=(li+lj+sc)*gradW(r,rl); } }
   NEIGH_END
   float l=length(dp); if(l>0.1*PS) dp*=0.1*PS/l;
-  o=vec4(sweep(Pi.xyz,Pi.xyz+dp),Pi.w); }`;
+  vec3 np=Pi.xyz+dp; o=vec4(tubeIn(Pi.xyz)?tubeFix(Pi.xyz,np,true):tubeFix(Pi.xyz,sweep(Pi.xyz,np),false),Pi.w); }`;
 // 7) velocidad, viscosidad XSPH, cohesión, rozamiento y temperatura (escribe POS y VEL)
 const FS_FLVEL = GLSL_FLHEAD + `layout(location=0) out vec4 oP; layout(location=1) out vec4 oV;
 void main(){ int i=idx(); vec4 Pi=texelFetch(u_pred,tc(i),0); vec4 Xi=texelFetch(u_pos,tc(i),0); vec4 Vi=texelFetch(u_vel,tc(i),0);
@@ -9378,7 +9422,7 @@ void main(){ int i=idx(); vec4 Pi=texelFetch(u_pred,tc(i),0); vec4 Xi=texelFetch
   if(cn>0.0){ vec3 tc2=(cen/cn-Pi.xyz)/PS; float surf=clamp(1.0-cn/26.0,0.0,1.0); vi+=tc2*(lava?9.0:(honey?14.0:4.0))*surf*u_dt; } // cohesión (tensión superficial)
   // rozamiento con el suelo (la lava se pega, el agua resbala)
   vec2 sb=span(vox(ivec3(floor(Pi.xyz-vec3(0.0,RAD+0.04,0.0))))); float fb=floor(Pi.y-RAD-0.04);
-  bool ground=sb.y>sb.x && Pi.y-RAD-0.04<fb+sb.y;
+  bool ground=sb.y>sb.x && Pi.y-RAD-0.04<fb+sb.y && !tubeIn(Pi.xyz);
   if(ground) vi.xz*=lava?0.80:(honey?0.55:(cn<7.0?0.86:0.985)); // la miel se pega al suelo // una película fina se queda pegada (la línea de contacto frena el charco)
   float T=Vi.w;
   if(lava){ vi*=0.985; if(ws>0.0) T=mix(T,Ts/ws,0.15); T=clamp(T-u_dt*(cn<16.0?0.03:0.002),0.35,1.0); }
@@ -9607,7 +9651,7 @@ function flCommon(P) { const gl = R.gl; const u = P.u;
   if (u.u_waveK) gl.uniform1f(u.u_waveK, R.gfxU ? R.gfxU[0] : 1);
   if (u.u_org) gl.uniform3f(u.u_org, FL.org[0], FL.org[1], FL.org[2]);
   if (u.u_kp) gl.uniform1f(u.u_kp, FL.kp); if (u.u_ks) gl.uniform1f(u.u_ks, FL.ks); if (u.u_eps) gl.uniform1f(u.u_eps, FL.eps);
-  flBindTex(P, 'u_vox', 8, FL.vox, gl.TEXTURE_3D); if (u.u_shp !== undefined) { flShpUpload(); flBindTex(P, 'u_shp', 10, FL.shpTex); } if (u.u_wdist) wdBind(P); }
+  flBindTex(P, 'u_vox', 8, FL.vox, gl.TEXTURE_3D); if (u.u_shp !== undefined) { flShpUpload(); flBindTex(P, 'u_shp', 10, FL.shpTex); } if (u.u_tOn !== undefined) tubeBind(P); if (u.u_wdist) wdBind(P); }
 function flPass(P, fb, rows) { const gl = R.gl; gl.bindFramebuffer(gl.FRAMEBUFFER, fb); gl.viewport(0, 0, FL.W, rows); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
 function flStep() {
   const gl = R.gl; const rows = FL.M / FL.W; const T = FL.pos, V = FL.vel;
@@ -10803,6 +10847,185 @@ function spongeAt(w, pt, r) {
   return n;
 }
 
+// ===== y_tubes.js
+// ============================================================================
+//  Tubificador3000: tubos huecos dibujados a mano (una pluma 3D) por los que corre el fluido de partículas
+// ============================================================================
+// Un tubo es una línea de puntos libre (cualquier ángulo, no va por bloques) con un diámetro interior medido en
+// partículas: fino 6, medio 12, ancho 24. No crea bloques ni partículas. Por dentro es hueco y el fluido lo recorre
+// aunque cruce bloques; la pared no deja pasar de fuera a dentro ni al revés, y por las bocas se entra y se sale.
+const TUBES = { list: [], next: 1, ver: 0 }; // { id, dim, n (diámetro en partículas), pts: [[x, y, z], ...] }
+const TUBE_N = { fino: 6, medio: 12, ancho: 24 };
+const TUBE_MODES = ['fino', 'medio', 'ancho', 'borrar'];
+const TUBE_MODE_NAME = { fino: 'tubo fino', medio: 'tubo medio', ancho: 'tubo ancho', borrar: 'eliminar' };
+const TUBE_MAXPTS = 40000;
+const PEN = { tube: null, lastUse: 0, eraseT: 0, sndT: 0 };
+function tubeR(n) { return n * (typeof FL_S === 'number' ? FL_S : 1 / 12) / 2; } // radio interior (cambia con el tamaño de PBF)
+function tubeWall(r) { return 0.03 + 0.12 * r; } // grosor de la pared (el mismo que usa el shader)
+function tubeMode(s) { return s && TUBE_MODES.includes(s.mode) ? s.mode : 'fino'; }
+function tubeChanged(t) { TUBES.ver++; if (t) tubeFreeMesh(t); }
+const tv = { sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]], mul: (a, s) => [a[0] * s, a[1] * s, a[2] * s], dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], len: a => Math.hypot(a[0], a[1], a[2]), norm: a => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; }, cross: (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]] };
+// punto más cercano de un tramo a un punto
+function tubeSegPt(p, a, b) { const ab = tv.sub(b, a); const t = clamp(tv.dot(tv.sub(p, a), ab) / Math.max(tv.dot(ab, ab), 1e-9), 0, 1); return tv.add(a, tv.mul(ab, t)); }
+// puntos más cercanos entre dos tramos (p0-p1 y q0-q1): [s, t, distancia]
+function tubeSegSeg(p0, p1, q0, q1) {
+  const d1 = tv.sub(p1, p0), d2 = tv.sub(q1, q0), r = tv.sub(p0, q0); const a = tv.dot(d1, d1), e = tv.dot(d2, d2), f = tv.dot(d2, r);
+  let s, t; if (a < 1e-9 && e < 1e-9) { s = t = 0; } else if (a < 1e-9) { s = 0; t = clamp(f / e, 0, 1); } else { const c = tv.dot(d1, r);
+    if (e < 1e-9) { t = 0; s = clamp(-c / a, 0, 1); } else { const b = tv.dot(d1, d2), den = a * e - b * b; s = den > 1e-9 ? clamp((b * f - c * e) / den, 0, 1) : 0; t = (b * s + f) / e;
+      if (t < 0) { t = 0; s = clamp(-c / a, 0, 1); } else if (t > 1) { t = 1; s = clamp((b - c) / a, 0, 1); } } }
+  return [s, t, tv.len(tv.sub(tv.add(p0, tv.mul(d1, s)), tv.add(q0, tv.mul(d2, t))))];
+}
+// punta de la pluma: delante de los ojos; si hay un bloque más cerca, se queda pegada a su superficie
+function tubeTip(p, r) {
+  const dir = lookDir(p); const h = G.hit; let d = 3 + r;
+  if (h && !h.ent && typeof h.t === 'number') d = Math.min(d, h.t - r - tubeWall(r) - 0.03);
+  d = Math.max(0.9, d); return [p.x + dir[0] * d, p.eye + dir[1] * d, p.z + dir[2] * d];
+}
+// clic derecho mantenido: dibujar (o borrar) mientras se mantiene
+function tubeUse(p, s) {
+  if (G.gameMode === 'spectator') return; const mode = tubeMode(s); PEN.lastUse = performance.now(); p.swing = Math.max(p.swing || 0, 0.01);
+  if (mode === 'borrar') { tubeErase(p); return; }
+  const n = TUBE_N[mode], r = tubeR(n), tip = tubeTip(p, r);
+  if (!PEN.tube || !TUBES.list.includes(PEN.tube)) { // empezar uno nuevo, o seguir uno del mismo grosor desde su boca
+    let t = null; const near = Math.max(0.5, r * 1.2);
+    for (const u of TUBES.list) { if (u.dim !== p.dim || u.n !== n || u.pts.length < 2) continue;
+      if (tv.len(tv.sub(u.pts[u.pts.length - 1], tip)) < near) { t = u; break; }
+      if (tv.len(tv.sub(u.pts[0], tip)) < near) { u.pts.reverse(); t = u; break; } }
+    if (!t) { t = { id: TUBES.next++, dim: p.dim, n, pts: [tip] }; TUBES.list.push(t); }
+    PEN.tube = t; tubeChanged(t); playSound('click', tip[0], tip[1], tip[2], 0.3); return;
+  }
+  const t = PEN.tube, last = t.pts[t.pts.length - 1], step = Math.max(0.2, r * 0.5), d = tv.len(tv.sub(tip, last));
+  if (d < step) return;
+  if (tubeCount() >= TUBE_MAXPTS) { showActionMsg('Tubificador3000: demasiados tubos (bórralos con el modo eliminar)'); return; }
+  const k = Math.min(30, Math.floor(d / step)); for (let i = 1; i <= k; i++) t.pts.push(tv.add(last, tv.mul(tv.sub(tip, last), i / k)));
+  tubeChanged(t);
+  const now = performance.now(); if (now - PEN.sndT > 140) { PEN.sndT = now; playSound('hit', tip[0], tip[1], tip[2], 0.12, ID.glass); }
+}
+function tubeCount() { let c = 0; for (const t of TUBES.list) c += t.pts.length; return c; }
+// se suelta el clic derecho (o se cambia de objeto): el trazo termina; los de un solo punto no cuentan
+function tubeTick(use) {
+  if (PEN.tube && (!use || performance.now() - PEN.lastUse > 200)) { const t = PEN.tube; PEN.tube = null; if (t.pts.length < 2) tubeRemove(t); else tubeNetSend(); }
+}
+function tubeRemove(t) { const i = TUBES.list.indexOf(t); if (i >= 0) TUBES.list.splice(i, 1); tubeChanged(t); }
+// tubo al que apunta la mirada (hasta 6 bloques o el primer bloque): { t, i (tramo), pt (punto del eje), d (distancia) }
+function tubePick(p) {
+  const dir = lookDir(p), eye = [p.x, p.eye, p.z]; let reach = 6; const h = G.hit; if (h && !h.ent && typeof h.t === 'number') reach = Math.min(reach, h.t + 0.3);
+  const end = tv.add(eye, tv.mul(dir, reach)); let best = null;
+  for (const t of TUBES.list) { if (t.dim !== p.dim || t.pts.length < 2) continue; const r = tubeR(t.n), ro = r + tubeWall(r) + 0.12;
+    for (let i = 0; i < t.pts.length - 1; i++) { const a = t.pts[i], b = t.pts[i + 1]; const [s, u, d] = tubeSegSeg(eye, end, a, b); if (d > ro) continue;
+      const along = s * reach; if (!best || along < best.along) best = { t, i, along, pt: tv.add(a, tv.mul(tv.sub(b, a), u)) }; } }
+  return best;
+}
+// modo eliminar: quita la sección del tubo a la que apuntas (los tramos cerca de ese punto), no el tubo entero; lo que
+// queda a cada lado sigue como tubos separados, con bocas abiertas
+function tubeErase(p) {
+  const now = performance.now(); if (now - PEN.eraseT < 70) return; PEN.eraseT = now;
+  const hit = tubePick(p); if (!hit) return; const t = hit.t, r = tubeR(t.n), rad = Math.max(0.35, r * 0.9);
+  const keep = []; for (let j = 0; j < t.pts.length - 1; j++) keep.push(tv.len(tv.sub(tubeSegPt(hit.pt, t.pts[j], t.pts[j + 1]), hit.pt)) > rad);
+  const pieces = []; let cur = null;
+  for (let j = 0; j < keep.length; j++) { if (keep[j]) { if (!cur) { cur = [t.pts[j]]; pieces.push(cur); } cur.push(t.pts[j + 1]); } else cur = null; }
+  tubeRemove(t); for (const pts of pieces) if (pts.length >= 2) TUBES.list.push({ id: TUBES.next++, dim: t.dim, n: t.n, pts });
+  if (PEN.tube === t) PEN.tube = null; tubeNetSend();
+  for (let k = 0; k < 6; k++) P_({ x: hit.pt[0], y: hit.pt[1], z: hit.pt[2], vx: (Math.random() - 0.5) * 2, vy: Math.random() * 1.5, vz: (Math.random() - 0.5) * 2, life: 0.5, size: 0.06, layer: TEX.spark, r: 0.8, g: 0.95, b: 1 });
+  playSound('break', hit.pt[0], hit.pt[1], hit.pt[2], 0.35, ID.glass);
+}
+// golpear el aire con el tubificador en la mano: siguiente modo
+function tubeNextMode(p, s) {
+  const i = TUBE_MODES.indexOf(tubeMode(s)); s.mode = TUBE_MODES[(i + 1) % TUBE_MODES.length]; p.swing = 0.01;
+  const m = s.mode; showActionMsg('Tubificador3000: ' + TUBE_MODE_NAME[m] + (m === 'borrar' ? '' : ' (' + TUBE_N[m] + ' partículas de diámetro)')); showItemName(); playSound('click', p.x, p.eye, p.z, 0.4);
+}
+// ---------------------------------------------------------------- datos para el shader del fluido
+// Tramos de los tubos de la dimensión simulada, en coordenadas de la región, repartidos en celdas de 2 bloques
+const TUBEG = { key: '', n: 0, TD: [1, 1, 1], cell: null, list: null, seg: null };
+function tubeTex(t, ifmt, fmt, w, h, data) { const gl = R.gl; gl.bindTexture(gl.TEXTURE_2D, t); gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4); gl.texImage2D(gl.TEXTURE_2D, 0, ifmt, w, h, 0, fmt, gl.FLOAT, data); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST); gl.bindTexture(gl.TEXTURE_2D, null); }
+function tubeGpuSync() {
+  const gl = R.gl;
+  if (!TUBEG.cell || TUBEG.gl !== gl) { TUBEG.gl = gl; TUBEG.cell = gl.createTexture(); TUBEG.list = gl.createTexture(); TUBEG.seg = gl.createTexture(); TUBEG.key = '';
+    tubeTex(TUBEG.cell, gl.RG32F, gl.RG, 1, 1, new Float32Array(2)); tubeTex(TUBEG.list, gl.R32F, gl.RED, 1, 1, new Float32Array(1)); tubeTex(TUBEG.seg, gl.RGBA32F, gl.RGBA, 2, 1, new Float32Array(8)); }
+  const w = FL.world; if (!w) { TUBEG.n = 0; return; }
+  const key = TUBES.ver + '|' + FL.org.join(',') + '|' + w.dim + '|' + FL_S; if (key === TUBEG.key) return; TUBEG.key = key;
+  const [vx, vy, vz] = FL.vdim, o = FL.org; const TD = [vx >> 1, vy >> 1, vz >> 1]; const NC = TD[0] * TD[1] * TD[2];
+  const segs = []; const lists = new Map(); let over = 0;
+  for (const t of TUBES.list) { if (t.dim !== w.dim || t.pts.length < 2) continue; const r = tubeR(t.n), m = r + tubeWall(r) + 0.7; // margen: lo que se mueve una partícula en un paso
+    for (let i = 0; i < t.pts.length - 1; i++) { const a = t.pts[i], b = t.pts[i + 1];
+      const lo = [0, 1, 2].map(k => Math.min(a[k], b[k]) - m - o[k]), hi = [0, 1, 2].map(k => Math.max(a[k], b[k]) + m - o[k]);
+      if (hi[0] < 0 || hi[1] < 0 || hi[2] < 0 || lo[0] > vx || lo[1] > vy || lo[2] > vz) continue;
+      const si = segs.length / 8; const fl = (i === 0 ? 1 : 0) | (i === t.pts.length - 2 ? 2 : 0); // bocas abiertas: el primer y el último tramo
+      segs.push(a[0] - o[0], a[1] - o[1], a[2] - o[2], r, b[0] - o[0], b[1] - o[1], b[2] - o[2], fl);
+      const c0 = lo.map((v, k) => clamp(Math.floor(v / 2), 0, TD[k] - 1)), c1 = hi.map((v, k) => clamp(Math.floor(v / 2), 0, TD[k] - 1));
+      for (let z = c0[2]; z <= c1[2]; z++) for (let y = c0[1]; y <= c1[1]; y++) for (let x = c0[0]; x <= c1[0]; x++) { const c = x + TD[0] * (y + TD[1] * z); let L = lists.get(c); if (!L) lists.set(c, L = []); if (L.length < 48) L.push(si); else over++; }
+    } }
+  TUBEG.n = segs.length / 8; TUBEG.TD = TD; if (over) console.warn('tubos: celdas con más de 48 tramos', over);
+  if (!TUBEG.n) return;
+  const ch = Math.ceil(NC / 256), C = new Float32Array(256 * ch * 2); const L = [];
+  for (const [c, l] of lists) { C[c * 2] = L.length; C[c * 2 + 1] = l.length; for (const s of l) L.push(s); }
+  const lr = Math.max(1, Math.ceil(L.length / 1024)), LA = new Float32Array(1024 * lr); LA.set(L);
+  const sr = Math.max(1, Math.ceil(TUBEG.n * 2 / 1024)), SA = new Float32Array(1024 * sr * 4); SA.set(segs);
+  tubeTex(TUBEG.cell, gl.RG32F, gl.RG, 256, ch, C); tubeTex(TUBEG.list, gl.R32F, gl.RED, 1024, lr, LA); tubeTex(TUBEG.seg, gl.RGBA32F, gl.RGBA, 1024, sr, SA);
+}
+function tubeBind(P) { // llamado desde flCommon
+  const gl = R.gl, u = P.u; tubeGpuSync(); gl.uniform1i(u.u_tOn, TUBEG.n > 0 ? 1 : 0); if (u.u_tdim) gl.uniform3i(u.u_tdim, TUBEG.TD[0], TUBEG.TD[1], TUBEG.TD[2]);
+  flBindTex(P, 'u_tcell', 11, TUBEG.cell); flBindTex(P, 'u_tlist', 13, TUBEG.list); flBindTex(P, 'u_tseg', 14, TUBEG.seg);
+}
+// ---------------------------------------------------------------- dibujo: vidrio transparente con reflejo en los bordes
+const VS_TUBE = `#version 300 es
+precision highp float; layout(location=0) in vec3 a_p; layout(location=1) in vec3 a_n; uniform mat4 u_vp; uniform vec3 u_off; out vec3 v_n; out vec3 v_p;
+void main(){ vec3 p=a_p+u_off; v_p=p; v_n=a_n; gl_Position=u_vp*vec4(p,1.0); }`;
+const FS_TUBE = `#version 300 es
+precision highp float; in vec3 v_n; in vec3 v_p; uniform vec3 u_sun; uniform float u_k, u_day; uniform vec4 u_tint; out vec4 o;
+void main(){ vec3 n=normalize(v_n); vec3 vd=normalize(-v_p); if(dot(n,vd)<0.0) n=-n; float fr=pow(1.0-clamp(dot(n,vd),0.0,1.0),3.0);
+  vec3 L=normalize(u_sun); float dif=0.6+0.4*max(dot(n,L),0.0); float sp=pow(max(dot(n,normalize(L+vd)),0.0),70.0)*u_day;
+  vec3 col=u_tint.rgb*dif*mix(0.35,1.0,u_day); o=vec4((col+sp*1.5)*u_k, clamp(u_tint.a+0.5*fr+sp*0.6,0.0,0.95)); }`;
+function tubeFreeMesh(t) { const m = t.mesh; if (!m) return; const gl = R.gl; if (gl) { gl.deleteBuffer(m.vb); gl.deleteBuffer(m.ib); gl.deleteVertexArray(m.vao); } t.mesh = null; }
+function tubeMesh(t) {
+  const gl = R.gl; const P = t.pts, n = P.length; if (n < 2) return null; const r = tubeR(t.n), ro = r + tubeWall(r); const K = r >= 0.45 ? 18 : 12; const o = P[0];
+  const T = P.map((q, i) => tv.norm(tv.sub(P[Math.min(n - 1, i + 1)], P[Math.max(0, i - 1)])));
+  let N = Math.abs(T[0][1]) < 0.9 ? tv.norm(tv.cross(T[0], [0, 1, 0])) : tv.norm(tv.cross(T[0], [1, 0, 0]));
+  const V = [], I = []; const ring = (c, rad, Nn, B, nrm) => { for (let k = 0; k < K; k++) { const a = k / K * Math.PI * 2; const d = tv.add(tv.mul(Nn, Math.cos(a)), tv.mul(B, Math.sin(a))); const q = tv.add(tv.sub(c, o), tv.mul(d, rad)); const nn = nrm || d; V.push(q[0], q[1], q[2], nn[0], nn[1], nn[2]); } };
+  const frames = [];
+  for (let i = 0; i < n; i++) { N = tv.norm(tv.sub(N, tv.mul(T[i], tv.dot(N, T[i])))); const B = tv.cross(T[i], N); frames.push([N, B]); ring(P[i], ro, N, B); } // marco de transporte paralelo (sin giros)
+  for (let i = 0; i < n - 1; i++) for (let k = 0; k < K; k++) { const a = i * K + k, b = i * K + (k + 1) % K, c = a + K, d = b + K; I.push(a, c, b, b, c, d); }
+  // las bocas: un aro entre la pared interior y la exterior
+  for (const [i, sg] of [[0, -1], [n - 1, 1]]) { const base = V.length / 6; const [Nn, B] = frames[i]; ring(P[i], r, Nn, B, tv.mul(T[i], sg)); const outer = i * K;
+    for (let k = 0; k < K; k++) { const a = outer + k, b = outer + (k + 1) % K, c = base + k, d = base + (k + 1) % K; I.push(a, c, b, b, c, d); } }
+  const vao = gl.createVertexArray(); gl.bindVertexArray(vao); const vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(V), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 24, 0); gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 24, 12);
+  const ib = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(I), gl.STATIC_DRAW); gl.bindVertexArray(null);
+  return { vao, vb, ib, count: I.length, o, r };
+}
+function tubeDraw() {
+  const p = G.player; if (!p || !TUBES.list.length) return; const gl = R.gl;
+  if (!R.progs.tube) R.progs.tube = compile(VS_TUBE, FS_TUBE); const P = R.progs.tube; gl.useProgram(P.p);
+  gl.uniformMatrix4fv(P.u.u_vp, false, R.vp); const s = ENV.sunReal || [0.3, 0.8, 0.2]; gl.uniform3f(P.u.u_sun, s[0], s[1], s[2]); const day = p.dim === 'overworld' ? (ENV.day ?? 1) : 0.6;
+  gl.uniform1f(P.u.u_day, day); gl.uniform1f(P.u.u_k, 0.85 / Math.max(0.15, R.expo || 1)); gl.uniform4f(P.u.u_tint, 0.80, 0.93, 1.0, 0.10);
+  gl.enable(gl.DEPTH_TEST); gl.depthMask(false); gl.disable(gl.CULL_FACE); gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  for (const t of TUBES.list) { if (t.dim !== p.dim || t.pts.length < 2) continue; const q = t.pts[0]; if (Math.abs(q[0] - p.x) > 300 || Math.abs(q[2] - p.z) > 300) continue;
+    if (t.mesh && t.mesh.r !== tubeR(t.n)) tubeFreeMesh(t); if (!t.mesh) t.mesh = tubeMesh(t); const m = t.mesh; if (!m) continue;
+    gl.uniform3f(P.u.u_off, m.o[0] - R.cam[0], m.o[1] - R.cam[1], m.o[2] - R.cam[2]); gl.bindVertexArray(m.vao); gl.drawElements(gl.TRIANGLES, m.count, gl.UNSIGNED_INT, 0); R.stats.draws++; }
+  gl.bindVertexArray(null); gl.depthMask(true); gl.disable(gl.BLEND);
+}
+// guía con el tubificador en la mano: aro en la punta de la pluma (modos de tubo) o la sección que se borraría
+function tubeGuide() {
+  const p = G.player; const s = p && p.held(); if (!s || !REG[s.id].tubeTool || G.gameMode === 'spectator') return; const mode = tubeMode(s);
+  const circ = (c, rad, nrm, col) => { const a0 = Math.abs(nrm[1]) < 0.9 ? tv.norm(tv.cross(nrm, [0, 1, 0])) : tv.norm(tv.cross(nrm, [1, 0, 0])); const b0 = tv.cross(nrm, a0); const L = []; const K = 24;
+    for (let k = 0; k < K; k++) { for (const j of [k, k + 1]) { const a = j / K * Math.PI * 2; const q = tv.add(c, tv.add(tv.mul(a0, Math.cos(a) * rad), tv.mul(b0, Math.sin(a) * rad))); L.push(q[0] - R.cam[0], q[1] - R.cam[1], q[2] - R.cam[2]); } }
+    drawLines(L, col); };
+  const dir = lookDir(p);
+  if (mode === 'borrar') { const h = tubePick(p); if (!h) return; const r = tubeR(h.t.n); const a = h.t.pts[h.i], b = h.t.pts[h.i + 1]; circ(h.pt, r + tubeWall(r) + 0.05, tv.norm(tv.sub(b, a)), [1, 0.3, 0.3, 1]); return; }
+  const r = tubeR(TUBE_N[mode]); const tip = tubeTip(p, r); circ(tip, r, dir, [0.7, 0.95, 1, 0.9]); circ(tip, r + tubeWall(r), dir, [1, 1, 1, 0.5]);
+}
+// ---------------------------------------------------------------- guardar/cargar (con el mundo)
+function tubeSerialize() { return TUBES.list.filter(t => t.pts.length >= 2).map(t => ({ d: t.dim, n: t.n, p: t.pts.flat().map(v => +v.toFixed(3)) })); }
+// multijugador: la lista entera viaja al terminar cada trazo o borrado (el anfitrión la reenvía a los demás)
+function tubeNetSend(except) { if (!G.net) return; const m = { t: 'tubes', l: tubeSerialize() }; if (except) netBroadcast(m, except); else netSend(m); }
+function tubeNetRecv(l) { const cur = PEN.tube; tubeRestore(l); if (cur && cur.pts.length) { TUBES.list.push(cur); PEN.tube = cur; } } // sin cortar el trazo que se está dibujando
+function tubeRestore(data) {
+  for (const t of TUBES.list) tubeFreeMesh(t); TUBES.list = []; PEN.tube = null;
+  if (Array.isArray(data)) for (const o of data) { if (!o || !Array.isArray(o.p) || o.p.length < 6) continue; const pts = []; for (let i = 0; i + 2 < o.p.length; i += 3) pts.push([+o.p[i], +o.p[i + 1], +o.p[i + 2]]);
+    TUBES.list.push({ id: TUBES.next++, dim: o.d || 'overworld', n: [6, 12, 24].includes(o.n) ? o.n : 6, pts }); }
+  tubeChanged(null);
+}
+
 // ===== v_boat.js
 // ============================================================================
 //  Botes: cuerpo rígido que flota por puntos del casco (empuje de Arquímedes en cada uno),
@@ -11413,7 +11636,7 @@ function serializeWorld() {
   const players = Object.assign({}, G.playerStates || {}); players.__local = playerState(G.player); players.__local.name = G.player.name;
   if (G.net && G.net.role === 'host') for (const c of G.net.conns.values()) if (c.ent && c.ent.state) players[c.ent.name] = c.ent.state;
   const ents = []; for (const e of G.entities.values()) { if (e.proxy || e.remotePlayer || e.removed || e.dead) continue; if (e instanceof Mob && (e.persist || !e.def.hostile)) ents.push({ k: 'mob', ty: e.type, d: e.dim, x: e.x, y: e.y, z: e.z, hp: e.hp, c: e.color, p: e.persist, n: e.name }); else if (e.type === 'item') ents.push({ k: 'item', d: e.dim, x: e.x, y: e.y, z: e.z, s: e.stack }); else if (e.isBoat) ents.push({ k: 'boat', d: e.dim, x: e.x, y: e.y, z: e.z, r: e.rot }); }
-  return { format: 'minecraft2-world', version: 3, name: G.worldName, seed: G.seed, seedStr: G.seedStr, gameMode: G.defaultMode || G.gameMode, curMode: G.gameMode, difficulty: G.difficulty, cheats: G.cheats, time: G.time, rain: G.rain, rainTimer: G.rainTimer, worldSpawn: G.worldSpawn, dragonKilled: G.dragonKilled, endInit: G.endInit, gateway: G.gateway, keepInventory: G.keepInventory, doWaterDespawn: !!G.doWaterDespawn, doDaylightCycle: G.doDaylightCycle !== false, doWeatherCycle: G.doWeatherCycle !== false, containers: G.containers, spawned: [...G.spawned], dims, players, entities: ents, created: G.created || Date.now(), lastPlayed: Date.now(), structures: G.structures !== false, climate: G.climate || 1, dynTrees: !!G.dynTrees, fluid: typeof flSerialize === 'function' ? flSerialize() : null };
+  return { format: 'minecraft2-world', version: 3, name: G.worldName, seed: G.seed, seedStr: G.seedStr, gameMode: G.defaultMode || G.gameMode, curMode: G.gameMode, difficulty: G.difficulty, cheats: G.cheats, time: G.time, rain: G.rain, rainTimer: G.rainTimer, worldSpawn: G.worldSpawn, dragonKilled: G.dragonKilled, endInit: G.endInit, gateway: G.gateway, keepInventory: G.keepInventory, doWaterDespawn: !!G.doWaterDespawn, doDaylightCycle: G.doDaylightCycle !== false, doWeatherCycle: G.doWeatherCycle !== false, containers: G.containers, spawned: [...G.spawned], dims, players, entities: ents, created: G.created || Date.now(), lastPlayed: Date.now(), structures: G.structures !== false, climate: G.climate || 1, dynTrees: !!G.dynTrees, fluid: typeof flSerialize === 'function' ? flSerialize() : null, tubes: tubeSerialize() };
 }
 function worldIcon() { try { const c = document.createElement('canvas'); c.width = 64; c.height = 64; c.getContext('2d').drawImage($('gl'), ($('gl').width - $('gl').height) / 2, 0, $('gl').height, $('gl').height, 0, 0, 64, 64); return c.toDataURL('image/jpeg', 0.7); } catch (e) { return null; } }
 async function saveWorld(silent) {
@@ -11444,7 +11667,7 @@ function migrateWorld(data) { // v2 -> v3: los objetos pasaron de id 256+ a 1000
 }
 function startWorld(data, isNew, netWelcome) {
   data = migrateWorld(data); resetGameState(); audioInit();
-  G.worldName = data.name; G.seed = data.seed >>> 0; G.seedStr = data.seedStr; G.difficulty = data.difficulty ?? 2; G.cheats = data.cheats !== false; G.time = data.time ?? 1000; G.keepInventory = !!data.keepInventory; G.doWaterDespawn = !!data.doWaterDespawn; G.doDaylightCycle = data.doDaylightCycle !== false; G.doWeatherCycle = data.doWeatherCycle !== false; if (typeof flRestore === 'function') flRestore(data.fluid || null);
+  G.worldName = data.name; G.seed = data.seed >>> 0; G.seedStr = data.seedStr; G.difficulty = data.difficulty ?? 2; G.cheats = data.cheats !== false; G.time = data.time ?? 1000; G.keepInventory = !!data.keepInventory; G.doWaterDespawn = !!data.doWaterDespawn; G.doDaylightCycle = data.doDaylightCycle !== false; G.doWeatherCycle = data.doWeatherCycle !== false; if (typeof flRestore === 'function') flRestore(data.fluid || null); tubeRestore(netWelcome && G.net ? G.net.tubesPending : data && data.tubes);
   G.defaultMode = data.gameMode || 'survival'; G.gameMode = data.curMode || data.gameMode || 'survival'; G.created = data.created || Date.now(); G.structures = data.structures !== false;
   G.climate = data.climate ?? (isNew ? 3 : 1); // biomas por clima en mundos nuevos; los antiguos siguen con los clásicos
   G.worlds = { overworld: new World('overworld', G.seed, G.climate), nether: new World('nether', G.seed, G.climate), end: new World('end', G.seed, G.climate) };
@@ -11777,6 +12000,7 @@ function updateLights(dt) {
 // ------------------------------------------------------------ superposiciones y mano
 function drawOverlays(trans) {
   const gl = R.gl; const p = G.player; const w = G.world;
+  if (trans) { tubeDraw(); return; } // tubos del tubificador (vidrio, encima del fluido que llevan dentro)
   if (!trans) {
     const h = G.hit; const lines = [];
     if (h && !h.ent && !hudHidden && G.gameMode !== 'spectator') {
@@ -11798,6 +12022,7 @@ function drawOverlays(trans) {
       if (WE.p2) drawLines(boxLines(WE.p2[0] - 0.01, WE.p2[1] - 0.01, WE.p2[2] - 0.01, WE.p2[0] + 1.01, WE.p2[1] + 1.01, WE.p2[2] + 1.01), [0.5, 0.75, 1, 1]);
       if (WE.p1 && WE.p2) drawLines(boxLines(Math.min(WE.p1[0], WE.p2[0]) - 0.02, Math.min(WE.p1[1], WE.p2[1]) - 0.02, Math.min(WE.p1[2], WE.p2[2]) - 0.02, Math.max(WE.p1[0], WE.p2[0]) + 1.02, Math.max(WE.p1[1], WE.p2[1]) + 1.02, Math.max(WE.p1[2], WE.p2[2]) + 1.02), [1, 0.9, 0.3, 1]);
     } }
+    tubeGuide();
     const beams = entityBeams(p.dim); if (beams.length) drawLines(beams, [0.9, 0.4, 1, 1]);
     if (F3B) { const L = []; for (const e of G.entities.values()) if (e.dim === p.dim && Math.abs(e.x - p.x) < 48 && Math.abs(e.z - p.z) < 48) L.push(...boxLines(e.x - e.w / 2, e.y, e.z - e.w / 2, e.x + e.w / 2, e.y + e.h, e.z + e.w / 2)); if (L.length) drawLines(L, [1, 1, 1, 1]); }
     if (F3G) { const L = []; const cx = (Math.floor(p.x) >> 4) * 16, cz = (Math.floor(p.z) >> 4) * 16; for (const [x, z] of [[cx, cz], [cx + 16, cz], [cx, cz + 16], [cx + 16, cz + 16]]) L.push(x - R.cam[0], -R.cam[1], z - R.cam[2], x - R.cam[0], w.H - R.cam[1], z - R.cam[2]); for (let y = 0; y <= w.H; y += 16) L.push(...boxLines(cx, y, cz, cx + 16, y, cz + 16)); drawLines(L, [1, 1, 0, 1]); }

@@ -36,7 +36,7 @@ shaped('gold_ingot', 1, ['NNN', 'NNN', 'NNN'], { N: 'gold_nugget' }); shapeless(
 shaped('iron_ingot', 1, ['NNN', 'NNN', 'NNN'], { N: 'iron_nugget' }); shapeless('iron_nugget', 9, ['iron_ingot']);
 shaped('bucket', 1, ['I I', ' I '], { I: 'iron_ingot' }); shapeless('flint_and_steel', 1, ['iron_ingot', 'flint']);
 shaped('fire_extinguisher', 1, ['INI', 'I I', 'INI'], { I: 'iron_ingot', N: 'iron_nugget' });
-shaped('flamethrower', 1, ['  F', 'IBI', 'II '], { I: 'iron_ingot', B: 'blaze_rod', F: 'flint_and_steel' }); shapeless('sponge_item', 2, ['sponge']); shaped('diffuser', 1, [' HP', ' PH', 'P  '], { P: 'stick', H: 'iron_ingot' });
+shaped('flamethrower', 1, ['  F', 'IBI', 'II '], { I: 'iron_ingot', B: 'blaze_rod', F: 'flint_and_steel' }); shapeless('sponge_item', 2, ['sponge']); shaped('tubificador', 1, ['GDG', 'DPD', ' P '], { G: 'gold_ingot', D: 'diamond', P: 'stick' }); shaped('diffuser', 1, [' HP', ' PH', 'P  '], { P: 'stick', H: 'iron_ingot' });
 shaped('shears', 1, [' I', 'I '], { I: 'iron_ingot' }); shaped('compass', 1, [' I ', 'IRI', ' I '], { I: 'iron_ingot', R: 'redstone' }); shaped('clock', 1, [' G ', 'GRG', ' G '], { G: 'gold_ingot', R: 'redstone' });
 shaped('bow', 1, [' TS', 'T S', ' TS'], { T: 'stick', S: 'string' }); shaped('arrow', 4, ['F', 'S', 'E'], { F: 'flint', S: 'stick', E: 'feather' });
 shaped('crossbow', 1, ['STS', 'TIT', ' S '], { S: 'stick', T: 'string', I: 'iron_ingot' });
