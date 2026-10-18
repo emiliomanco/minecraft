@@ -491,12 +491,13 @@ function flDrawDebug() {
 // opaca y emisiva (cuerpo negro según su temperatura) con costra que se enfría.
 const VS_FLSPH = `#version 300 es
 precision highp float; precision highp sampler2D;
-uniform sampler2D u_pos, u_vel, u_lam; uniform sampler2D u_scl; uniform mat4 u_view, u_proj; uniform vec3 u_off; uniform float u_rad;
+uniform sampler2D u_pos, u_vel, u_lam; uniform sampler2D u_scl; uniform mat4 u_view, u_proj; uniform vec3 u_off; uniform float u_rad; uniform float u_kind;
 out vec2 v_q; out vec3 v_ce; out float v_ph; out float v_t; out float v_s; out float v_r;
 void main(){ int i=gl_InstanceID; vec4 P=texelFetch(u_pos,ivec2(i&255,i>>8),0); vec4 V=texelFetch(u_vel,ivec2(i&255,i>>8),0);
   vec2 q=vec2(float(gl_VertexID&1),float(gl_VertexID>>1))*2.0-1.0; v_q=q;
   float ph=mod(P.w,10.0); if(P.w<0.5 || P.w>=30.0){ gl_Position=vec4(2.0,2.0,2.0,1.0); return; }
   v_ph=ph>1.5&&ph<2.5?2.0:(ph>3.5&&ph<4.5?3.0:(ph>4.5&&ph<5.5?4.0:1.0)); v_t=V.w; v_s=length(V.xyz); // 1 agua, 2 lava, 3 miel, 4 leche
+  if(u_kind>0.5 && abs(v_ph-u_kind)>0.5){ gl_Position=vec4(2.0,2.0,2.0,1.0); return; } // cada líquido se dibuja en su propia pasada
   // gotas sueltas (poca densidad alrededor): más pequeñas y blancas, como salpicaduras
   float rho=texelFetch(u_lam,ivec2(i&255,i>>8),0).y; float iso=1.0-smoothstep(0.22,0.36,rho); if(P.w>=10.0) iso=0.0;
   v_t=max(v_t,iso*(v_ph<1.5?0.8:0.0));
@@ -526,9 +527,9 @@ const FS_FLSMOOTH = `#version 300 es
 precision highp float; precision highp sampler2D;
 uniform sampler2D u_src; uniform vec2 u_dir; uniform float u_ps; uniform float u_wr; out vec4 o;
 void main(){ ivec2 f=ivec2(gl_FragCoord.xy); vec4 c=texelFetch(u_src,f,0); float d=c.x; if(d<=0.0){ o=c; return; }
-  float rp=clamp(u_wr*u_ps/d,1.0,16.0); float sig=rp*0.5; float sd=0.09+d*0.004;
+  float rp=clamp(u_wr*u_ps/d,1.0,24.0); float sig=rp*0.5; float sd=0.09+d*0.004;
   float sum=d, ws=1.0; int n=int(ceil(rp)); ivec2 sz=textureSize(u_src,0);
-  for(int k=1;k<=16;k++){ if(k>n) break; float fk=float(k); float g=exp(-fk*fk/(2.0*sig*sig));
+  for(int k=1;k<=24;k++){ if(k>n) break; float fk=float(k); float g=exp(-fk*fk/(2.0*sig*sig));
     for(int s=-1;s<=1;s+=2){ ivec2 q=clamp(f+ivec2(u_dir*fk*float(s)),ivec2(0),sz-1); float dj=texelFetch(u_src,q,0).x; if(dj<=0.0) continue;
       float dd=(dj-d)/sd; float w=g*exp(-dd*dd); sum+=dj*w; ws+=w; } }
   o=vec4(sum/ws,c.y,0.0,1.0); }`;
@@ -647,22 +648,30 @@ function flRender() {
   const sphU = P => { gl.useProgram(P.p); gl.uniformMatrix4fv(P.u.u_view, false, R.view); gl.uniformMatrix4fv(P.u.u_proj, false, R.proj); gl.uniform3f(P.u.u_off, off[0], off[1], off[2]); gl.uniform1f(P.u.u_rad, rad);
     flBindTex(P, 'u_pos', 0, FL.pos[FL.cur]); flBindTex(P, 'u_vel', 1, FL.vel[FL.cur]); flBindTex(P, 'u_lam', 2, FL.lam); flBindTex(P, 'u_scl', 9, FL.scaleTex); flBindTex(P, 'u_depthCopy', 3, R.fbo.copy.depth);
     if (P.u.u_near) { gl.uniform1f(P.u.u_near, R.near); gl.uniform1f(P.u.u_far, R.far); } if (P.u.u_res) gl.uniform2f(P.u.u_res, S.w, S.h); };
-  // 1) profundidad (desde dentro del agua, la más lejana: es donde el rayo sale del líquido, no la bolita más cercana)
-  // cámara dentro del líquido (agua, leche o miel): se dibuja la superficie vista desde dentro, sin el «tubo» vacío alrededor
-  const camIn = flLiquidAt(G.world, R.cam[0], R.cam[1], R.cam[2]) === 1 || flHoneyAt(G.world, R.cam[0], R.cam[1], R.cam[2]) || flMilkAt(G.world, R.cam[0], R.cam[1], R.cam[2]); FL.camIn = camIn;
-  gl.bindFramebuffer(gl.FRAMEBUFFER, S.fdA.fb); gl.viewport(0, 0, S.w, S.h); gl.clearColor(0, 0, 0, 0); gl.clearDepth(camIn ? 0 : 1); gl.enable(gl.DEPTH_TEST); gl.depthFunc(camIn ? gl.GREATER : gl.LESS); gl.depthMask(true); gl.disable(gl.BLEND);
-  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); sphU(S.sph); if (!(K & 1)) gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, FL.hi); gl.depthFunc(gl.LESS); gl.clearDepth(1);
-  // 2) grosor
-  gl.bindFramebuffer(gl.FRAMEBUFFER, S.fth.fb); gl.clear(gl.COLOR_BUFFER_BIT); gl.disable(gl.DEPTH_TEST); gl.depthMask(false); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
-  sphU(S.thick); if (!(K & 2)) gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, FL.hi); gl.disable(gl.BLEND);
-  // 3) suavizado (2 vueltas horizontal + vertical)
-  const P = S.smooth; gl.useProgram(P.p); gl.uniform1f(P.u.u_ps, R.proj[5] * 0.5 * S.h); gl.uniform1f(P.u.u_wr, rad * 3.2);
-  if (!(K & 4)) for (let it = 0; it < 3; it++) for (const [dx, dy, src, dst] of [[1, 0, S.fdA, S.fdB], [0, 1, S.fdB, S.fdA]]) { gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fb); flBindTex(P, 'u_src', 0, src.tex); gl.uniform2f(P.u.u_dir, dx, dy); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
-  // 4) composición sobre la escena, con prueba de profundidad contra lo ya dibujado (agua quieta incluida)
-  gl.bindFramebuffer(gl.FRAMEBUFFER, R.fbo.scene.fb); gl.viewport(0, 0, R.w, R.h); gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LESS); gl.depthMask(true);
-  const C = S.comp; gl.useProgram(C.p); setCommon(C); gl.uniformMatrix4fv(C.u.u_proj, false, R.proj); gl.uniformMatrix4fv(C.u.u_view, false, R.view); gl.uniform2f(C.u.u_res, R.w, R.h); gl.uniform1f(C.u.u_ss, S.ss); if (C.u.u_camIn) gl.uniform1f(C.u.u_camIn, camIn ? 1 : 0);
-  flBindTex(C, 'u_fd', 2, S.fdA.tex); flBindTex(C, 'u_ft', 3, S.fth.tex); flBindTex(C, 'u_sceneCopy', 4, R.fbo.copy.tex);
-  if (!(K & 8)) gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  // cada líquido (lava, leche, miel, agua) se dibuja por separado, con su propia profundidad, grosor y suavizado: así
+  // forma su propio «manto» continuo y, al mezclar, se ven las capas (el agua deja ver la miel de debajo). Se componen
+  // de más opaco a más transparente, volviendo a copiar la escena entre uno y otro para que los de encima la refracten
+  const cx = R.cam[0], cy = R.cam[1], cz = R.cam[2];
+  const camKind = flHoneyAt(G.world, cx, cy, cz) ? 3 : flMilkAt(G.world, cx, cy, cz) ? 4 : flLiquidAt(G.world, cx, cy, cz) === 1 ? 1 : 0; FL.camIn = camKind > 0;
+  const KN = FL.kindN; const kinds = [2, 4, 3, 1].filter(k => !KN || KN[k] > 0 || k === camKind); if (!kinds.length) kinds.push(1);
+  kinds.forEach((kind, ki) => {
+    if (ki > 0) { gl.bindFramebuffer(gl.READ_FRAMEBUFFER, R.fbo.scene.fb); gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, R.fbo.copy.fb); gl.blitFramebuffer(0, 0, R.w, R.h, 0, 0, R.w, R.h, gl.COLOR_BUFFER_BIT, gl.NEAREST); }
+    const camIn = camKind === kind; gl.bindVertexArray(FL.vao);
+    // 1) profundidad (desde dentro del líquido, la más lejana: es donde el rayo sale de él, no la bolita más cercana)
+    gl.bindFramebuffer(gl.FRAMEBUFFER, S.fdA.fb); gl.viewport(0, 0, S.w, S.h); gl.clearColor(0, 0, 0, 0); gl.clearDepth(camIn ? 0 : 1); gl.enable(gl.DEPTH_TEST); gl.depthFunc(camIn ? gl.GREATER : gl.LESS); gl.depthMask(true); gl.disable(gl.BLEND);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT); sphU(S.sph); gl.uniform1f(S.sph.u.u_kind, kind); if (!(K & 1)) gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, FL.hi); gl.depthFunc(gl.LESS); gl.clearDepth(1);
+    // 2) grosor
+    gl.bindFramebuffer(gl.FRAMEBUFFER, S.fth.fb); gl.clear(gl.COLOR_BUFFER_BIT); gl.disable(gl.DEPTH_TEST); gl.depthMask(false); gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+    sphU(S.thick); gl.uniform1f(S.thick.u.u_kind, kind); if (!(K & 2)) gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, FL.hi); gl.disable(gl.BLEND);
+    // 3) suavizado («manto»: radio amplio, 4 vueltas horizontal + vertical; respeta los saltos grandes de profundidad)
+    const P = S.smooth; gl.useProgram(P.p); gl.uniform1f(P.u.u_ps, R.proj[5] * 0.5 * S.h); gl.uniform1f(P.u.u_wr, rad * (kind === 2 ? 3.2 : 5.5));
+    if (!(K & 4)) for (let it = 0; it < 4; it++) for (const [dx, dy, src, dst] of [[1, 0, S.fdA, S.fdB], [0, 1, S.fdB, S.fdA]]) { gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fb); flBindTex(P, 'u_src', 0, src.tex); gl.uniform2f(P.u.u_dir, dx, dy); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); }
+    // 4) composición sobre la escena, con prueba de profundidad contra lo ya dibujado (agua quieta y líquidos anteriores incluidos)
+    gl.bindFramebuffer(gl.FRAMEBUFFER, R.fbo.scene.fb); gl.viewport(0, 0, R.w, R.h); gl.enable(gl.DEPTH_TEST); gl.depthFunc(gl.LESS); gl.depthMask(true);
+    const C = S.comp; gl.useProgram(C.p); setCommon(C); gl.uniformMatrix4fv(C.u.u_proj, false, R.proj); gl.uniformMatrix4fv(C.u.u_view, false, R.view); gl.uniform2f(C.u.u_res, R.w, R.h); gl.uniform1f(C.u.u_ss, S.ss); if (C.u.u_camIn) gl.uniform1f(C.u.u_camIn, camIn ? 1 : 0);
+    flBindTex(C, 'u_fd', 2, S.fdA.tex); flBindTex(C, 'u_ft', 3, S.fth.tex); flBindTex(C, 'u_sceneCopy', 4, R.fbo.copy.tex);
+    if (!(K & 8)) gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  });
   gl.depthFunc(gl.LEQUAL); gl.enable(gl.CULL_FACE); gl.bindVertexArray(null); gl.activeTexture(gl.TEXTURE0);
 }
 // ============================================================================
@@ -757,6 +766,27 @@ function flQuenchAcc(w, x, y, z, lavaInWater) {
   else if (b === ID.lava) w.set(x, y, z, liqAmt(w.getMeta(x, y, z)) >= 6 ? ID.obsidian : ID.cobblestone);
   fizz(w, x, y, z);
 }
+// golpe de agua: mucha masa de partículas (agua o leche) que llega deprisa contra una entidad la tumba (ragdoll), como una
+// ola de verdad o el agua de una presa al romperse. Solo partículas: las olas del mar no llegan a la orilla
+function flImpactCheck(w, occ) {
+  if (typeof startRagdoll !== 'function' || typeof ragdollsOn !== 'function' || !ragdollsOn() || (G.net && G.net.role === 'client') || !occ.size) return;
+  const now = performance.now(); const list = [G.player]; for (const e of G.entities.values()) if (e instanceof Mob && e.dim === w.dim) list.push(e);
+  for (const e of list) {
+    if (!e || e.dead || e.removed || e.ragdoll || e.boat || e.flying || e.dim !== w.dim || (e._wImpT && now < e._wImpT)) continue;
+    if (e === G.player && G.gameMode === 'spectator') continue; if (e.def && (e.def.boss || e.def.noGrav)) continue;
+    const hw = (e.w || 0.6) / 2 + 0.25, h = e.h || 1.8; let m = 0, px = 0, py = 0, pz = 0;
+    for (let y = Math.floor(e.y); y <= Math.floor(e.y + h); y++) for (let z = Math.floor(e.z - hw); z <= Math.floor(e.z + hw); z++) for (let x = Math.floor(e.x - hw); x <= Math.floor(e.x + hw); x++) {
+      const c = occ.get(FLK(x, y, z)); if (!c || c.nw < FL_MIN) continue;
+      const rx = c.vx - (e.vx || 0), ry = c.vy - (e.vy || 0), rz = c.vz - (e.vz || 0); if (Math.hypot(rx, ry, rz) < 3) continue;
+      const mm = c.nw / FL_PPB; m += mm; px += mm * rx; py += mm * ry; pz += mm * rz;
+    }
+    const P = Math.hypot(px, py, pz); const thr = 2.2 * clamp(((e.w || 0.6) * (e.h || 1.8)) / 1.08, 0.35, 3); // los grandes aguantan más
+    if (m < 0.3 || P < thr) continue;
+    const ix = px / m, iy = py / m, iz = pz / m; e._wImpT = now + 2500;
+    startRagdoll(e, [ix * 0.55, Math.max(1.2, iy * 0.35 + 1.8), iz * 0.55], true, 1.4 + Math.min(2.2, P * 0.12));
+    if (e === G.player) showActionMsg('¡El agua te ha tumbado!');
+  }
+}
 function flAfterReadback() {
   const rb = FL.rb, w = FL.world; if (!w || !FL.spawnFrame) return; const n = rb.count, o = rb.orgNow, P = rb.pos, V = rb.vel, F = rb.frameAt;
   const now = (G.wclock ?? performance.now() / 1000) * 1000; const dtR = Math.min(1, (now - (FL.lastRB || now)) / 1000); FL.lastRB = now;
@@ -773,8 +803,12 @@ function flAfterReadback() {
     if (base === 2) c.nl++; else if (base === 4) c.nh++; else { c.nw++; if (base === 3) c.np++; if (base === 5) c.nm++; } // la leche cuenta como agua (se nada en ella)
     if (y > c.top) c.top = y; c.vx += vx; c.vy += vy; c.vz += vz; c.vs = (c.vs || 0) + sp; if (sp > c.vmax) c.vmax = sp; c.idx.push(i);
   }
-  for (const c of occ.values()) { const m = c.idx.length; c.vx /= m; c.vy /= m; c.vz /= m; }
+  const KN = [0, 0, 0, 0, 0]; // partículas de cada líquido (para dibujar solo los que hay): 1 agua, 2 lava, 3 miel, 4 leche
+  for (const c of occ.values()) { const m = c.idx.length; c.vx /= m; c.vy /= m; c.vz /= m; KN[1] += c.nw - c.nm; KN[2] += c.nl; KN[3] += c.nh; KN[4] += c.nm; }
+  for (let i = 0; i < FL.spawnQ.length; i += 9) KN[[0, 1, 2, 1, 3, 4][FL.spawnQ[i + 4] | 0] || 1]++; // las recién creadas aún no leídas
+  FL.kindN = KN;
   FL.occ = occ; flMarkFull(occ);
+  flImpactCheck(w, occ);
   // la lava en movimiento ilumina (las celdas con más lava, como luces dinámicas)
   FL.lavaPts = []; for (const c of occ.values()) if (c.nl >= 12) FL.lavaPts.push([c.x + 0.5, c.y, c.z + 0.5]);
   // agua y lava en la misma celda
