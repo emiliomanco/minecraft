@@ -36,7 +36,7 @@ async function startHost() {
 function stopNet() {
   const n = G.net; if (!n) return;
   try { if (n.role === 'host') { netBroadcast({ t: 'kick', m: 'El anfitrión cerró el mundo' }); n.bc && n.bc.close(); n.peer && n.peer.destroy(); } else { if (n.lanBye) n.lanBye(); n.conn && n.conn.close && n.conn.close(); n.peer && n.peer.destroy(); } } catch (e) { }
-  G.net = null;
+  G.net = null; netRestorePhys(); // vuelven las físicas propias
 }
 function hostDrop(c) {
   const n = G.net; if (!n || !n.conns.has(c.id)) return; n.conns.delete(c.id);
@@ -60,7 +60,7 @@ function hostHandle(c, m) {
       G.entities.set(e.id, e); c.ent = e; n.peers = n.conns.size;
       c.send({ t: 'welcome', id: e.id, name, seed: G.seed, climate: G.climate, dyn: !!G.dynTrees, seedStr: G.seedStr, worldName: G.worldName, gm: G.gameMode, time: G.time, diff: G.difficulty, dk: G.dragonKilled, ei: G.endInit, gw: G.gateway, st: st || null, spawn: sp, hostName: G.player.name, hostId: G.player.id, keep: G.keepInventory, rules: { dc: G.doDaylightCycle !== false, wc: G.doWeatherCycle !== false, wd: !!G.doWaterDespawn } });
       const chunks = modifiedChunks(); for (let i = 0; i < chunks.length; i += 8) c.send({ t: 'chunks', list: chunks.slice(i, i + 8) });
-      c.send({ t: 'ready' });
+      c.send({ t: 'tubes', l: tubeSerialize() }); c.send({ t: 'phys', p: SETTINGS.physics }); c.send({ t: 'ready' });
       chatMsg(name + ' se unió al juego', '#ff8'); netBroadcast({ t: 'chat', m: name + ' se unió al juego', sys: true }, c);
       break;
     }
@@ -76,6 +76,11 @@ function hostHandle(c, m) {
     case 'tnt': { if (!w) return; igniteTNT(w, m.x, m.y, m.z); break; }
     case 'boat': boatNetRecv(c, m); break;
     case 'flm': { const e = c.ent; if (e && Array.isArray(m.o) && Array.isArray(m.dir)) flamerEmit(G.worlds[e.dim] || G.world, m.o.map(Number), m.dir.map(Number), clamp(+m.dt || 0.05, 0, 0.1), e); break; }
+    case 'tubes': if (Array.isArray(m.l)) { tubeNetRecv(m.l); tubeNetSend(c); } break;
+    case 'flr': c.flS = null; break; // el cliente rehízo su simulación: mandarle todas las partículas otra vez
+    case 'pkill': flNetKillSlots(c, m.l); break;
+    case 'pour': { const e = c.ent; if (e && Array.isArray(m.c) && Array.isArray(m.d) && Math.hypot(m.c[0] - e.x, m.c[2] - e.z) < 8 && [1, 2, 4, 5].includes(m.l)) { const v = Array.isArray(m.v) ? m.v.map(Number) : [0, 0]; bucketPourAt(G.worlds[e.dim] || G.world, +m.c[0], +m.c[1], +m.c[2], m.d.map(Number), m.l, clamp(+m.ml || 0, 0, BUCKET_ML), v[0], v[1]); } break; }
+    case 'dif': { const e = c.ent; if (e && Array.isArray(m.p) && Math.hypot(m.p[0] - e.x, m.p[2] - e.z) < 8) diffuserAt(G.worlds[e.dim] || G.world, m.p.map(Number), m.m === 'pbf' ? 'pbf' : 'liquid', 1.6); break; }
     case 'spg': { const e = c.ent; if (e && Array.isArray(m.p) && Math.hypot(m.p[0] - e.x, m.p[2] - e.z) < 8) spongeAt(G.worlds[e.dim] || G.world, m.p.map(Number), 1.6); break; }
     case 'brm': { const e = c.ent; if (e && Array.isArray(m.h) && Array.isArray(m.v)) broomPush(e, Math.floor(e.y + 0.01), clamp(+m.dt || 0.05, 0, 0.1), { head: m.h, v: m.v }); break; }
     case 'boom': { if (!w) return; explode(w, m.x, m.y, m.z, m.p, true, null); break; }
@@ -92,6 +97,8 @@ function hostNetTick() {
   const pl = [{ i: G.player.id, n: G.player.name, x: G.player.x, y: G.player.y, z: G.player.z, yw: G.player.yaw, pt: G.player.pitch, d: G.player.dim, sn: G.player.sneaking, h: G.player.held() ? G.player.held().id : 0, ar: G.player.armor.map(a => a ? a.id : 0), dead: G.player.dead, sp: G.gameMode === 'spectator', gl: G.player.gliding, sw: G.player.swing }];
   for (const c of n.conns.values()) { const e = c.ent; if (e) pl.push({ i: e.id, n: e.name, x: e.x, y: e.y, z: e.z, yw: e.yaw, pt: e.pitch, d: e.dim, sn: e.sneaking, h: e.heldItem || 0, ar: (e.armor || []).map(a => a ? a.id : 0), dead: e.dead, sp: e.spectator, gl: e.gliding, sw: e.swing }); }
   netBroadcast({ t: 'ps', l: pl });
+  if (G.rtick % 3 === 0) flNetHostTick(n); // partículas del fluido continuo cerca de cada cliente
+  netPhysTick();
   if (G.rtick % 2 === 0) for (const c of n.conns.values()) {
     const p = c.ent; if (!p) continue; const list = [];
     for (const e of G.entities.values()) {
@@ -131,6 +138,9 @@ function clientHandle(m, resolve, reject) {
     case 'welcome': n.welcome = m; n.chunks = []; break;
     case 'chunks': for (const c of m.list) (n.chunks || (n.chunks = [])).push(c); if (G.worlds) for (const c of m.list) applyNetChunk(c); break;
     case 'ready': n.clearTO && n.clearTO(); resolve && resolve(n.welcome); break;
+    case 'tubes': if (Array.isArray(m.l)) { if (G.worlds) tubeNetRecv(m.l); else n.tubesPending = m.l; } break;
+    case 'phys': netApplyPhys(m.p); break;
+    case 'flp': flNetRecv(m); break;
     case 'bb': { G.applyingNet = true; for (const [d, x, y, z, id, meta] of m.l) { const w = G.worlds && G.worlds[d]; if (!w) continue; if (w.chunk(x >> 4, z >> 4)) w.set(x, y, z, id, meta); else { const k = ckey(x >> 4, z >> 4); const c = w.ensure(x >> 4, z >> 4); c.blocks[(x & 15) | ((z & 15) << 4) | (y << 8)] = id; c.meta[(x & 15) | ((z & 15) << 4) | (y << 8)] = meta; c.modified = true; } } G.applyingNet = false; break; }
     case 'ps': updateProxyPlayers(m.l); break;
     case 'es': updateProxyEntities(m.d, m.l); break;
@@ -198,3 +208,15 @@ function netInterp(e, dt) {
   e.walk = (e.walk || 0) + hd * (pl ? 1 : 1.5); e.walkAmt = lerp(e.walkAmt || 0, Math.min(1, hd / Math.max(dt, 0.001) / (pl ? 4 : 3)), Math.min(1, dt * 10));
 }
 function smoothProxies(dt) { for (const e of G.entities.values()) { if (!e.proxy && !e.remotePlayer) continue; if (e.isBoat && e.tr) { const k2 = Math.min(1, dt * 12); for (let i = 0; i < 9; i++) e.rot[i] += (e.tr[i] - e.rot[i]) * k2; e.prot = e.rot; } netInterp(e, dt); } }
+
+// ---------------------------------------------------------------- físicas: en multijugador las decide el anfitrión
+// El anfitrión manda sus ajustes de Físicas al unirse alguien y cada vez que los cambia. El cliente los usa mientras está
+// en la partida (sin guardarlos: los suyos quedan aparte y vuelven al salir) y no los puede tocar en el menú.
+let NETPHYS_SENT = '';
+function netPhysTick() { const n = G.net; if (!n || n.role !== 'host' || G.rtick % 10 !== 0) return; const j = JSON.stringify(SETTINGS.physics); if (j === NETPHYS_SENT) return; NETPHYS_SENT = j; netBroadcast({ t: 'phys', p: SETTINGS.physics }); }
+function netApplyPhys(p) {
+  if (!p || typeof p !== 'object') return; if (!G.netPhysOwn) G.netPhysOwn = JSON.parse(JSON.stringify(SETTINGS.physics));
+  const out = {}; for (const k in PHYS_DEF) out[k] = Object.assign({}, PHYS_DEF[k], p[k] && typeof p[k] === 'object' ? p[k] : {}); SETTINGS.physics = out;
+  if (typeof OPT !== 'undefined' && OPT.tab === 'phys' && typeof optRebuild === 'function') try { optRebuild(); } catch (e) { }
+}
+function netRestorePhys() { if (G.netPhysOwn) { SETTINGS.physics = G.netPhysOwn; G.netPhysOwn = null; } }

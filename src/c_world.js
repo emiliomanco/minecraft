@@ -132,7 +132,7 @@ class Generator {
     this.nC = n('cont'); this.nE = n('ero'); this.nP = n('peaks'); this.nD = n('detail'); this.nT = n('temp'); this.nHm = n('hum');
     this.nR = n('river'); this.nL = n('lake'); this.nC1 = n('cave1'); this.nC2 = n('cave2'); this.nC3 = n('cave3'); this.nCB = n('cavebiome'); this.nCB2 = n('cavebiome2');
     this.nV = n('variety'); this.nS = n('snow'); this.nDS = n('deepslate'); this.nW = n('weird'); this.nWX = n('warpx'); this.nWZ = n('warpz');
-    this.structCache = new Map(); this.colCache = new Map();
+    this.structCache = new Map(); this.colCache = new Map(); this.preCache = new Map(); this.lakeCache = new Map();
   }
   // ------------------------------------------------------------ overworld columna
   rawHeight(x, z) {
@@ -178,9 +178,10 @@ class Generator {
     const det = d * (2.2 * coast + 9 * (1 - flat) * (1 - mf)) + this.nD.n2(x * 0.045, z * 0.045) * 0.8 * (1 - flat);
     return { h: base + det + mh, c, e, d, mountain: mh };
   }
-  col(x, z) {
-    const key = x * 100003 + z; let r = this.colCache.get(key); if (r) return r;
-    if (this.colCache.size > 60000) this.colCache.clear();
+  // altura antes de los lagos (relieve + ríos + pantanos); la usan las columnas y el cálculo del nivel de cada lago
+  preLake(x, z) {
+    const key = x * 100003 + z; let P = this.preCache.get(key); if (P) return P;
+    if (this.preCache.size > 80000) this.preCache.clear();
     const R = this.rawHeight(x, z); let h = R.h; const c = R.c;
     const v2 = this.climate >= 2; let T, Hm;
     if (v2) { const cl = this.climateAt(x, z); T = cl[0]; Hm = cl[1]; }
@@ -192,7 +193,7 @@ class Generator {
       // entre montañas (el valle se estrecha y encaja según sube el relieve)
       const rv = Math.abs(this.nR.fbm2(x * 0.00055, z * 0.00055, 3)), mt = clamp(R.mountain / 120, 0, 1);
       const vw = 0.1 - 0.05 * mt, cw = 0.007 + 0.004 * (1 - mt), bw = cw * 1.5;
-      if (c > -0.12 && rv < vw) {
+      if (c > -0.12 && rv < vw && R.h > SEA - 1) { // solo en tierra: en el mar no hay ríos (antes cruzaban el océano como una franja sin olas)
         if (rv < bw) { // cauce y orillas
           const t = smooth(clamp((rv - cw * 0.4) / (bw - cw * 0.4), 0, 1)), rh = SEA - 4 + t * 5;
           if (h > rh) h = rh; if (rv < cw) river = true;
@@ -202,19 +203,42 @@ class Generator {
         }
       }
     } else { const rv = Math.abs(this.nR.fbm2(x * 0.0013, z * 0.0013, 3));
-    if (c > -0.18 && rv < 0.065 && R.mountain < 40) { const t = smooth(clamp((rv - 0.018) / 0.047, 0, 1)); const rh = SEA - 3 - (1 - t) * 2.5; if (h > rh) h = lerp(rh, h, t * t); if (rv < 0.032) river = true; } }
+    if (c > -0.18 && rv < 0.065 && R.mountain < 40 && R.h > SEA - 1) { const t = smooth(clamp((rv - 0.018) / 0.047, 0, 1)); const rh = SEA - 3 - (1 - t) * 2.5; if (h > rh) h = lerp(rh, h, t * t); if (rv < 0.032) river = true; } }
     // pantano de manglares: aplanar
     let swamp = (v2 ? Hm >= CLH[3] && T >= CLT[2] && T < CLT[4] : Hm > 0.32 && T > 0.05 && T < 0.5) && h > SEA - 4 && h < SEA + 9 && R.mountain < 2;
     if (swamp) h = lerp(h, SEA - 0.6 + R.d * 3, 0.85);
+    P = { R, h, c, T, Hm, v2, river, swamp }; this.preCache.set(key, P); return P;
+  }
+  // lago de una celda de 96x96 (o null): el agua llega como mucho hasta un bloque por debajo del punto más bajo del borde,
+  // así nunca flota ni se queda sin orillas; si un río o un pantano lo corta, no hay lago
+  lakeAt(cx, cz) {
+    const key = cx * 7919 + cz; if (this.lakeCache.has(key)) return this.lakeCache.get(key);
+    if (this.lakeCache.size > 4000) this.lakeCache.clear();
+    let L = null; const rr = rngFor(this.seed, cx, cz, 77);
+    if (rr() <= 0.38) {
+      const lx = cx * 96 + 20 + rr() * 56, lz = cz * 96 + 20 + rr() * 56, rad = 7 + rr() * 9; const R2 = rad * 1.25;
+      let lo = 1e9, bad = false;
+      for (let dz = -R2; dz <= R2 && !bad; dz += 2) for (let dx = -R2; dx <= R2; dx += 2) {
+        if (dx * dx + dz * dz > R2 * R2) continue; const P = this.preLake(Math.floor(lx + dx), Math.floor(lz + dz));
+        if (P.river || P.swamp) { bad = true; break; } if (P.h < lo) lo = P.h;
+      }
+      const lvl = Math.floor(lo) - 2;
+      if (!bad && lvl > SEA + 1 && lvl < SEA + 40) L = { lx, lz, rad, lvl };
+    }
+    this.lakeCache.set(key, L); return L;
+  }
+  col(x, z) {
+    const key = x * 100003 + z; let r = this.colCache.get(key); if (r) return r;
+    if (this.colCache.size > 60000) this.colCache.clear();
+    const P = this.preLake(x, z); const R = P.R, c = P.c, T = P.T, Hm = P.Hm, v2 = P.v2, river = P.river, swamp = P.swamp; let h = P.h;
     // lagos
     let lake = 0; if (!river && R.mountain < 6 && c > -0.04) {
       const gx = Math.floor(x / 96), gz = Math.floor(z / 96);
       for (let ox = 0; ox <= 1 && !lake; ox++) for (let oz = 0; oz <= 1 && !lake; oz++) {
         const cx = gx + (((x % 96) + 96) % 96 < 48 ? ox - 1 : ox), cz = gz + (((z % 96) + 96) % 96 < 48 ? oz - 1 : oz);
-        const rr = rngFor(this.seed, cx, cz, 77); if (rr() > 0.38) continue;
-        const lx = cx * 96 + 20 + rr() * 56, lz = cz * 96 + 20 + rr() * 56, rad = 7 + rr() * 9;
-        const dist = Math.hypot(x - lx, z - lz) / (rad * (0.85 + this.nL.n2(x * 0.08, z * 0.08) * 0.25));
-        if (dist < 1) { const lvl = Math.floor(this.rawHeight(lx | 0, lz | 0).h) - 1; if (lvl > SEA + 1 && lvl < SEA + 40) { const dep = (1 - dist) * 7 + 1; if (h > lvl - dep) h = lvl - dep; lake = lvl; } }
+        const Lk = this.lakeAt(cx, cz); if (!Lk) continue;
+        const dist = Math.hypot(x - Lk.lx, z - Lk.lz) / (Lk.rad * (0.85 + this.nL.n2(x * 0.08, z * 0.08) * 0.25));
+        if (dist < 1) { const dep = (1 - dist) * 6 + 1; if (h > Lk.lvl - dep) h = Lk.lvl - dep; lake = Lk.lvl; }
       }
     }
     h = Math.floor(clamp(h, 8, this.H - 20));
@@ -414,6 +438,9 @@ class Generator {
         }
       }
       if (ci.biome === BI.mangrove_swamp && h === SEA - 1 && r() < 0.05 && B[x | z << 4 | (h + 2) << 8] === 0) B[x | z << 4 | (h + 2) << 8] = ID.lily_pad;
+      // agua finita (lagos, ríos, pantanos): las celdas sumergidas nacen con la marca de «cubierta» que les pondría la simulación;
+      // sin ella, al despertar una celda la corrección se propagaba por todo el lago (lag y mallas rehechas sin parar)
+      if (!oceanCol) for (let y = h + 1; y < waterTop; y++) { const i = x | z << 4 | y << 8; if (B[i] === ID.water && B[i + 256] === ID.water) M[i] |= LIQ_FALL; }
     }
     // biomas de cueva y decoración subterránea
     for (let z = 0; z < 16; z++) for (let x = 0; x < 16; x++) {
@@ -703,50 +730,65 @@ function dynTreePlan(sp, x, y, z, stage, seed) {
     if (tipLeaves) tipLeaves(cx, cy, cz);
     return [cx, cy, cz];
   };
-  const trunk = (H, T0, Tt) => { for (let i = 0; i < H; i++) addLog(x, y + i, z, T0 + (Tt - T0) * Math.pow(i / Math.max(1, H - 1), 0.8)); };
-  const tAt = (H, T0, Tt, yy) => T0 + (Tt - T0) * Math.pow(clamp((yy - y) / Math.max(1, H - 1), 0, 1), 0.8);
   const a0 = r() * Math.PI * 2;
+  // grosor del tronco: 1x1, 2x2 o 3x3 bloques según la especie (los árboles jóvenes empiezan más finos)
+  const nW = { oak: [0.6, 0.88], dark_oak: [0.25, 0.75], jungle: [0.4, 0.8], spruce: [0.6, 0.9], birch: [0.85, 1], cherry: [0.7, 1], acacia: [0.8, 1] }[sp] || [1, 1];
+  const rn = r(); const nFull = rn < nW[0] ? 1 : rn < nW[1] ? 2 : 3; const n = stage >= 2 ? nFull : stage === 1 ? Math.min(nFull, 2) : 1;
+  const o0 = n === 3 ? -1 : 0, gN = 1 + 0.2 * (n - 1), wN = (n - 1) * 0.9 * s; const base = new Set(), trunkSet = new Set();
+  // tronco grueso: bloques enteros en la base (el 3x3 se queda en cruz más arriba) y una sola columna que se afina hasta la copa
+  const trunk = (H, T0, Tt) => {
+    const Hb = n === 1 ? 0 : Math.max(1, Math.round(H * (n === 3 ? 0.7 : 0.55))), Hp = n === 3 ? Math.round(Hb * 0.5) : Hb;
+    for (let i = 0; i < Hb; i++) for (let dz = 0; dz < n; dz++) for (let dx = 0; dx < n; dx++) {
+      if (i >= Hp && dx !== 1 && dz !== 1) continue;
+      const a = x + o0 + dx, c = z + o0 + dz; addLog(a, y + i, c, 7); trunkSet.add(K(a, y + i, c)); if (!i) base.add(K(a, y, c));
+    }
+    const t0 = n > 1 ? 7 : T0, tt = n > 1 ? Math.max(Tt, n === 3 ? 5 : 4) : Tt;
+    for (let i = Hb; i < H; i++) { addLog(x, y + i, z, t0 + (tt - t0) * Math.pow((i - Hb) / Math.max(1, H - 1 - Hb), 0.8)); trunkSet.add(K(x, y + i, z)); }
+    base.add(K(x, y, z));
+  };
+  const tAt = (H, T0, Tt, yy) => n > 1 ? 7 : T0 + (Tt - T0) * Math.pow(clamp((yy - y) / Math.max(1, H - 1), 0, 1), 0.8);
   switch (sp) {
     case 'oak': case 'cherry': case 'dark_oak': {
       const big = sp === 'dark_oak', ch = sp === 'cherry';
-      const H = Math.max(2, Math.round(((big ? 7 : ch ? 5 : 6) + r() * 2) * s)), T0 = Math.round((big ? 7 : 6.5) * s + 0.3), Tt = Math.max(0, Math.round(T0 * 0.35));
+      const H = Math.max(2, Math.round(((big ? 7 : ch ? 5 : 6) + r() * 2) * s * gN)), T0 = Math.round((big ? 7 : 6.5) * s + 0.3), Tt = Math.max(0, Math.round(T0 * 0.35));
       trunk(H, T0, Tt);
-      const nb = Math.max(1, Math.round(((big ? 5 : ch ? 4 : 4) + r() * 1.5) * s));
-      const cl = (cx, cy, cz) => blob(cx, cy + 1, cz, ((big ? 3 : ch ? 3.2 : 2.6) + r() * 0.6) * s + 0.4, (big ? 1.8 : 1.6) * s + 0.4, true);
+      // pocas ramas, cortas y dentro de la copa (antes salían muchas y largas, peladas)
+      const nb = Math.max(1, Math.round(((big ? 2.5 : 2) + r() * 1.5) * s)) + (n - 1);
+      const cl = (cx, cy, cz) => blob(cx, cy, cz, ((big ? 2.8 : ch ? 3 : 2.5) + r() * 0.6) * s + 0.5 + wN * 0.5, (big ? 1.8 : 1.6) * s + 0.5, true);
       for (let i = 0; i < nb; i++) {
-        const hy = y + Math.max(1, Math.floor(H * (0.42 + 0.48 * (i + r() * 0.6) / nb)));
-        const ang = a0 + i * (Math.PI * 2 / nb) + (r() - 0.5) * 0.8; const len = Math.max(1, Math.round(((big ? 4 : ch ? 4.5 : 3.6) + r() * 1.5) * s));
-        branch(x, hy, z, ang, len, Math.max(0, tAt(H, T0, Tt, hy) - 2), ch ? 0.35 : 0.5, cl, s > 0.6);
+        const hy = y + Math.max(1, Math.floor(H * (0.55 + 0.4 * (i + r() * 0.6) / nb)));
+        const ang = a0 + i * (Math.PI * 2 / nb) + (r() - 0.5) * 0.8; const len = Math.max(1, Math.round(((big ? 3 : ch ? 3.4 : 2.6) + r()) * s + wN));
+        branch(x, hy, z, ang, len, Math.max(0, tAt(H, T0, Tt, hy) - 2), ch ? 0.45 : 0.6, cl, big && s > 0.9);
       }
-      blob(x, y + H, z, ((big ? 3.6 : ch ? 3.4 : 3) + r() * 0.5) * s + 0.5, 2.2 * s + 0.4, true);
+      blob(x, y + H, z, ((big ? 3.6 : ch ? 3.4 : 3) + r() * 0.5) * s + 0.5 + wN, 2.2 * s + 0.4 + wN * 0.4, true);
       break;
     }
     case 'birch': {
-      const H = Math.max(3, Math.round((8 + r() * 3) * s)), T0 = Math.round(4.5 * s + 0.3); trunk(H, T0, Math.max(0, T0 - 3));
-      const nb = Math.max(1, Math.round((5 + r() * 2) * s));
-      for (let i = 0; i < nb; i++) { const hy = y + Math.floor(H * (0.45 + 0.5 * r())); branch(x, hy, z, a0 + i * 2.4, Math.max(1, Math.round((1.5 + r() * 1.5) * s)), 0.8, 0.8, (cx, cy, cz) => blob(cx, cy, cz, 1.6 * s + 0.4, 1.2 * s + 0.3), false); }
-      blob(x, y + Math.round(H * 0.72), z, 2.2 * s + 0.5, H * 0.33 + 0.5);
+      const H = Math.max(3, Math.round((8 + r() * 3) * s * gN)), T0 = Math.round(4.5 * s + 0.3); trunk(H, T0, Math.max(0, T0 - 3));
+      const nb = Math.max(1, Math.round((2.5 + r() * 1.5) * s)) + (n - 1);
+      for (let i = 0; i < nb; i++) { const hy = y + Math.floor(H * (0.55 + 0.4 * r())); branch(x, hy, z, a0 + i * 2.4, Math.max(1, Math.round((1 + r()) * s + wN)), 0.8, 0.8, (cx, cy, cz) => blob(cx, cy, cz, 1.6 * s + 0.4, 1.2 * s + 0.3), false); }
+      blob(x, y + Math.round(H * 0.72), z, 2.2 * s + 0.5 + wN, H * 0.33 + 0.5);
       break;
     }
     case 'spruce': {
-      const H = Math.max(3, Math.round((10 + r() * 5) * s) + 1), T0 = Math.round(5.5 * s + 0.3); trunk(H, T0, 0);
+      const H = Math.max(3, Math.round((10 + r() * 5) * s * gN) + 1), T0 = Math.round(5.5 * s + 0.3); trunk(H, T0, 0);
       for (let yy = y + 2; yy < y + H; yy++) {
-        const k = (yy - y - 2) / Math.max(1, H - 2); const rr = (1 - k) * 3.6 * s + 0.8; const layer = ((yy - y) % 2) === 0;
-        if (layer && rr >= 1.8) { const nb = 3 + ((r() * 2) | 0); for (let i = 0; i < nb; i++) branch(x, yy, z, a0 + yy + i * (Math.PI * 2 / nb), Math.max(1, Math.round(rr - 0.8)), 0.6, -0.15, null, false); }
+        const k = (yy - y - 2) / Math.max(1, H - 2); const rr = (1 - k) * (3.6 * s + wN) + 0.8; const layer = ((yy - y) % 2) === 0;
+        if (layer && rr >= 2.2 && ((yy - y) % 4) === 0) { const nb = 2 + ((r() * 2) | 0); for (let i = 0; i < nb; i++) branch(x, yy, z, a0 + yy + i * (Math.PI * 2 / nb), Math.max(1, Math.round(rr - 0.8)), 0.6, -0.15, null, false); }
         blob(x, yy, z, layer ? rr : Math.max(1, rr - 1.1), 0);
       }
       leaf(x, y + H, z); leaf(x, y + H + 1, z);
       break;
     }
     case 'jungle': {
-      const H = Math.max(4, Math.round((13 + r() * 6) * s) + 1), T0 = Math.round(7 * s + 0.3), Tt = Math.max(1, Math.round(T0 * 0.4)); trunk(H, T0, Tt);
-      const nb = Math.max(1, Math.round(4 * s));
-      for (let i = 0; i < nb; i++) { const hy = y + Math.floor(H * (0.68 + 0.27 * r())); branch(x, hy, z, a0 + i * (Math.PI * 2 / nb), Math.max(1, Math.round((3.5 + r() * 2) * s)), Math.max(0, tAt(H, T0, Tt, hy) - 2), 0.45, (cx, cy, cz) => blob(cx, cy + 1, cz, 3 * s + 0.5, 1.6 * s + 0.4, true), s > 0.6); }
-      blob(x, y + H, z, 3.6 * s + 0.5, 2 * s + 0.4, true);
+      const H = Math.max(4, Math.round((13 + r() * 6) * s * gN) + 1), T0 = Math.round(7 * s + 0.3), Tt = Math.max(1, Math.round(T0 * 0.4)); trunk(H, T0, Tt);
+      const nb = Math.max(1, Math.round(3 * s)) + (n - 1);
+      for (let i = 0; i < nb; i++) { const hy = y + Math.floor(H * (0.72 + 0.23 * r())); branch(x, hy, z, a0 + i * (Math.PI * 2 / nb), Math.max(1, Math.round((3 + r() * 1.5) * s + wN)), Math.max(0, tAt(H, T0, Tt, hy) - 2), 0.55, (cx, cy, cz) => blob(cx, cy, cz, 3 * s + 0.5 + wN * 0.5, 1.8 * s + 0.5, true), false); }
+      blob(x, y + H, z, 3.6 * s + 0.5 + wN, 2 * s + 0.4 + wN * 0.4, true);
       break;
     }
     case 'acacia': {
-      const h1 = Math.max(1, Math.round(3.5 * s) + 1), T0 = Math.round(5.5 * s + 0.3); trunk(h1, T0, T0 - 1);
+      const h1 = Math.max(1, Math.round(3.5 * s * gN) + 1), T0 = Math.round(5.5 * s + 0.3); trunk(h1, T0, T0 - 1);
       const limbs = s > 0.5 ? 2 + (r() < 0.4 ? 1 : 0) : 1;
       for (let i = 0; i < limbs; i++) {
         const ang = a0 + i * (Math.PI * 2 / limbs) + (r() - 0.5) * 0.6;
@@ -756,7 +798,13 @@ function dynTreePlan(sp, x, y, z, stage, seed) {
       break;
     }
   }
-  return { logs, leaves, leafId: sp + '_leaves', logId: 'dyn_' + sp + '_log' };
+  // ramas tapadas: la parte de cada rama que se aleja del tronco va envuelta en hojas (no quedan palos pelados asomando)
+  if (sp !== 'acacia') for (const [k, [a, b, c]] of [...logs]) {
+    if (trunkSet.has(k) || b < y + 2) continue; const lx = a - x, lz = c - z;
+    const ex = Math.max(o0 - lx, lx - (o0 + n - 1), 0), ez = Math.max(o0 - lz, lz - (o0 + n - 1), 0); if (Math.max(ex, ez) < 2) continue;
+    leaf(a + 1, b, c); leaf(a - 1, b, c); leaf(a, b, c + 1); leaf(a, b, c - 1); leaf(a, b + 1, c); if (r() < 0.6) leaf(a, b - 1, c);
+  }
+  return { logs, leaves, base, n, leafId: sp + '_leaves', logId: 'dyn_' + sp + '_log' };
 }
 // coloca (o hace crecer) el árbol: las ramas solo ocupan aire, plantas, hojas o ramas del mismo árbol; las hojas solo aire
 function dynTreePlace(S, x, y, z, sp, stage, seed, stumpKeep) {
@@ -770,14 +818,14 @@ function dynTreePlace(S, x, y, z, sp, stage, seed, stumpKeep) {
   if (live) {
     const comp = new Map(), st = [[x, y, z]]; comp.set(K(x, y, z), [x, y, z]);
     while (st.length && comp.size < 800) { const [a, b, c] = st.pop(); for (const [dx, dy, dz] of N6) { const p = a + dx, q = b + dy, t = c + dz; const k = K(p, q, t); if (comp.has(k) || Math.abs(p - x) > 12 || Math.abs(t - z) > 12) continue; const nb = S.get(p, q, t); if (nb > 0 && REG[nb].dynLog) { comp.set(k, [p, q, t]); st.push([p, q, t]); } } }
-    const ow = new Map(), oq = []; for (const [k, [a, b, c]] of comp) if (k === K(x, y, z) || ground(S.get(a, b - 1, c))) { ow.set(k, k); oq.push(k); }
+    const ow = new Map(), oq = []; for (const [k, [a, b, c]] of comp) if (k === K(x, y, z) || P.base.has(k) || ground(S.get(a, b - 1, c))) { ow.set(k, P.base.has(k) ? K(x, y, z) : k); oq.push(k); }
     for (let i = 0; i < oq.length; i++) { const k = oq[i]; const [a, b, c] = comp.get(k); for (const [dx, dy, dz] of N6) { const nk = K(a + dx, b + dy, c + dz); if (comp.has(nk) && !ow.has(nk)) { ow.set(nk, ow.get(k)); oq.push(nk); } } }
     own = new Set(); for (const [k, o] of ow) if (o === K(x, y, z)) own.add(k);
   }
   const ok = (a, b, c, root) => {
     const cur = S.get(a, b, c); if (cur < 0) return false; const cd = cur > 0 ? REG[cur] : null;
     if (cur !== 0 && cur !== ID.water && !(cd && (cd.replace || cd.leaves || cur === logId))) return false;
-    if (!root && !P.logs.has(K(a, b - 1, c)) && ground(S.get(a, b - 1, c))) return false;
+    if (!root && !P.logs.has(K(a, b - 1, c)) && ground(S.get(a, b - 1, c))) return false; // solo la base del tronco (1x1, 2x2 o 3x3) toca el suelo
     for (const [dx, dy, dz] of N6) { const k = K(a + dx, b + dy, c + dz); if (P.logs.has(k)) continue; const nb = S.get(a + dx, b + dy, c + dz); if (nb > 0 && REG[nb].dynLog && !(own && own.has(k))) return false; }
     return true;
   };
@@ -785,8 +833,9 @@ function dynTreePlace(S, x, y, z, sp, stage, seed, stumpKeep) {
   const seen = new Set([rk]), q = [P.logs.get(rk)];
   while (q.length) {
     const [a, b, c, t] = q.pop(); let tt = t; if (live && S.get(a, b, c) === logId) tt = Math.max(t, S.getMeta(a, b, c) & 7);
-    const root = a === x && b === y && c === z; S.set(a, b, c, logId, tt | (root ? (stage & 3) << 3 : 0));
-    for (const [dx, dy, dz] of N6) { const k = K(a + dx, b + dy, c + dz); if (seen.has(k) || !P.logs.has(k)) continue; seen.add(k); const L = P.logs.get(k); if (ok(L[0], L[1], L[2], false)) q.push(L); }
+    // la raíz principal guarda la fase; el resto de la base de un tronco grueso se marca (64) como raíz secundaria
+    const root = a === x && b === y && c === z; S.set(a, b, c, logId, tt | (root ? (stage & 3) << 3 : P.base.has(K(a, b, c)) ? 64 : 0));
+    for (const [dx, dy, dz] of N6) { const k = K(a + dx, b + dy, c + dz); if (seen.has(k) || !P.logs.has(k)) continue; seen.add(k); const L = P.logs.get(k); if (ok(L[0], L[1], L[2], P.base.has(k))) q.push(L); }
   }
   for (const [a, b, c] of P.leaves.values()) S.setIfAir(a, b, c, leafId);
 }
@@ -1167,17 +1216,21 @@ defStruct({
   build(S, c, r) {
     const y = S.colH(c.x, c.z); const R = 10;
     for (let x = c.x - R; x <= c.x + R; x++) for (let z = c.z - R; z <= c.z + R; z++) S.foundation(x, z, y, ID.sandstone);
-    for (let k = 0; k <= R; k++) S.fillFn(c.x - R + k, y + k, c.z - R + k, c.x + R - k, y + k, c.z + R - k, (x, yy, z) => (Math.abs(x - c.x) === R - k || Math.abs(z - c.z) === R - k || k === 0 || k === R) ? (k % 4 === 2 ? ID.orange_terracotta : ID.sandstone) : 0);
-    S.fill(c.x - R + 1, y + 1, c.z - R + 1, c.x + R - 1, y + 6, c.z + R - 1, 0);
-    S.fill(c.x - R + 1, y + 1, c.z - R + 1, c.x + R - 1, y + 1, c.z + R - 1, ID.sandstone);
+    // cuerpo escalonado: paredes en cada capa, hueco por dentro hasta la 6.ª (la sala) y macizo por encima
+    // (antes el vaciado de la sala se comía las paredes de las 6 primeras capas y la pirámide salía cortada)
+    for (let k = 0; k <= R; k++) S.fillFn(c.x - R + k, y + k, c.z - R + k, c.x + R - k, y + k, c.z + R - k, (x, yy, z) => {
+      const m = Math.max(Math.abs(x - c.x), Math.abs(z - c.z)); const edge = m === R - k;
+      if (edge || k === 0 || k === 1 || k > 6) return edge && k % 4 === 2 ? ID.orange_terracotta : ID.sandstone; return 0; });
     for (const [tx, tz] of [[c.x - R, c.z - R], [c.x + R - 4, c.z - R]]) S.fill(tx, y, tz, tx + 4, y + 10, tz + 4, ID.cut_sandstone);
-    S.fill(c.x - 1, y + 1, c.z - R, c.x + 1, y + 3, c.z - R + 1, 0);
+    S.fill(c.x - 1, y + 1, c.z - R, c.x + 1, y + 3, c.z - R + 3, 0); // entrada: atraviesa todas las capas de la fachada
     S.set(c.x, y + 1, c.z, ID.blue_terracotta); for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) S.set(c.x + dx, y + 1, c.z + dz, ID.orange_terracotta);
+    // cámara del tesoro bajo el suelo, con el pozo escondido bajo la terracota azul
     S.fill(c.x - 4, y - 12, c.z - 4, c.x + 4, y - 1, c.z + 4, ID.sandstone); S.fill(c.x - 3, y - 11, c.z - 3, c.x + 3, y - 2, c.z + 3, 0);
-    S.fill(c.x - 1, y - 2, c.z - 1, c.x + 1, y, c.z + 1, 0); S.set(c.x, y + 1, c.z, 0);
+    S.fill(c.x - 1, y - 2, c.z - 1, c.x + 1, y, c.z + 1, 0);
     S.chest(c.x, y - 11, c.z - 3, 'desert_pyramid'); S.chest(c.x, y - 11, c.z + 3, 'desert_pyramid'); S.chest(c.x - 3, y - 11, c.z, 'desert_pyramid'); S.chest(c.x + 3, y - 11, c.z, 'desert_pyramid');
+    // trampa: placa de presión en el centro y 9 dinamitas debajo del suelo (pisarla las prende)
     S.fill(c.x - 1, y - 13, c.z - 1, c.x + 1, y - 13, c.z + 1, ID.tnt);
-    S.set(c.x, y - 11, c.z, ID.stone_slab);
+    S.set(c.x, y - 11, c.z, ID.stone_pressure_plate);
   }
 });
 // 8. PUESTO DE SAQUEADORES ----------------------------------------
@@ -1217,20 +1270,85 @@ defStruct({
   }
 });
 // 10. BARCOS NAUFRAGADOS -------------------------------------------
+// casco común: eslora 2L+1, manga que se estrecha en proa y popa
+const shipHalfW = (a, L) => 3 - Math.max(0, Math.abs(a) - (L - 4));
+const OCEAN_SHIP = [BI.ocean, BI.deep_ocean, BI.warm_ocean, BI.frozen_ocean];
 defStruct({
-  name: 'shipwreck', dim: 'overworld', spacing: 16, radius: 14, sep: 4, chance: 0.6,
-  place(gen, x, z) { const c = gen.col(x, z); if (![BI.ocean, BI.deep_ocean, BI.warm_ocean, BI.beach, BI.frozen_ocean].includes(c.biome)) return null; return { water: true, rot: hash2(gen.seed, x, z) < 0.5 }; },
+  name: 'shipwreck', dim: 'overworld', spacing: 16, radius: 16, sep: 4, chance: 0.6,
+  // solo en mar con fondo suficiente para quedar del todo bajo el agua
+  place(gen, x, z) { const c = gen.col(x, z); if (!OCEAN_SHIP.includes(c.biome) || c.h > SEA - 9) return null; const h = hash2(gen.seed + 3, x, z); return { water: true, rot: hash2(gen.seed, x, z) < 0.5, roll: (h - 0.5) * 0.9, pitch: (hash2(gen.seed + 4, x, z) - 0.5) * 0.25, breach: 2 + ((h * 97) % 1) * 12 | 0 }; },
   build(S, c, r) {
-    const y = S.colH(c.x, c.z); const L = 11; const P = ID.spruce_planks, P2 = ID.oak_planks, LOG = ID.spruce_log;
-    const put = (a, h, b, id) => { if (c.rot) S.set(c.x + b, y + h, c.z + a, id); else S.set(c.x + a, y + h, c.z + b, id); };
-    const broken = (a, h, b) => hash3(c.seed, a, h, b) < 0.18;
+    // hundido de verdad: semienterrado en la arena, escorado y cabeceado, con medio casco destrozado y el mástil partido
+    const y = S.colH(c.x, c.z) - 1; const L = 11; const P = ID.spruce_planks, P2 = ID.oak_planks, LOG = ID.spruce_log || ID.oak_log;
+    const W = (a, b) => c.rot ? [c.x + b, c.z + a] : [c.x + a, c.z + b];
+    const yAt = (a, h, b) => y + h + Math.round(b * c.roll + a * c.pitch);
+    const put = (a, h, b, id) => { const [wx, wz] = W(a, b); const yy = yAt(a, h, b); if (id === 0 && yy <= S.colH(wx, wz)) id = hash3(c.seed, wx, yy, wz) < 0.3 ? ID.gravel : ID.sand; S.set(wx, yy, wz, id); };
+    const rot = (a, h, b) => { const q = hash3(c.seed, a, h, b); const hole = b > 0 && a >= c.breach - L && a < c.breach - L + 4 && h >= 1; return hole || q < (h >= 3 ? 0.55 : 0.3); };
     for (let a = -L; a <= L; a++) {
-      const taper = Math.max(0, Math.abs(a) - (L - 4)); const w = 3 - taper;
-      for (let h = 0; h <= 4; h++) { const ww = h === 0 ? w - 1 : w; for (let b = -ww; b <= ww; b++) { const shell = h === 0 || Math.abs(b) === ww || (h === 2 && Math.abs(a) < L - 2); if (shell) { if (!broken(a, h, b)) put(a, h, b, h === 2 ? P2 : P); } else put(a, h, b, 0); } }
+      const w = shipHalfW(a, L);
+      for (let h = 0; h <= 4; h++) { const ww = h === 0 ? w - 1 : w; for (let b = -ww; b <= ww; b++) {
+        const shell = h === 0 || Math.abs(b) === ww || (h === 2 && Math.abs(a) < L - 2);
+        if (shell) { if (!rot(a, h, b)) put(a, h, b, h === 2 ? P2 : P); else if (h > 0) put(a, h, b, 0); } else put(a, h, b, 0);
+      } }
     }
-    for (let h = 3; h < 12; h++) if (!broken(0, h, 99)) put(0, h, 0, LOG); for (let b = -3; b <= 3; b++) put(0, 9, b, LOG);
-    put(-L + 3, 1, 0, ID.chest); const cx = c.rot ? c.x : c.x - L + 3, cz = c.rot ? c.z - L + 3 : c.z; S.chest(cx, y + 1, cz, 'shipwreck');
-    const cx2 = c.rot ? c.x : c.x + L - 3, cz2 = c.rot ? c.z + L - 3 : c.z; S.chest(cx2, y + 1, cz2, 'shipwreck_treasure');
+    // mástil: un tocón en cubierta y el resto tirado en el fondo junto al barco
+    const stump = 2 + (r() * 2 | 0); for (let h = 3; h < 3 + stump; h++) put(0, h, 0, LOG);
+    const side = r() < 0.5 ? -1 : 1; for (let k = 0; k < 7; k++) { const [wx, wz] = W(-2 + k, side * 5); S.set(wx, S.colH(wx, wz) + 1, wz, LOG); }
+    for (let k = -2; k <= 2; k++) { const [wx, wz] = W(3, side * 5 + k); S.set(wx, S.colH(wx, wz) + 1, wz, LOG); }
+    for (let i = 0; i < 6; i++) { const [wx, wz] = W(Math.round((r() - 0.5) * 2 * (L + 3)), Math.round((r() - 0.5) * 12)); S.set(wx, S.colH(wx, wz) + 1, wz, r() < 0.5 ? P : P2); } // tablas sueltas
+    const [cx, cz] = W(-L + 3, 0); S.chest(cx, yAt(-L + 3, 1, 0), cz, 'shipwreck');
+    const [cx2, cz2] = W(L - 3, 0); S.chest(cx2, yAt(L - 3, 1, 0), cz2, 'shipwreck_treasure');
+  }
+});
+// 10b. BARCOS PIRATA -----------------------------------------------
+// el barco entero, flotando y en perfecto estado: bodega seca bajo cubierta, dos mástiles con velas, camarote del capitán,
+// cofres con botín y saqueadores (los piratas) a bordo
+defStruct({
+  name: 'pirate_ship', dim: 'overworld', spacing: 28, radius: 18, sep: 6, chance: 0.45,
+  place(gen, x, z) { const c = gen.col(x, z); if (!OCEAN_SHIP.includes(c.biome) || c.h > SEA - 6 || c.biome === BI.frozen_ocean) return null; return { water: true, rot: hash2(gen.seed + 7, x, z) < 0.5 }; },
+  build(S, c, r) {
+    const L = 12, y0 = SEA - 2; const HULL = ID.dark_oak_planks, DECK = ID.spruce_planks, LOG = ID.dark_oak_log || ID.oak_log, SAIL = ID.white_wool, RAIL = ID.dark_oak_fence;
+    const W = (a, b) => c.rot ? [c.x + b, c.z + a] : [c.x + a, c.z + b];
+    const put = (a, yy, b, id) => { const [wx, wz] = W(a, b); S.set(wx, yy, wz, id); };
+    const air = (a, yy, b) => { const [wx, wz] = W(a, b); if (S.inside(wx, yy, wz)) { S.c.blocks[(wx - S.x0) | (wz - S.z0) << 4 | yy << 8] = 0; S.c.meta[(wx - S.x0) | (wz - S.z0) << 4 | yy << 8] = 0; } };
+    for (let a = -L; a <= L; a++) {
+      const w = shipHalfW(a, L); const keel = Math.abs(a) > L - 3 ? 1 : 0; // proa y popa algo más altas
+      for (let yy = y0 + keel; yy <= y0 + 4; yy++) { const h = yy - y0; const ww = h === keel ? w - 1 : w;
+        for (let b = -w; b <= w; b++) {
+          if (Math.abs(b) > ww) { if (yy <= SEA) put(a, yy, b, HULL); continue; } // pantoque
+          const edge = Math.abs(b) === ww || Math.abs(a) === L;
+          if (h === keel) put(a, yy, b, HULL);
+          else if (h === 3) put(a, yy, b, edge ? HULL : DECK); // cubierta
+          else if (h === 4) { if (edge) put(a, yy, b, RAIL); else air(a, yy, b); }
+          else if (edge) put(a, yy, b, HULL); else air(a, yy, b); // bodega seca
+        }
+      }
+    }
+    // camarote del capitán en popa
+    for (let a = L - 5; a <= L - 1; a++) for (let yy = y0 + 4; yy <= y0 + 6; yy++) for (let b = -2; b <= 2; b++) {
+      const edge = Math.abs(b) === 2 || a === L - 5 || a === L - 1; if (yy === y0 + 6) put(a, yy, b, HULL); else if (edge) put(a, yy, b, (yy === y0 + 5 && Math.abs(b) === 2 && a === L - 3) ? ID.glass : HULL); else air(a, yy, b);
+    }
+    air(L - 5, y0 + 4, 0); air(L - 5, y0 + 5, 0); // puerta
+    for (let b = -2; b <= 2; b++) put(L - 3, y0 + 7, b, RAIL);
+    // mástiles con verga y vela
+    for (const [ma, mh] of [[-4, 11], [3, 13]]) {
+      for (let yy = y0 + 3; yy <= y0 + 3 + mh; yy++) put(ma, yy, 0, LOG);
+      const top = y0 + 3 + mh; for (let b = -4; b <= 4; b++) { put(ma, top - 1, b, LOG); put(ma, top - 7, b, LOG); }
+      for (let yy = top - 6; yy <= top - 2; yy++) for (let b = -4; b <= 4; b++) if (Math.abs(b) < 4 || yy < top - 2) put(ma - 1, yy, b, SAIL);
+    }
+    put(3, y0 + 17, 1, ID.black_wool || SAIL); put(3, y0 + 17, 2, ID.black_wool || SAIL); put(3, y0 + 16, 1, ID.black_wool || SAIL); put(3, y0 + 16, 2, ID.black_wool || SAIL); // bandera
+    for (let k = 1; k <= 4; k++) put(-L - k, y0 + 3 + (k >> 1), 0, LOG); // bauprés
+    // escotilla y escalera a la bodega
+    air(0, y0 + 3, 1); for (let yy = y0 + 1; yy <= y0 + 3; yy++) put(0, yy, 2, ID.ladder);
+    put(-6, y0 + 4, 2, ID.lantern); put(6, y0 + 4, -2, ID.lantern); put(L - 3, y0 + 5, 0, ID.lantern); put(-2, y0 + 1, -2, ID.lantern);
+    for (const [a, b] of [[-7, -1], [-7, 1], [5, 1]]) put(a, y0 + 1, b, ID.barrel || HULL);
+    // cofres: dos en la bodega y el tesoro en el camarote
+    const ch = (a, yy, b, t) => { const [wx, wz] = W(a, b); S.chest(wx, yy, wz, t); };
+    ch(-5, y0 + 1, -2, 'pirate'); ch(4, y0 + 1, -2, 'pirate'); ch(L - 2, y0 + 4, 0, 'pirate_treasure');
+    // piratas
+    for (let i = 0; i < 4; i++) { const [wx, wz] = W(-8 + i * 4, (i % 2 ? 1 : -1)); S.mob('pillager', wx + 0.5, y0 + 4, wz + 0.5); }
+    { const [wx, wz] = W(-3, 0); S.mob('pillager', wx + 0.5, y0 + 1, wz + 0.5); }
+    { const [wx, wz] = W(L - 3, 1); S.mob(r() < 0.5 ? 'vindicator' : 'pillager', wx + 0.5, y0 + 4, wz + 0.5); } // el capitán
   }
 });
 // 11. TEMPLO DE LA JUNGLA -----------------------------------------
@@ -1344,6 +1462,8 @@ const LOOT = {
   outpost: [['arrow', 2, 7, 3], ['wheat', 3, 5, 3], ['iron_ingot', 1, 3, 2], ['bow', 1, 1, 2], ['dark_oak_log', 2, 3, 2], ['emerald', 1, 2, 1]],
   mineshaft: [['rail', 4, 8, 4], ['torch', 1, 16, 4], ['iron_ingot', 1, 5, 4], ['gold_ingot', 1, 3, 3], ['redstone', 4, 9, 3], ['lapis_lazuli', 4, 9, 3], ['diamond', 1, 2, 1], ['coal', 3, 8, 4], ['bread', 1, 3, 3]],
   shipwreck: [['paper', 1, 10, 4], ['coal', 2, 8, 3], ['wheat', 4, 10, 3], ['rotten_flesh', 2, 10, 3], ['leather_helmet', 1, 1, 1], ['bread', 1, 3, 2]],
+  pirate: [['gold_nugget', 3, 12, 4], ['gold_ingot', 1, 4, 3], ['iron_ingot', 2, 6, 3], ['emerald', 1, 4, 3], ['arrow', 6, 18, 3], ['crossbow', 1, 1, 1], ['gunpowder', 2, 6, 2], ['bread', 2, 5, 2], ['cooked_cod', 2, 6, 2], ['map', 1, 1, 1]],
+  pirate_treasure: [['diamond', 1, 4, 3], ['gold_ingot', 3, 9, 4], ['emerald', 2, 8, 3], ['gold_block', 1, 2, 1], ['heart_of_the_sea', 1, 1, 2], ['golden_apple', 1, 2, 2], ['enchanted_golden_apple', 1, 1, 0.3], ['diamond_sword', 1, 1, 1], ['totem_of_undying', 1, 1, 0.5]],
   shipwreck_treasure: [['iron_ingot', 3, 8, 4], ['gold_ingot', 1, 5, 3], ['emerald', 1, 5, 3], ['diamond', 1, 1, 1], ['gold_nugget', 1, 10, 3], ['heart_of_the_sea', 1, 1, 2], ['lapis_lazuli', 1, 10, 3]],
   jungle_temple: [['bone', 4, 8, 4], ['gold_ingot', 2, 7, 3], ['iron_ingot', 1, 5, 3], ['emerald', 1, 3, 2], ['diamond', 1, 3, 2], ['saddle', 1, 1, 1], ['rotten_flesh', 3, 7, 3]],
   dungeon: [['bread', 1, 2, 4], ['saddle', 1, 1, 2], ['iron_ingot', 1, 4, 3], ['gold_ingot', 1, 4, 2], ['string', 1, 4, 3], ['gunpowder', 1, 4, 3], ['golden_apple', 1, 1, 1], ['bucket', 1, 1, 2], ['redstone', 1, 4, 2]],

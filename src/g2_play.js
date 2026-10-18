@@ -78,7 +78,7 @@ function openScreen(kind, data) {
   document.exitPointerLock && document.exitPointerLock();
   const panel = $('invPanel'); panel.innerHTML = ''; panel.className = 'panel ' + kind;
   const sec = (title, cls) => { const d = document.createElement('div'); d.className = 'sec ' + (cls || ''); if (title) { const t = document.createElement('div'); t.className = 'ptitle'; t.textContent = title; d.appendChild(t); } panel.appendChild(d); return d; };
-  const grid = (parent, slots, cols, cls) => { const g = document.createElement('div'); g.className = 'grid ' + (cls || ''); g.style.gridTemplateColumns = `repeat(${cols}, var(--sl))`; for (const s of slots) { const el = document.createElement('div'); el.className = 'slot' + (s.cls ? ' ' + s.cls : ''); s.el = el; UI.slots.push(s); el.addEventListener('mousedown', ev => slotClick(s, ev)); el.addEventListener('mouseenter', () => { UI.hover = s; showTooltip(s); }); el.addEventListener('mouseleave', () => { if (UI.hover === s) UI.hover = null; hideTooltip(); }); el.addEventListener('contextmenu', e => e.preventDefault()); g.appendChild(el); } parent.appendChild(g); return g; };
+  const grid = (parent, slots, cols, cls) => { const g = document.createElement('div'); g.className = 'grid ' + (cls || ''); g.style.gridTemplateColumns = `repeat(${cols}, var(--sl))`; for (const s of slots) { const el = document.createElement('div'); el.className = 'slot' + (s.cls ? ' ' + s.cls : ''); s.el = el; UI.slots.push(s); el.addEventListener('mousedown', ev => slotClick(s, ev)); el.addEventListener('mouseenter', ev => { UI.hover = s; showTooltip(s); if (UI.drag && (ev.buttons & 2)) dragEnter(s); }); el.addEventListener('mouseleave', () => { if (UI.hover === s) UI.hover = null; hideTooltip(); }); el.addEventListener('contextmenu', e => e.preventDefault()); g.appendChild(el); } parent.appendChild(g); return g; };
   if (kind === 'creative') { buildCreative(panel, grid, sec); }
   else {
     const top = sec(null, 'top');
@@ -145,12 +145,58 @@ function renderEnchant() {
   box.innerHTML = rolls.length ? rolls.map((o, i) => { const ok = G.gameMode === 'creative' || (xpLevel(p.xp) >= o.cost && lap >= i + 1); return `<div class="eopt ${ok ? '' : 'no'}" data-i="${i}"><b>${o.cost}</b> ${ENCH[o.k][0]} ${ROMAN[o.lvl]} <small>(${i + 1} lapislázuli)</small></div>`; }).join('') : '<div class="hint">' + (s && s.e ? 'Ya está encantado' : 'Coloca una herramienta, arma o armadura y lapislázuli') + '</div>';
   box.querySelectorAll('.eopt').forEach(el => el.onmousedown = ev => { ev.preventDefault(); const i = +el.dataset.i; const o = rolls[i]; if (G.gameMode !== 'creative' && (xpLevel(p.xp) < o.cost || lap < i + 1)) return; s.e = { [o.k]: o.lvl }; if (Math.random() < 0.5) { const L = enchOptions(s).filter(k => k !== o.k); if (L.length) { const k2 = L[Math.random() * L.length | 0]; s.e[k2] = Math.max(1, Math.round(o.lvl * 0.6)); } } if (G.gameMode !== 'creative') { E[1].c -= i + 1; if (E[1].c <= 0) E[1] = null; spendLevels(p, i + 1); } p.enchSeed = Math.random() * 1e9 | 0; playSound('levelup', 0, 0, 0, 0.5); refreshInvUI(); });
 }
-function consumeCraft() { const c = UI.craft; for (let i = 0; i < c.grid.length; i++) { const s = c.grid[i]; if (!s) continue; if (s.id === ID.water_bucket || s.id === ID.lava_bucket || s.id === ID.milk_bucket) { c.grid[i] = { id: ID.bucket, c: 1 }; continue; } s.c--; if (s.c <= 0) c.grid[i] = null; } }
+function consumeCraft() { const c = UI.craft; for (let i = 0; i < c.grid.length; i++) { const s = c.grid[i]; if (!s) continue; if (s.id === ID.water_bucket || s.id === ID.lava_bucket || s.id === ID.milk_bucket || s.id === ID.honey_bucket) { c.grid[i] = { id: ID.bucket, c: 1 }; continue; } s.c--; if (s.c <= 0) c.grid[i] = null; } }
 function smithResult() { const s = UI.smith; if (!s || !s[0] || !s[1] || s[1].id !== ID.netherite_ingot) return null; const n = REG[s[0].id].name; if (!n.startsWith('diamond_')) return null; const t = ID['netherite_' + n.slice(8)]; if (t === undefined) return null; return { id: t, c: 1, d: s[0].d || 0 }; }
 function consumeSmith() { const s = UI.smith; s[0] = null; s[1].c--; if (s[1].c <= 0) s[1] = null; if (s[2]) { s[2].c--; if (s[2].c <= 0) s[2] = null; } }
 function sameItem(a, b) { return a && b && a.id === b.id && (a.d || 0) === (b.d || 0) && !a.e && !b.e; }
+// sacar el resultado de una casilla de salida: en la mesa, la herrería y el yunque se gastan los ingredientes
+function outputTake(s) { if (s.craftOut === 'craft') consumeCraft(); else if (s.craftOut === 'smith') consumeSmith(); else if (s.craftOut === 'anvil') consumeAnvil(); else s.set(null); }
+function armorFits(st, slot) { const d = REG[st.id]; return !!(d.armor && d.armor.slot === slot) || (slot === 0 && st.id === ID.carved_pumpkin); }
+// tecla 1-9 sobre una casilla: intercambio con esa casilla de la barra rápida. En las salidas (mesa, horno, yunque,
+// herrería) solo se puede sacar: el resultado va a la barra si está vacía, o si tiene lo mismo y cabe, gastando los
+// ingredientes como un clic. Antes se copiaba el resultado sin gastar nada y se borraba lo que hubiera en la barra.
+function hotbarSwap(s, i) {
+  const p = G.player; const hb = p.inv[i];
+  if (s.output) {
+    const res = s.get(); if (!res) return;
+    if (hb && !(sameItem(hb, res) && hb.c + res.c <= REG[res.id].stack)) return; // ocupada con otra cosa: no se toca nada
+    if (hb) hb.c += res.c; else p.inv[i] = { ...res };
+    outputTake(s); playSound('click', 0, 0, 0, 0.2);
+  } else {
+    if (s.armor !== undefined && hb && !armorFits(hb, s.armor)) return;
+    const a = s.get(); s.set(hb || null); p.inv[i] = a || null;
+  }
+  if (s.onChange) s.onChange(); refreshInvUI();
+}
+// arrastre con el clic derecho mantenido y un objeto en el cursor: uno en cada casilla por la que se pasa; con Mayús, el
+// montón se reparte a partes iguales entre las casillas al soltar (si no alcanza para todas, uno en cada una por orden)
+function dragFits(s) { const c = UI.cursor; if (!c || s.output || s.palette || s.trash || !s.get) return false; if (s.armor !== undefined && !armorFits(c, s.armor)) return false; const cur = s.get(); return !cur || (sameItem(cur, c) && cur.c < REG[cur.id].stack); }
+function dragPutOne(s) { const c = UI.cursor; if (!c || !dragFits(s)) return false; const cur = s.get(); if (cur) cur.c++; else s.set({ ...c, c: 1 }); c.c--; if (c.c <= 0) UI.cursor = null; if (s.onChange) s.onChange(); return true; }
+function dragEnter(s) {
+  const D = UI.drag; if (!D || D.slots.includes(s) || !dragFits(s)) return;
+  D.slots.push(s); if (D.mode === 'one') dragPutOne(s); else if (s.el) s.el.classList.add('dragsel');
+  refreshInvUI();
+}
+function dragEnd() {
+  const D = UI.drag; UI.drag = null; if (!D) return;
+  for (const s of D.slots) if (s.el) s.el.classList.remove('dragsel');
+  if (D.mode === 'split' && UI.cursor) {
+    const list = D.slots.filter(dragFits); const n = list.length;
+    if (n === 1) dragPutOne(list[0]); // un solo clic: como un clic derecho normal
+    else if (n > 1) { const per = Math.floor(UI.cursor.c / n);
+      for (const s of list) { const c = UI.cursor; if (!c) break; const cur = s.get(); const room = REG[c.id].stack - (cur ? cur.c : 0); const k = Math.min(per >= 1 ? per : 1, room, c.c); if (k <= 0) continue;
+        if (cur) cur.c += k; else s.set({ ...c, c: k }); c.c -= k; if (c.c <= 0) UI.cursor = null; if (s.onChange) s.onChange(); } }
+  }
+  refreshInvUI();
+}
+window.addEventListener('mouseup', ev => { if (ev.button === 2 && UI.drag) dragEnd(); });
 function slotClick(s, ev) {
   ev.preventDefault(); const p = G.player; const right = ev.button === 2; const shift = ev.shiftKey;
+  if (right && UI.cursor && dragFits(s)) { // empieza el arrastre (un clic suelto sigue poniendo uno)
+    UI.drag = { mode: shift ? 'split' : 'one', slots: [s] };
+    if (UI.drag.mode === 'one') dragPutOne(s); else if (s.el) s.el.classList.add('dragsel');
+    refreshInvUI(); return;
+  }
   if (s.palette) { // creativo
     if (UI.cursor) { UI.cursor = null; } else { const d = REG[s.palette]; const st = { id: s.palette, c: shift || ev.button === 1 ? d.stack : (right ? 1 : d.stack), d: 0 }; if (shift) giveItem(p, st); else UI.cursor = st; }
     refreshInvUI(); return;
@@ -158,7 +204,7 @@ function slotClick(s, ev) {
   if (s.trash) { if (shift) { p.inv.fill(null); } UI.cursor = null; refreshInvUI(); return; }
   if (s.output) {
     const res = s.get(); if (!res) return;
-    const take = () => { if (s.craftOut === 'craft') consumeCraft(); else if (s.craftOut === 'smith') consumeSmith(); else if (s.craftOut === 'anvil') consumeAnvil(); else s.set(null); };
+    const take = () => outputTake(s);
     if (shift) { let guard = 0; while (guard++ < 64) { const r = s.get(); if (!r) break; const left = giveItem(p, r); if (left > 0) { if (left < r.c) { } break; } take(); if (!s.craftOut) break; } }
     else if (!UI.cursor) { UI.cursor = { ...res }; take(); }
     else if (sameItem(UI.cursor, res) && UI.cursor.c + res.c <= REG[res.id].stack) { UI.cursor.c += res.c; take(); }
@@ -166,7 +212,7 @@ function slotClick(s, ev) {
   }
   const cur = s.get();
   if (shift && cur) { quickMove(s); if (s.onChange) s.onChange(); refreshInvUI(); return; }
-  if (s.armor !== undefined && UI.cursor) { const d = REG[UI.cursor.id]; if (!(d.armor && d.armor.slot === s.armor) && !(s.armor === 0 && UI.cursor.id === ID.carved_pumpkin)) return; }
+  if (s.armor !== undefined && UI.cursor && !armorFits(UI.cursor, s.armor)) return;
   if (!right) {
     if (!UI.cursor) { if (cur) { UI.cursor = cur; s.set(null); } }
     else if (!cur) { s.set(UI.cursor); UI.cursor = null; }
@@ -205,6 +251,7 @@ function showTooltip(s) { const st = s.palette ? { id: s.palette, c: 1 } : s.get
   if (d.dur) h += `<br><span style="color:#aaa">Durabilidad: ${d.dur - (st.d || 0)} / ${d.dur}</span>`; if (d.armor && d.armor.pts) h += `<br><span style="color:#58f">+${d.armor.pts} armadura</span>`; if (d.dmg) h += `<br><span style="color:#5f5">${d.dmg} de daño</span>`; if (d.food) h += `<br><span style="color:#fa5">+${d.food[0]} comida</span>`; h += `<br><span style="color:#555;font-size:14px">minecraft:${d.name}</span>`; tt.innerHTML = h; tt.style.display = 'block'; }
 function hideTooltip() { $('tooltip').style.display = 'none'; }
 function closeScreen() {
+  if (UI.drag) dragEnd();
   const p = G.player; if (!UI.open) return;
   if (UI.craft && UI.open === 'craft') for (let i = 0; i < UI.craft.grid.length; i++) if (UI.craft.grid[i]) { const l = giveItem(p, UI.craft.grid[i]); if (l) dropItem(p.dim, p.x, p.eye, p.z, { ...UI.craft.grid[i], c: l }); UI.craft.grid[i] = null; }
   if (UI.open === 'inv' && UI.craft) { for (let i = 0; i < 4; i++) if (UI.craft.grid[i]) { const l = giveItem(p, UI.craft.grid[i]); if (l) dropItem(p.dim, p.x, p.eye, p.z, { ...UI.craft.grid[i], c: l }); UI.craft.grid[i] = null; } }
@@ -221,7 +268,7 @@ const CREATIVE_TABS = [['Construcción', i => { const d = REG[i]; return d.isBlo
   ['Colores', i => REG[i].isBlock && /wool|terracotta|glass|concrete|carpet/.test(REG[i].name)],
   ['Naturales', i => { const d = REG[i]; return d.isBlock && (/ore|log|leaves|sand|gravel|dirt|grass|nylium|sapling|flower|mushroom|cactus|snow|ice|stone$|netherrack|soul|end_stone|moss|sculk|dripstone|clay|mud|basalt|blackstone|kelp|seagrass|lily|vine|fungus|roots|stem|wart|melon|pumpkin|bush|fern|poppy|dandelion|orchid|cornflower|daisy|amethyst|cane|chorus|petals|debris/.test(d.name)); }],
   ['Funcionales', i => { const d = REG[i]; return d.isBlock && (d.ui || d.light || /portal|spawner|vault|bed|tnt|bars|rail|ladder|scaffold|lever|button|plate|rod|lamp|detector|target|note|slime|honey|sponge|bedrock/.test(d.name)) && !/stairs|slab|_wall$|fence|door/.test(d.name); }],
-  ['Herramientas', i => { const d = REG[i]; return !d.isBlock && (d.tool && d.tool.type !== 'sword' || /bucket|flint_and|extinguisher|flamethrower|sponge_item|shears|compass|clock|spyglass|map|lead|brush|broom|boat|fishing|rocket|saddle|name_tag|bone_meal|eye_of|ender_pearl/.test(d.name)); }],
+  ['Herramientas', i => { const d = REG[i]; return !d.isBlock && (d.tool && d.tool.type !== 'sword' || /bucket|flint_and|extinguisher|flamethrower|sponge_item|diffuser|tubificador|edit_tool|shears|compass|clock|spyglass|map|lead|brush|broom|boat|fishing|rocket|saddle|name_tag|bone_meal|eye_of|ender_pearl/.test(d.name)); }],
   ['Combate', i => { const d = REG[i]; return !d.isBlock && (d.armor || (d.tool && d.tool.type === 'sword') || /bow|arrow|shield|trident|mace|totem|elytra|snowball|obliterator/.test(d.name) || (d.tool && d.tool.type === 'axe')); }],
   ['Comida', i => !REG[i].isBlock && !!REG[i].food],
   ['Ingredientes', i => { const d = REG[i]; return !d.isBlock && !d.food && !d.tool && !d.armor && !d.dur && !d.bucket && !/bow|arrow|shield|trident|mace|totem|elytra/.test(d.name); }],
@@ -231,6 +278,14 @@ const CREATIVE_TABS = [['Construcción', i => { const d = REG[i]; return d.isBlo
 const CR_WOODS = ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'bamboo', 'crimson', 'warped'];
 const CR_COLORS = ['white', 'light_gray', 'gray', 'black', 'brown', 'red', 'orange', 'yellow', 'lime', 'green', 'cyan', 'light_blue', 'blue', 'purple', 'magenta', 'pink'];
 const CR_TIERS = ['wooden', 'stone', 'leather', 'chainmail', 'iron', 'golden', 'diamond', 'netherite', 'turtle'];
+// ---- world edit: dos esquinas (pos1, pos2) marcadas con el Edit Tool; /set rellena la caja o la esfera entre ellas
+const WE = { p1: null, p2: null };
+function weSetPos(k, x, y, z) {
+  const cur = k === 1 ? WE.p1 : WE.p2; if (cur && cur[0] === x && cur[1] === y && cur[2] === z) return;
+  if (k === 1) WE.p1 = [x, y, z]; else WE.p2 = [x, y, z]; const yo = G.player ? G.player.world.yOff || 0 : 0;
+  let n = ''; if (WE.p1 && WE.p2) n = ' (' + ((Math.abs(WE.p1[0] - WE.p2[0]) + 1) * (Math.abs(WE.p1[1] - WE.p2[1]) + 1) * (Math.abs(WE.p1[2] - WE.p2[2]) + 1)).toLocaleString('es') + ' bloques)';
+  chatMsg('Pos' + k + ': ' + x + ' ' + (y + yo) + ' ' + z + n, k === 1 ? '#f9a' : '#9cf'); playSound('click', x, y, z, 0.4);
+}
 const CR_FORMS = ['log', 'stem', 'wood', 'stripped', 'planks', 'block', 'stairs', 'slab', 'wall', 'fence', 'fence_gate', 'door', 'trapdoor', 'pressure_plate', 'button', 'leaves', 'sapling', 'shovel', 'pickaxe', 'axe', 'hoe', 'sword', 'helmet', 'chestplate', 'leggings', 'boots'];
 const CR_GROUPS = [
   /^(oak|spruce|birch|jungle|acacia|dark_oak|mangrove|cherry|crimson|warped)_(log|stem|wood|planks|stairs|slab|fence|fence_gate|door|trapdoor|pressure_plate|button)$/,
@@ -244,7 +299,7 @@ const CR_GROUPS = [
   /ice$|snow/, /netherrack|nylium|soul_s|wart_block|shroomlight|magma_block|glowstone$/, /^end_stone$|chorus|dragon_egg/, /dripstone|amethyst|sculk/,
   /crafting_table|furnace|smoker|smithing|anvil|enchanting|bookshelf|barrel|chest$/, /torch|lantern|campfire|end_rod|sea_lantern|froglight|lamp/, /bed$|ladder|scaffolding|bars$|rail/,
   /redstone|lever|button|pressure_plate|target|daylight|note_block|lightning_rod|tnt|piston|observer|hopper|dispenser|dropper/,
-  /_shovel$|_pickaxe$|_axe$|_hoe$/, /bucket/, /flint_and_steel|fire_charge|bone_meal|shears|brush|fishing_rod|compass|clock|spyglass|map$|lead|name_tag|saddle|boat|broom|extinguisher|flamethrower|sponge_item/,
+  /_shovel$|_pickaxe$|_axe$|_hoe$/, /bucket/, /flint_and_steel|fire_charge|bone_meal|shears|brush|fishing_rod|compass|clock|spyglass|map$|lead|name_tag|saddle|boat|broom|extinguisher|flamethrower|sponge_item|diffuser|tubificador|edit_tool/,
   /_sword$/, /bow$|crossbow|arrow|trident|mace|shield|totem|obliterator/, /_helmet$|_chestplate$|_leggings$|_boots$/, /elytra/
 ];
 const _crKey = new Map();
@@ -346,7 +401,7 @@ function onKeyDown(e) {
   if ($('chatIn').classList.contains('on')) { if (e.code === 'Escape') { closeChat(); e.preventDefault(); } return; }
   const a = actionFor(e.code);
   // agacharse / correr en modo «alternar» (Opciones → Controles)
-  if (!e.repeat && !UI.open && !G.paused) { if (a === 'sneak' && SETTINGS.ctl.toggleSneak) INPUT.tSneak = !INPUT.tSneak; if (a === 'sprint' && SETTINGS.ctl.toggleSprint) INPUT.tSprint = !INPUT.tSprint; }
+  if (!e.repeat && !UI.open && !G.paused) { if (a === 'jump' || a === 'sneak') INPUT.lastVert = a; if (a === 'sneak' && SETTINGS.ctl.toggleSneak && !(G.player && G.player.flying)) INPUT.tSneak = !INPUT.tSneak; if (a === 'sprint' && SETTINGS.ctl.toggleSprint) INPUT.tSprint = !INPUT.tSprint; }
   if (e.code === 'F3' || a === 'debug') { e.preventDefault(); if (!e.repeat && !INPUT.keys.F3) { F3 = !F3; setF3Display(); } INPUT.keys.F3 = true; INPUT.f3used = false; return; }
   if (INPUT.keys.F3 && !INPUT.f3used && (/^Key[BGNQ]$/.test(e.code) || e.code === 'F4')) { F3 = !F3; setF3Display(); }
   if (INPUT.keys.F3 && e.code === 'F4') { e.preventDefault(); INPUT.f3used = true; if (!e.repeat) gmSwitchStep(); return; }
@@ -354,7 +409,7 @@ function onKeyDown(e) {
   if (e.code === 'Escape') { e.preventDefault(); if (UI.open) closeScreen(); else if (G.paused) { if ($('sOptions').classList.contains('on') || $('sControls').classList.contains('on')) { waitingKey = null; showScreen('sPause'); } else pauseGame(false); } else if ($('sCredits').classList.contains('on')) { hideScreens(); lockPointer(); } else if (!G.player.dead) pauseGame(true); return; }
   if (UI.open) {
     if (a === 'inventory' && !(document.activeElement && document.activeElement.tagName === 'INPUT')) { closeScreen(); e.preventDefault(); }
-    if (/^Digit[1-9]$/.test(e.code) && UI.hover && !UI.hover.palette && UI.hover.get) { const i = +e.code[5] - 1; const s = UI.hover; const a1 = s.get(), b1 = G.player.inv[i]; s.set(b1); G.player.inv[i] = a1; refreshInvUI(); }
+    if (/^Digit[1-9]$/.test(e.code) && UI.hover && !UI.hover.palette && !UI.hover.trash && UI.hover.get) hotbarSwap(UI.hover, +e.code[5] - 1);
     if (a === 'drop' && UI.hover && UI.hover.get && !UI.hover.palette) { const s = UI.hover.get(); if (s) { const n = e.ctrlKey ? s.c : 1; dropItem(G.player.dim, G.player.x, G.player.eye - 0.3, G.player.z, { ...s, c: n }, -Math.sin(G.player.yaw) * 4, 2, -Math.cos(G.player.yaw) * 4, 40); s.c -= n; if (s.c <= 0) UI.hover.set(null); refreshInvUI(); } }
     return;
   }
@@ -369,7 +424,7 @@ function onKeyDown(e) {
     case 'command': openChat('/'); e.preventDefault(); break;
     case 'perspective': perspective = (perspective + 1) % 3; e.preventDefault(); break;
     case 'hideHud': hudHidden = !hudHidden; $('hud').style.display = hudHidden ? 'none' : 'block'; e.preventDefault(); break;
-    case 'jump': { const now = performance.now(); if ((G.gameMode === 'creative') && now - lastSpace < 300) { G.player.flying = !G.player.flying; G.player.vy = 0; } lastSpace = now; const p = G.player; const el = p.armor[1] && p.armor[1].id === ID.elytra; if (el && !p.onGround && !p.flying && !p.inWater && p.vy < 0 && !p.gliding) { p.gliding = true; } break; }
+    case 'jump': { if (e.repeat) break; const now = performance.now(); if ((G.gameMode === 'creative') && now - lastSpace < 300) { G.player.flying = !G.player.flying; G.player.vy = 0; INPUT.tSneak = false; lastSpace = 0; } else lastSpace = now; /* las repeticiones del teclado al mantener Espacio no cuentan como doble toque */ const p = G.player; const el = p.armor[1] && p.armor[1].id === ID.elytra; if (el && !p.onGround && !p.flying && !p.inWater && p.vy < 0 && !p.gliding) { p.gliding = true; } break; }
     case 'ragdoll': if (!INPUT.keys.F3 && typeof playerRagdollToggle === 'function') playerRagdollToggle(); break;
   }
   if (e.code === 'F2') { e.preventDefault(); screenshot(); }
@@ -469,11 +524,13 @@ function placeBlock(hit, stack) {
 }
 function useItem(hit) {
   const p = G.player; const w = p.world; const s = p.held(); const d = s ? REG[s.id] : null;
+  if (d && d.editTool) { if (G.gameMode === 'creative' && hit && !hit.ent) weSetPos(2, hit.x, hit.y, hit.z); return true; } // world edit: pos2 (antes de abrir cofres o puertas)
+  if (d && d.tubeTool) { tubeUse(p, s); return 'hold'; } // tubificador: dibuja (o borra) mientras se mantiene, sin abrir puertas ni cofres
   // interacción con entidades
   if (hit && hit.ent) {
     const e = hit.ent;
     if (s && s.id === ID.shears && e.type === 'sheep' && !e.sheared) { e.sheared = true; dropItem(e.dim, e.x, e.y + 1, e.z, { id: ID.white_wool, c: 1 + (Math.random() * 3 | 0) }); damageItem(p.inv, p.sel, 1); return true; }
-    if (s && s.id === ID.bucket && (e.type === 'cow' || e.type === 'goat')) { consumeHeld(p); giveItem(p, { id: ID.milk_bucket, c: 1 }); return true; }
+    if (s && s.id === ID.bucket && (e.type === 'cow' || e.type === 'goat')) { consumeHeld(p); giveItem(p, { id: ID.milk_bucket, c: 1, ml: BUCKET_ML }); playSound('bucket', e.x, e.y + 1, e.z, 0.6); return true; } // ordeñar: 10 L de leche
     if (e.isBoat) { boatMount(p, e); return true; }
     if (e.type === 'villager') { openTrade(e); return true; }
     if (s && s.id === ID.name_tag) { e.persist = true; e.name = 'Mascota'; consumeHeld(p); return true; }
@@ -499,13 +556,13 @@ function useItem(hit) {
   if (!s) return false;
   // objetos
   if (d.food && (p.food < 20 || d.regen || s.id === ID.chorus_fruit || G.gameMode === 'creative')) { p.eatT = 0.01; return 'hold'; }
-  if (d.milk) { p.effects = {}; consumeHeld(p); giveItem(p, { id: ID.bucket, c: 1 }); playSound('drink', p.x, p.y, p.z, 0.8); return true; }
   if (d.bow) { if (G.gameMode === 'creative' || countItem(p, ID.arrow) > 0) { p.bowT = 0.01; return 'hold'; } return false; }
   if (d.trident) { p.bowT = 0.01; return 'hold'; }
   if (d.spyglass) { p.spy = true; return 'hold'; }
   if (d.extinguisher) { sprayExtinguisher(p); return 'hold'; }
   if (d.flamethrower) { sprayFlamethrower(p); return 'hold'; }
   if (d.pbfSponge) { spongeUse(p); return 'hold'; }
+  if (d.diffuser) { diffuserUse(p, s); return 'hold'; }
   if (d.broom) { broomUse(p); return 'hold'; }
   if (d.throwable) {
     const dir = lookDir(p);
@@ -529,14 +586,14 @@ function useItem(hit) {
       const now = performance.now(); if (now - (p._bkT || 0) < 100) return 'hold'; p._bkT = now;
       const got = bucketCollect(w, p, dir, cont, BUCKET_ML - ml);
       if (got.ml > 0) {
-        const nm = Math.min(BUCKET_ML, ml + got.ml); const item = { id: got.liq === 2 ? ID.lava_bucket : ID.water_bucket, c: 1, ml: nm };
+        const nm = Math.min(BUCKET_ML, ml + got.ml); const item = { id: ({ 1: ID.water_bucket, 2: ID.lava_bucket, 4: ID.honey_bucket, 5: ID.milk_bucket })[got.liq] || ID.water_bucket, c: 1, ml: nm };
         if (s.c > 1) { s.c--; p.inv[p.sel] = item; giveItem(p, { id: ID.bucket, c: s.c }); } else p.inv[p.sel] = item;
-        showActionMsg((got.liq === 2 ? 'Lava: ' : 'Agua: ') + (nm / 1000).toFixed(1) + ' / 10 L'); if (Math.random() < 0.35) playSound('bucket', p.x, p.eye, p.z, 0.4); updateHUD();
+        showActionMsg((LIQ_NAME[got.liq] || 'Agua') + ': ' + (nm / 1000).toFixed(1) + ' / 10 L'); if (Math.random() < 0.35) playSound('bucket', p.x, p.eye, p.z, 0.4); updateHUD();
       }
       return 'hold';
     }
     if (!cont || ml <= 0) return false;
-    bucketPourMl(w, p, dir, hit, cont, ml);
+    if (!bucketPourMl(w, p, dir, hit, cont, ml)) return false;
     if (G.gameMode !== 'creative') p.inv[p.sel] = { id: ID.bucket, c: 1 }; playSound('bucket_empty', p.x, p.eye, p.z, 0.8); updateHUD(); return true;
   }
   if (d.boatItem) { if (boatPlace(p, w)) { if (G.gameMode !== 'creative') consumeHeld(p); return true; } return false; }
@@ -595,8 +652,16 @@ function updateInteraction(dt) {
   if (MINE.cool > 0) MINE.cool -= dt; if (MINE.useCool > 0) MINE.useCool -= dt; if (MINE.attackCool > 0) MINE.attackCool -= dt;
   const attack = held('attack'), use = held('use');
   if (p.swing > 0) { p.swing += dt * 6; if (p.swing > 1) p.swing = 0; }
+  // difusor en la mano: golpear el aire cambia de modo (Líquido ↔ PBF)
+  { const s = p.held(); if (attack && !MINE.atkPrev && !tgt && s && REG[s.id].diffuser && G.gameMode !== 'spectator') { s.mode = s.mode === 'pbf' ? 'liquid' : 'pbf'; p.swing = 0.01; showActionMsg('Difusor: modo ' + (s.mode === 'pbf' ? 'PBF (líquido normal → partículas)' : 'Líquido (partículas → líquido normal)')); showItemName(); playSound('hit', p.x, p.eye, p.z, 0.3, ID.iron_block); } }
+  // tubificador en la mano: golpear el aire cambia de modo (fino → medio → ancho → eliminar)
+  { const s = p.held(); if (attack && !MINE.atkPrev && !tgt && s && REG[s.id].tubeTool && G.gameMode !== 'spectator') tubeNextMode(p, s); }
+  // Edit Tool (creativo): clic izquierdo en un bloque marca pos1 y no lo rompe
+  const editHeld = (() => { const s = p.held(); return !!(s && REG[s.id].editTool); })();
+  if (editHeld && attack && !MINE.atkPrev && tgt && !tgt.ent && G.gameMode === 'creative') { weSetPos(1, tgt.x, tgt.y, tgt.z); p.swing = 0.01; }
+  MINE.atkPrev = attack;
   // atacar / minar
-  if (attack && G.gameMode !== 'spectator') {
+  if (attack && G.gameMode !== 'spectator' && !(editHeld && tgt && !tgt.ent)) {
     if (tgt && tgt.ent) { if (MINE.attackCool <= 0) { attackEntity(tgt.ent); MINE.attackCool = 0.35; p.swing = 0.01; } MINE.target = null; }
     else if (tgt) {
       const key = tgt.x + ',' + tgt.y + ',' + tgt.z;
@@ -623,6 +688,7 @@ function updateInteraction(dt) {
     if (p.bowT > 0) { const pw = Math.min(1, p.bowT / 1); p.bowT = 0; if (pw > 0.1) { const dir = lookDir(p); if (s && REG[s.id].trident) { shoot('trident', p.dim, p.x, p.eye - 0.1, p.z, dir[0] * 30 * pw, dir[1] * 30 * pw, dir[2] * 30 * pw, p, { itemD: (s.d || 0) + 1 }); if (G.gameMode !== 'creative') p.inv[p.sel] = null; } else { const a = shoot('arrow', p.dim, p.x, p.eye - 0.1, p.z, dir[0] * 55 * pw, dir[1] * 55 * pw, dir[2] * 55 * pw, p, { power: pw * (1 + 0.25 * enchLvl(s, 'power')), pickable: G.gameMode !== 'creative' }); if (G.gameMode !== 'creative') takeItem(p, ID.arrow, 1); damageItem(p.inv, p.sel, 1); } playSound('bow', p.x, p.y, p.z, 0.8); updateHUD(); } }
     p.eatT = 0; p.spy = false; MINE.useCool = Math.min(MINE.useCool, 0);
   }
+  tubeTick(use); // el trazo del tubificador termina al soltar
   // elegir bloque
   if (held('pick') && !MINE.picked && tgt && !tgt.ent) { MINE.picked = true; const id = tgt.id === ID.furnace_lit ? ID.furnace : tgt.id; const idx = p.inv.findIndex(s => s && s.id === id); if (idx >= 0 && idx < 9) p.sel = idx; else if (G.gameMode === 'creative') { const free = p.inv.slice(0, 9).findIndex(s => !s); p.inv[free >= 0 ? free : p.sel] = { id, c: 1 }; if (free >= 0) p.sel = free; } else if (idx >= 9) { const t = p.inv[p.sel]; p.inv[p.sel] = p.inv[idx]; p.inv[idx] = t; } updateHUD(); showItemName(); }
   if (!held('pick')) MINE.picked = false;

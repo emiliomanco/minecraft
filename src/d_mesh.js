@@ -198,14 +198,22 @@ let MESH_QUALITY = 2;
 // olas lejos de la orilla: a menos de MESH_SHORE bloques de la cara de tierra el mar no tiene oleaje (no deja al aire
 // los bloques de la orilla al bajar); después crece en una rampa de 4 bloques
 let MESH_SHORE = 3; const SHORE_RAMP = 4; let SHORE_C = new Map();
+// lo que frena el oleaje como orilla: solo el terreno natural (arena, tierra, roca, hielo...) y el aire; los barcos hundidos,
+// ruinas y demás estructuras del mar (o lo construido con madera, ladrillo...) no lo calman
+let SHORE_B = null;
+function shoreTable() {
+  SHORE_B = new Uint8Array(REG.length + 1); SHORE_B[0] = 1;
+  const re = /^(sand|red_sand|sandstone|red_sandstone|smooth_sandstone|gravel|dirt|coarse_dirt|rooted_dirt|grass_block|snowy_grass|podzol|mycelium|mud|clay|stone|granite|diorite|andesite|deepslate|tuff|calcite|dripstone_block|ice|packed_ice|blue_ice|snow_block|moss_block|terracotta|[a-z_]+_terracotta|bedrock|netherrack|end_stone)$/;
+  for (let i = 1; i < REG.length; i++) { const d = REG[i]; if (d && d.name && re.test(d.name) && !/glazed/.test(d.name)) SHORE_B[i] = 1; }
+}
 function shoreW(px, y, pz) { // px,pz: coordenadas locales del chunk (pueden ser fraccionarias)
-  if (MESH_SHORE <= 0) return 1;
+  if (MESH_SHORE <= 0) return 1; if (!SHORE_B) shoreTable();
   const key = (y * 512 + Math.round(px * 4) + 64) * 512 + Math.round(pz * 4) + 64; let r = SHORE_C.get(key); if (r !== undefined) return r;
   const R = Math.min(LP - 1, MESH_SHORE + SHORE_RAMP); let best = R + 1;
   const x0 = Math.floor(px - R), x1 = Math.ceil(px + R), z0 = Math.floor(pz - R), z1 = Math.ceil(pz + R);
   for (let b = z0; b < z1; b++) { const dz = Math.max(b - pz, 0, pz - (b + 1)); if (dz >= best) continue;
     for (let a = x0; a < x1; a++) { const dx = Math.max(a - px, 0, px - (a + 1)); if (dx >= best) continue;
-      const c = ((y + 1) * LR + b + LP + 1) * LR + a + LP + 1; if (isLiqB(regB[c], 1)) continue; const d = Math.hypot(dx, dz); if (d < best) best = d; } }
+      const c = ((y + 1) * LR + b + LP + 1) * LR + a + LP + 1; const bb = regB[c]; if (isLiqB(bb, 1) || !SHORE_B[bb]) continue; const d = Math.hypot(dx, dz); if (d < best) best = d; } }
   const t = clamp((best - MESH_SHORE) / SHORE_RAMP, 0, 1); r = t * t * (3 - 2 * t); SHORE_C.set(key, r); return r;
 }
 function buildMesh(world, ch) { buildRegion(world, ch); return meshRegion(world, ch); }

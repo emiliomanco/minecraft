@@ -97,7 +97,7 @@ function serializeWorld() {
   const players = Object.assign({}, G.playerStates || {}); players.__local = playerState(G.player); players.__local.name = G.player.name;
   if (G.net && G.net.role === 'host') for (const c of G.net.conns.values()) if (c.ent && c.ent.state) players[c.ent.name] = c.ent.state;
   const ents = []; for (const e of G.entities.values()) { if (e.proxy || e.remotePlayer || e.removed || e.dead) continue; if (e instanceof Mob && (e.persist || !e.def.hostile)) ents.push({ k: 'mob', ty: e.type, d: e.dim, x: e.x, y: e.y, z: e.z, hp: e.hp, c: e.color, p: e.persist, n: e.name }); else if (e.type === 'item') ents.push({ k: 'item', d: e.dim, x: e.x, y: e.y, z: e.z, s: e.stack }); else if (e.isBoat) ents.push({ k: 'boat', d: e.dim, x: e.x, y: e.y, z: e.z, r: e.rot }); }
-  return { format: 'minecraft2-world', version: 3, name: G.worldName, seed: G.seed, seedStr: G.seedStr, gameMode: G.defaultMode || G.gameMode, curMode: G.gameMode, difficulty: G.difficulty, cheats: G.cheats, time: G.time, rain: G.rain, rainTimer: G.rainTimer, worldSpawn: G.worldSpawn, dragonKilled: G.dragonKilled, endInit: G.endInit, gateway: G.gateway, keepInventory: G.keepInventory, doWaterDespawn: !!G.doWaterDespawn, doDaylightCycle: G.doDaylightCycle !== false, doWeatherCycle: G.doWeatherCycle !== false, containers: G.containers, spawned: [...G.spawned], dims, players, entities: ents, created: G.created || Date.now(), lastPlayed: Date.now(), structures: G.structures !== false, climate: G.climate || 1, dynTrees: !!G.dynTrees, fluid: typeof flSerialize === 'function' ? flSerialize() : null };
+  return { format: 'minecraft2-world', version: 3, name: G.worldName, seed: G.seed, seedStr: G.seedStr, gameMode: G.defaultMode || G.gameMode, curMode: G.gameMode, difficulty: G.difficulty, cheats: G.cheats, time: G.time, rain: G.rain, rainTimer: G.rainTimer, worldSpawn: G.worldSpawn, dragonKilled: G.dragonKilled, endInit: G.endInit, gateway: G.gateway, keepInventory: G.keepInventory, doWaterDespawn: !!G.doWaterDespawn, doDaylightCycle: G.doDaylightCycle !== false, doWeatherCycle: G.doWeatherCycle !== false, containers: G.containers, spawned: [...G.spawned], dims, players, entities: ents, created: G.created || Date.now(), lastPlayed: Date.now(), structures: G.structures !== false, climate: G.climate || 1, dynTrees: !!G.dynTrees, fluid: typeof flSerialize === 'function' ? flSerialize() : null, tubes: tubeSerialize() };
 }
 function worldIcon() { try { const c = document.createElement('canvas'); c.width = 64; c.height = 64; c.getContext('2d').drawImage($('gl'), ($('gl').width - $('gl').height) / 2, 0, $('gl').height, $('gl').height, 0, 0, 64, 64); return c.toDataURL('image/jpeg', 0.7); } catch (e) { return null; } }
 async function saveWorld(silent) {
@@ -128,7 +128,7 @@ function migrateWorld(data) { // v2 -> v3: los objetos pasaron de id 256+ a 1000
 }
 function startWorld(data, isNew, netWelcome) {
   data = migrateWorld(data); resetGameState(); audioInit();
-  G.worldName = data.name; G.seed = data.seed >>> 0; G.seedStr = data.seedStr; G.difficulty = data.difficulty ?? 2; G.cheats = data.cheats !== false; G.time = data.time ?? 1000; G.keepInventory = !!data.keepInventory; G.doWaterDespawn = !!data.doWaterDespawn; G.doDaylightCycle = data.doDaylightCycle !== false; G.doWeatherCycle = data.doWeatherCycle !== false; if (typeof flRestore === 'function') flRestore(data.fluid || null);
+  G.worldName = data.name; G.seed = data.seed >>> 0; G.seedStr = data.seedStr; G.difficulty = data.difficulty ?? 2; G.cheats = data.cheats !== false; G.time = data.time ?? 1000; G.keepInventory = !!data.keepInventory; G.doWaterDespawn = !!data.doWaterDespawn; G.doDaylightCycle = data.doDaylightCycle !== false; G.doWeatherCycle = data.doWeatherCycle !== false; if (typeof flRestore === 'function') flRestore(data.fluid || null); tubeRestore(netWelcome && G.net ? G.net.tubesPending : data && data.tubes);
   G.defaultMode = data.gameMode || 'survival'; G.gameMode = data.curMode || data.gameMode || 'survival'; G.created = data.created || Date.now(); G.structures = data.structures !== false;
   G.climate = data.climate ?? (isNew ? 3 : 1); // biomas por clima en mundos nuevos; los antiguos siguen con los clásicos
   G.worlds = { overworld: new World('overworld', G.seed, G.climate), nether: new World('nether', G.seed, G.climate), end: new World('end', G.seed, G.climate) };
@@ -182,7 +182,7 @@ function showCredits() {
 async function quitToTitle(save = true) {
   if (save) await saveWorld(true); stopNet(); closeScreen();
   for (const d in G.worlds || {}) { G.worlds[d].dead = true; WK.worlds.delete(G.worlds[d]._wid); for (const c of G.worlds[d].chunks.values()) freeMesh(c); }
-  G.worlds = null; G.player = null; G.mode = 'menu'; G.entities = new Map(); G.particles = []; $('hud').style.display = 'none'; $('chatLog').innerHTML = '';
+  netRestorePhys(); G.worlds = null; G.player = null; G.mode = 'menu'; G.entities = new Map(); G.particles = []; $('hud').style.display = 'none'; $('chatLog').innerHTML = '';
   goMenu();
 }
 function disconnected(msg) { quitToTitle(false).then(() => { showScreen('sMulti'); $('mErr').textContent = msg || 'Desconectado'; }); }
@@ -325,6 +325,7 @@ function worldTick() {
     const pls = [p, ...[...G.entities.values()].filter(e => e.remotePlayer)];
     for (const pl of pls) { const w = G.worlds[pl.dim]; const cx = Math.floor(pl.x) >> 4, cz = Math.floor(pl.z) >> 4; for (let dx = -4; dx <= 4; dx++) for (let dz = -4; dz <= 4; dz++) randomTicks(w, cx + dx, cz + dz); if (G.tick % 20 === 0) spawnerTick(w, pl); }
     if (G.tick % 20 === 0) spawnTick();
+    plateTick(); // placas de presión (la trampa de la pirámide)
     if (G.tick % 20 === 10 && typeof heatMeltTick === 'function') heatMeltTick(G.world); // el calor derrite nieve y hielo
     furnaceTick();
   }
@@ -341,7 +342,7 @@ function gameFrame(dt) {
   const wdt = pausedSP ? 0 : Math.min(0.1, dt * rate);
   if (G.wclock === undefined) G.wclock = performance.now() / 1000; G.wclock += pausedSP ? 0 : dt * rate; // reloj de las animaciones del mundo
   const typing = $('chatIn').classList.contains('on');
-  const input = (UI.open || typing || G.paused || p.dead) ? {} : { f: held('forward'), b: held('back'), l: held('left'), r: held('right'), jump: held('jump'), sneak: SETTINGS.ctl.toggleSneak ? !!INPUT.tSneak : held('sneak'), sprint: SETTINGS.ctl.toggleSprint ? (held('forward') ? !!INPUT.tSprint : (INPUT.tSprint = false)) : held('sprint'), useHeld: p.eatT > 0 || p.bowT > 0 };
+  const input = (UI.open || typing || G.paused || p.dead) ? {} : { f: held('forward'), b: held('back'), l: held('left'), r: held('right'), jump: held('jump'), sneak: SETTINGS.ctl.toggleSneak && !p.flying ? !!INPUT.tSneak : held('sneak'), lastVert: INPUT.lastVert, sprint: SETTINGS.ctl.toggleSprint ? (held('forward') ? !!INPUT.tSprint : (INPUT.tSprint = false)) : held('sprint'), useHeld: p.eatT > 0 || p.bowT > 0 };
   if (!pausedSP && !p.dead && !p.ragdoll && p.boat) { p.savePrev(); boatRide(p, dt, input, pausedSP ? 1 : clamp(acc / 50, 0, 1)); }
   else if (!pausedSP && !p.dead && !p.ragdoll) { p.savePrev(); const steps = dt > 0.034 ? 2 : 1; for (let i = 0; i < steps; i++) updatePlayerPhysics(p, dt / steps, input); }
   if (!pausedSP && p.ragdoll && input.jump && p.ragdoll.alive && p.ragdoll.t > 0.5) p.ragdoll.dur = 0; // saltar = levantarse
@@ -362,7 +363,11 @@ function gameFrame(dt) {
   let roll = ragRoll; if (G.shake > 0) { G.shake = Math.max(0, G.shake - dt * 2.5); roll = (Math.random() - 0.5) * G.shake * 0.08; pitch += (Math.random() - 0.5) * G.shake * 0.05; yaw += (Math.random() - 0.5) * G.shake * 0.05; }
   if (p.hurtTime > 0) roll += Math.sin(p.hurtTime / 10 * Math.PI) * 0.06;
   { const cl = w.dim === 'overworld' ? Math.min(1, w.light(Math.floor(eye[0]), Math.floor(eye[1]), Math.floor(eye[2]))[0] / 12) : 1; R.camSky = lerp(R.camSky ?? 1, cl, Math.min(1, dt * 3)); }
-  const camB = blockAt(w, eye[0], eye[1], eye[2]); const under = liquidAt(w, eye[0], eye[1], eye[2]) === 1;
+  const camB = blockAt(w, eye[0], eye[1], eye[2]);
+  // líquido en el que está la cámara: 1 agua, 4 miel, 5 leche (la miel y la leche solo existen como partículas)
+  let underKind = liquidAt(w, eye[0], eye[1], eye[2]) === 1 ? 1 : 0;
+  if (typeof flMilkAt === 'function') { if (flMilkAt(w, eye[0], eye[1], eye[2])) underKind = 5; else if (!underKind && flHoneyAt(w, eye[0], eye[1], eye[2])) underKind = 4; }
+  const under = underKind > 0;
   // zoom (mantener la tecla; la rueda cambia el aumento entre 2x y 12x)
   const zoomOn = held('zoom') && !UI.open && !G.paused && !$('chatIn').classList.contains('on'); G.zoomCur = lerp(G.zoomCur || 1, zoomOn ? (G.zoomMag || SETTINGS.ctl.zoomMag || 4) : 1, Math.min(1, dt * 12));
   const tfov = SETTINGS.fov * (p.sprinting && !zoomOn ? 1.12 : 1) * (p.spy ? 0.14 : 1) * (p.bowT > 0 ? 1 - Math.min(1, p.bowT) * 0.15 : 1) * (p.gliding ? 1.1 : 1) / G.zoomCur;
@@ -370,11 +375,12 @@ function gameFrame(dt) {
   R.yawCam = yaw; const alpha = pausedSP ? 1 : acc / 50, alphaW = pausedSP || rate === 0 ? 1 : clamp(accW / 50, 0, 1);
   // ondas del agua (estelas, salpicaduras, chorros): fuentes y un paso de simulación en GPU antes de dibujar
   if (typeof ripUpdate === 'function') { if (!pausedSP) ripSources(w, dt); ripUpdate(wdt); }
+  if (typeof wdTick === 'function' && G.mode === 'game') wdTick(); // distancia a la costa para la dirección del oleaje
   if (typeof flUpdate === 'function') flUpdate(wdt, w); // fluido continuo (partículas en GPU)
   if (typeof flamerTick === 'function') flamerTick(w, wdt);
-  if (typeof rainPuddleTick === 'function') rainPuddleTick(w, wdt); // charcos de lluvia (partículas) // calor del lanzallamas y de los conductores: evapora el agua
+  if (typeof rainPuddleTick === 'function') rainPuddleTick(w, wdt); // la lluvia ya no crea partículas: evapora las gotas que quedaran // calor del lanzallamas y de los conductores: evapora el agua
   renderWorld(w, eye, yaw, pitch, {
-    fov: G.fovCur, under, roll, bob, biome: w.biomeAt(Math.floor(p.x), Math.floor(p.z)),
+    fov: G.fovCur, under, underKind, roll, bob, biome: w.biomeAt(Math.floor(p.x), Math.floor(p.z)),
     drawEntities: () => { drawAllEntities(p.dim, alphaW, perspective > 0 && G.gameMode !== 'spectator', perspective === 0 && G.gameMode !== 'spectator' && !p.ragdoll && !p.boat && !p.sleeping && !p.gliding && !p.spy); },
     particles: G.particles, flames: G._flames, fireCells: G._fireCells, drawOverlay: tr => drawOverlays(tr), drawHand: perspective === 0 && !hudHidden && G.gameMode !== 'spectator' && !p.spy && !p.ragdoll && (G.zoomCur || 1) < 1.3 ? drawHand : null,
     exposure: p.effects.night ? 1.6 : 1
@@ -455,6 +461,7 @@ function updateLights(dt) {
 // ------------------------------------------------------------ superposiciones y mano
 function drawOverlays(trans) {
   const gl = R.gl; const p = G.player; const w = G.world;
+  if (trans) { tubeDraw(); return; } // tubos del tubificador (vidrio, encima del fluido que llevan dentro)
   if (!trans) {
     const h = G.hit; const lines = [];
     if (h && !h.ent && !hudHidden && G.gameMode !== 'spectator') {
@@ -471,6 +478,12 @@ function drawOverlays(trans) {
       }
     }
     if (lines.length) drawLines(lines, [0, 0, 0, 0.9]);
+    { const s = p.held(); if (s && REG[s.id].editTool && (WE.p1 || WE.p2)) { // world edit: pos1 (rosa), pos2 (azul) y la selección (amarillo)
+      if (WE.p1) drawLines(boxLines(WE.p1[0] - 0.01, WE.p1[1] - 0.01, WE.p1[2] - 0.01, WE.p1[0] + 1.01, WE.p1[1] + 1.01, WE.p1[2] + 1.01), [1, 0.45, 0.65, 1]);
+      if (WE.p2) drawLines(boxLines(WE.p2[0] - 0.01, WE.p2[1] - 0.01, WE.p2[2] - 0.01, WE.p2[0] + 1.01, WE.p2[1] + 1.01, WE.p2[2] + 1.01), [0.5, 0.75, 1, 1]);
+      if (WE.p1 && WE.p2) drawLines(boxLines(Math.min(WE.p1[0], WE.p2[0]) - 0.02, Math.min(WE.p1[1], WE.p2[1]) - 0.02, Math.min(WE.p1[2], WE.p2[2]) - 0.02, Math.max(WE.p1[0], WE.p2[0]) + 1.02, Math.max(WE.p1[1], WE.p2[1]) + 1.02, Math.max(WE.p1[2], WE.p2[2]) + 1.02), [1, 0.9, 0.3, 1]);
+    } }
+    tubeGuide();
     const beams = entityBeams(p.dim); if (beams.length) drawLines(beams, [0.9, 0.4, 1, 1]);
     if (F3B) { const L = []; for (const e of G.entities.values()) if (e.dim === p.dim && Math.abs(e.x - p.x) < 48 && Math.abs(e.z - p.z) < 48) L.push(...boxLines(e.x - e.w / 2, e.y, e.z - e.w / 2, e.x + e.w / 2, e.y + e.h, e.z + e.w / 2)); if (L.length) drawLines(L, [1, 1, 1, 1]); }
     if (F3G) { const L = []; const cx = (Math.floor(p.x) >> 4) * 16, cz = (Math.floor(p.z) >> 4) * 16; for (const [x, z] of [[cx, cz], [cx + 16, cz], [cx, cz + 16], [cx + 16, cz + 16]]) L.push(x - R.cam[0], -R.cam[1], z - R.cam[2], x - R.cam[0], w.H - R.cam[1], z - R.cam[2]); for (let y = 0; y <= w.H; y += 16) L.push(...boxLines(cx, y, cz, cx + 16, y, cz + 16)); drawLines(L, [1, 1, 0, 1]); }
@@ -604,6 +617,10 @@ function optGraphics(ui) {
 }
 const PK = (sec, k) => [() => SETTINGS.physics[sec][k], v => { SETTINGS.physics[sec][k] = v; }];
 function optPhysics(ui) {
+  if (G.net && G.net.role === 'client') { // en el mundo de otro jugador: se ven sus ajustes, pero no se pueden cambiar
+    ui.note('<span style="color:#fc8">Estás en el mundo de otro jugador: las físicas las decide el anfitrión. Aquí ves sus ajustes; los tuyos vuelven al salir.</span>');
+    const base = ui; ui = Object.assign({}, base, { button() { }, slider(l, g, s, a, b, st, f, h, o = {}) { const d = base.slider(l, g, () => { }, a, b, st, f, h, Object.assign({}, o, { off: true })); const inp = d.querySelector('input'); if (inp) inp.disabled = true; return d; }, cycle(l, g, s, v, n, h, o = {}) { const b = base.cycle(l, g, () => { }, v, n, h, Object.assign({}, o, { off: true })); b.disabled = true; return b; } });
+  }
   ui.note('Cada apartado puede ir en modo <b>Realista</b> (físicas de Minecraft 2) o <b>Vanilla</b> (como el juego original). En multijugador mandan los ajustes del anfitrión.');
   ui.button('Todo realista', () => { for (const k in PHYS_DEF) SETTINGS.physics[k].mode = 'real'; saveSettings(); optRebuild(); }, 'Pone todos los apartados en modo realista.');
   ui.button('Todo vanilla', () => { for (const k in PHYS_DEF) SETTINGS.physics[k].mode = 'vanilla'; saveSettings(); optRebuild(); }, 'Pone todos los apartados como en el Minecraft original.');
@@ -619,6 +636,7 @@ function optPhysics(ui) {
   ui.slider('Velocidad del agua', ...PK('liquids', 'waterSpeed'), 0.5, 2, 0.05, pct, 'Lo rápido que fluye y se nivela el agua.');
   ui.slider('Viscosidad de la lava', ...PK('liquids', 'lavaVisc'), 0.5, 3, 0.05, pct, 'Más viscosidad = la lava avanza más despacio.');
   ui.cycle('Fluido continuo (partículas)', ...PK('liquids', 'continuous'), [true, false], ['Sí', 'No'], 'Calidad Alta o Ultra: el agua y la lava se mueven como fluido real (partículas en la GPU) en vez de por celdas.', { off: v });
+  ui.cycle('Tamaño de PBF', ...PK('liquids', 'pbfSize'), [1, 2], ['1 (pequeñas)', '2 (grandes)'], 'Tamaño de las partículas del fluido continuo. 1: la mitad de tamaño, con 8 veces más partículas por bloque (más detalle, más carga para la GPU). 2: el tamaño anterior. Al cambiarlo se borran las partículas que haya.', { off: v });
   ui.cycle('Salpicaduras', ...PK('liquids', 'splash'), [true, false], ['Sí', 'No'], 'Gotas al caer agua y al moverse los líquidos.', { off: v });
   ui.sec('Nieve');
   v = mode('snow', 'la nieve está suelta y se compacta solo donde pisan el jugador y los mobs (huellas y rastros).', 'capas de nieve sólidas, sin huellas.');
@@ -685,7 +703,7 @@ function optControls(ui) {
 // «Restablecer pestaña»: valores por defecto de la pestaña abierta
 function optResetTab() {
   if (OPT.tab === 'gfx') { Object.assign(SETTINGS.gfx, GFX_DEF); Object.assign(SETTINGS, { fov: 70, gui: 2, brightness: 0.5, clouds: true, particles: 2, fpsCap: 0, bob: true, dynres: true, resScale: 1, autoExp: true }); delete SETTINGS.cpuMode; applyGui(); applyRenderMode(false); }
-  else if (OPT.tab === 'phys') { for (const k in PHYS_DEF) SETTINGS.physics[k] = Object.assign({}, PHYS_DEF[k]); }
+  else if (OPT.tab === 'phys') { if (G.net && G.net.role === 'client') return; for (const k in PHYS_DEF) SETTINGS.physics[k] = Object.assign({}, PHYS_DEF[k]); }
   else if (OPT.tab === 'audio') { Object.assign(SETTINGS.audio, AUDIO_DEF); SETTINGS.vol = 0.7; if (AU.master) AU.master.gain.value = 0.7; }
   else if (OPT.tab === 'ctl') { Object.assign(SETTINGS.ctl, CTL_DEF); SETTINGS.keys = Object.assign({}, DEFAULT_KEYS); SETTINGS.sens = 0.5; SETTINGS.invertY = false; }
   saveSettings(); optRebuild();
@@ -757,6 +775,7 @@ function setupInput() {
   window.addEventListener('wheel', e => { if (G.mode !== 'game' || UI.open || G.paused) return; if (held('zoom')) { G.zoomMag = clamp((G.zoomMag || 4) * (e.deltaY > 0 ? 0.85 : 1.18), 2, 12); return; } const p = G.player; p.sel = (p.sel + (e.deltaY > 0 ? 1 : 8)) % 9; updateHUD(); showItemName(); }, { passive: true });
   document.addEventListener('pointerlockchange', () => { INPUT.lockT = performance.now(); INPUT.mAvg = 0; if (G.mode === 'game' && document.pointerLockElement !== $('gl') && !UI.open && !G.paused && !$('chatIn').classList.contains('on') && !G.player.dead && !$('sCredits').classList.contains('on')) pauseGame(true); INPUT.mouse = {}; });
   window.addEventListener('blur', () => { INPUT.keys = {}; INPUT.mouse = {}; });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { INPUT.keys = {}; INPUT.mouse = {}; } }); // pestaña oculta: las teclas soltadas fuera no llegan
   window.addEventListener('resize', () => { drawLogo(); });
   window.addEventListener('beforeunload', e => { if (G.mode === 'game') { if (!G.net || G.net.role === 'host') { try { saveWorld(true); } catch (err) { } } e.preventDefault(); e.returnValue = '¿Salir de Minecraft 2?'; return e.returnValue; } });
   $('sInv').addEventListener('mousedown', e => { if (e.target === $('sInv') && UI.cursor) { const p = G.player; const n = e.button === 2 ? 1 : UI.cursor.c; dropItem(p.dim, p.x, p.eye - 0.3, p.z, { ...UI.cursor, c: n }, -Math.sin(p.yaw) * 4, 2, -Math.cos(p.yaw) * 4, 40); UI.cursor.c -= n; if (UI.cursor.c <= 0) UI.cursor = null; refreshInvUI(); } });

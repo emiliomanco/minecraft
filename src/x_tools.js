@@ -3,7 +3,8 @@
 //  · Lanzallamas: como el extintor, pero el chorro es combustible ardiendo. Prende lo inflamable, a los mobs y la
 //    dinamita; el calor evapora el agua del fluido continuo a la que se apunta un rato. El agua que descansa sobre
 //    un bloque que conduce el calor (hierro, oro, cobre…) con fuego, lava o el chorro justo debajo también hierve.
-//  · Esponja (objeto): con el clic derecho mantenido borra las partículas de agua y lava del fluido continuo
+//  · Esponja (objeto): con el clic derecho mantenido borra el agua y la lava que mira: partículas del fluido continuo
+//    y también el líquido normal (lagos, ríos, lava; el mar vuelve a rellenar lo que se le quita)
 //    alrededor de donde se apunta. No toca el agua normal ni los océanos.
 // ============================================================================
 const FLAMER = { heat: new Map(), hot: new Map(), scanT: 0, sent: 0 };
@@ -91,7 +92,7 @@ function flamerTick(w, dt) {
   for (const [k, h] of FLAMER.heat) {
     h.h -= dt * 0.5; if (h.h <= 0) { FLAMER.heat.delete(k); continue; }
     if (h.h < 2.5) continue;
-    h.acc += dt * (h.h - 2) * 14; const n = Math.floor(h.acc); if (n <= 0) continue; h.acc -= n;
+    h.acc += dt * (h.h - 2) * 14 * (h.s ? 1 : FL_PPB / 216); const n = Math.floor(h.acc); if (n <= 0) continue; h.acc -= n; // (partículas pequeñas: más por segundo, mismo volumen)
     if (!(h.s ? flamerBoilStatic(w, h, n) : flamerBoil(w, h, n))) FLAMER.heat.delete(k);
   }
 }
@@ -104,7 +105,7 @@ function steamPuff(w, x, y, z, k) {
 function flamerBoil(w, h, n) {
   if (typeof FL === 'undefined' || !FL.occ) return false;
   let c = FL.occ.get(FLK(h.x, h.y, h.z)); if (!c || !c.idx.length) c = FL.occ.get(FLK(h.x, h.y - 1, h.z)); if (!c || !c.idx.length) return false;
-  let k = 0; for (let j = c.idx.length - 1; j >= 0 && k < n; j--) { const i = c.idx[j]; const ph = FL.phase[i]; if (ph && ph !== 2) { flKill(i); c.idx.splice(j, 1); c.nw = Math.max(0, c.nw - 1); k++; } }
+  let k = 0; for (let j = c.idx.length - 1; j >= 0 && k < n; j--) { const i = c.idx[j]; const ph = FL.phase[i]; if (ph && ph !== 2 && ph !== 4) { flKill(i); c.idx.splice(j, 1); c.nw = Math.max(0, c.nw - 1); k++; } }
   if (k) steamPuff(w, c.x, Math.max(c.y, c.top), c.z, k);
   return k > 0;
 }
@@ -117,15 +118,60 @@ function flamerBoilStatic(w, h, n) {
     setBlockNet(w, h.x, h.y, h.z, ID.water, liqMeta(a, false, false) | (m & 16)); }
   return true;
 }
+// ------------------------------------------------------------ difusor
+// Agua y lava (la miel y la leche no tienen versión normal). Modo «Líquido»: las partículas a las que apunta pasan a
+// líquido normal (con el mismo volumen); modo «PBF»: el líquido normal pasa a partículas. Sin durabilidad.
+const DIFF = { last: 0 };
+function diffuserUse(p, s) {
+  const pt = fluidAim(p); const mode = s && s.mode === 'pbf' ? 'pbf' : 'liquid'; p.swing = Math.max(p.swing || 0, 0.01);
+  if (G.net && G.net.role === 'client') { const now = performance.now(); if (now - (FLAMER.sentD || 0) > 100) { FLAMER.sentD = now; netSend({ t: 'dif', p: pt.map(v => +v.toFixed(2)), m: mode }); } return; }
+  const n = diffuserAt(p.world, pt, mode, 1.6); if (n && Math.random() < 0.3) playSound(mode === 'pbf' ? 'splash' : 'bucket', pt[0], pt[1], pt[2], 0.25);
+}
+function diffuserAt(w, pt, mode, r) {
+  const now = performance.now(); if (now - DIFF.last < 100) return 0; DIFF.last = now;
+  if (typeof FL === 'undefined' || !flCanSim(w)) { if (w === G.world) showActionMsg('El difusor necesita el fluido continuo (calidad Alta o Ultra con partículas activadas)'); return 0; }
+  const ri = Math.ceil(r), cx = Math.floor(pt[0]), cy = Math.floor(pt[1]), cz = Math.floor(pt[2]); let n = 0;
+  if (mode === 'pbf') { // líquido normal → partículas
+    for (let dy = ri; dy >= -ri; dy--) for (let dz = -ri; dz <= ri; dz++) for (let dx = -ri; dx <= ri; dx++) {
+      const x = cx + dx, y = cy + dy, z = cz + dz; const b = w.get(x, y, z); if (b !== ID.water && b !== ID.lava) continue;
+      if ((x + 0.5 - pt[0]) ** 2 + (y + 0.5 - pt[1]) ** 2 + (z + 0.5 - pt[2]) ** 2 > (r + 0.5) ** 2 || !flCanSim(w, x, y, z)) continue;
+      const a = liqAmt(w.getMeta(x, y, z)); if (flFree() < a / 8 * FL_PPB + 1000 || n >= 6) return n;
+      w.set(x, y, z, 0); flSpawnCell(w, x, y, z, a, b === ID.water ? 3 : 2, 0, 0, 0); n++;
+    }
+    return n;
+  }
+  if (!FL.rb.ready) return 0; const P = FL.rb.pos, o = FL.rb.orgNow; // partículas → líquido normal
+  for (let dy = -ri; dy <= ri; dy++) for (let dz = -ri; dz <= ri; dz++) for (let dx = -ri; dx <= ri; dx++) {
+    const c = FL.occ.get(FLK(cx + dx, cy + dy, cz + dz)); if (!c || !c.idx.length) continue;
+    for (let j = c.idx.length - 1; j >= 0; j--) { const i = c.idx[j]; const ph = FL.phase[i]; if (!ph) { c.idx.splice(j, 1); continue; } if (ph >= 4) continue; // miel y leche: no compatibles
+      const k = i * 4; const x = P[k] + o[0], y = P[k + 1] + o[1], z = P[k + 2] + o[2];
+      if ((x - pt[0]) ** 2 + (y - pt[1]) ** 2 + (z - pt[2]) ** 2 > r * r) continue;
+      flExitVol(w, Math.floor(x), Math.floor(y), Math.floor(z), ph); flKill(i); c.idx.splice(j, 1); n++; }
+  }
+  return n;
+}
+// punto al que apunta una herramienta de líquidos: la primera celda con partículas o con líquido en la mirada (hasta 5
+// bloques) o, si no hay, delante del bloque que se mira
+function fluidAim(p) {
+  const w = p.world, dir = lookDir(p); let pt = null;
+  for (let t = 0.4; t < 5; t += 0.2) {
+    const x = p.x + dir[0] * t, y = p.eye + dir[1] * t, z = p.z + dir[2] * t; const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z);
+    const c = typeof FL !== 'undefined' && FL.occ && FL.occ.get(FLK(bx, by, bz)); if (c && c.idx.length) { pt = [x, y, z]; break; }
+    const b = w.get(bx, by, bz); if (b > 0 && REG[b].liquid) { pt = [x, y, z]; break; }
+    if (b > 0 && REG[b].solid) { pt = [x - dir[0] * 0.4, y - dir[1] * 0.4, z - dir[2] * 0.4]; break; }
+  }
+  return pt || [p.x + dir[0] * 2, p.eye + dir[1] * 2, p.z + dir[2] * 2];
+}
 // ------------------------------------------------------------ esponja
 function spongeUse(p) {
-  if (typeof FL === 'undefined') return; const now = performance.now();
+  const now = performance.now();
   const w = p.world, dir = lookDir(p); let pt = null;
-  // punto: la primera celda con partículas en la mirada (hasta 5 bloques) o, si no hay, delante del bloque que se mira
+  // punto: la primera celda con partículas o con líquido en la mirada (hasta 5 bloques) o, si no hay, delante del bloque que se mira
   for (let t = 0.4; t < 5; t += 0.2) {
     const x = p.x + dir[0] * t, y = p.eye + dir[1] * t, z = p.z + dir[2] * t; const bx = Math.floor(x), by = Math.floor(y), bz = Math.floor(z);
     const c = FL.occ && FL.occ.get(FLK(bx, by, bz)); if (c && c.idx.length) { pt = [x, y, z]; break; }
-    const b = w.get(bx, by, bz); if (b > 0 && REG[b].solid) { pt = [x - dir[0] * 0.4, y - dir[1] * 0.4, z - dir[2] * 0.4]; break; }
+    const b = w.get(bx, by, bz); if (b > 0 && REG[b].liquid) { pt = [x, y, z]; break; }
+    if (b > 0 && REG[b].solid) { pt = [x - dir[0] * 0.4, y - dir[1] * 0.4, z - dir[2] * 0.4]; break; }
   }
   if (!pt) pt = [p.x + dir[0] * 2, p.eye + dir[1] * 2, p.z + dir[2] * 2];
   p.swing = Math.max(p.swing || 0, 0.01);
@@ -133,9 +179,22 @@ function spongeUse(p) {
   const n = spongeAt(w, pt, 1.6);
   if (n && Math.random() < 0.3) playSound('splash', pt[0], pt[1], pt[2], 0.25);
 }
-// borra las partículas del fluido continuo a menos de r del punto; devuelve cuántas
+// borra el líquido normal (celdas de agua o lava) a menos de r del punto, como mucho cada 0,1 s; devuelve cuántas
+const SPONGE = { last: 0 };
+function spongeStatic(w, pt, r) {
+  const now = performance.now(); if (now - SPONGE.last < 100) return 0; SPONGE.last = now;
+  const ri = Math.ceil(r), R2 = (r + 0.5) * (r + 0.5); let n = 0; const cx = Math.floor(pt[0]), cy = Math.floor(pt[1]), cz = Math.floor(pt[2]);
+  for (let dy = -ri; dy <= ri; dy++) for (let dz = -ri; dz <= ri; dz++) for (let dx = -ri; dx <= ri; dx++) {
+    const x = cx + dx, y = cy + dy, z = cz + dz; const b = w.get(x, y, z); if (!(b > 0 && REG[b].liquid)) continue;
+    const ex = x + 0.5 - pt[0], ey = y + 0.5 - pt[1], ez = z + 0.5 - pt[2]; if (ex * ex + ey * ey + ez * ez > R2) continue;
+    w.set(x, y, z, 0); n++;
+  }
+  return n;
+}
+// borra las partículas del fluido continuo y el líquido normal a menos de r del punto; devuelve cuántas partículas/celdas
 function spongeAt(w, pt, r) {
-  if (typeof FL === 'undefined' || !FL.ok || FL.world !== w || !FL.rb.ready) return 0;
+  const ns = spongeStatic(w, pt, r);
+  if (typeof FL === 'undefined' || !FL.ok || FL.world !== w || !FL.rb.ready) return ns;
   const P = FL.rb.pos, o = FL.rb.orgNow; const R2 = r * r; const ri = Math.ceil(r); let n = 0;
   const cx = Math.floor(pt[0]), cy = Math.floor(pt[1]), cz = Math.floor(pt[2]);
   for (let dy = -ri; dy <= ri; dy++) for (let dz = -ri; dz <= ri; dz++) for (let dx = -ri; dx <= ri; dx++) {
@@ -144,6 +203,7 @@ function spongeAt(w, pt, r) {
       const ex = P[k] + o[0] - pt[0], ey = P[k + 1] + o[1] - pt[1], ez = P[k + 2] + o[2] - pt[2];
       if (ex * ex + ey * ey + ez * ez < R2) { flKill(i); c.idx.splice(j, 1); n++; } }
   }
+  n += ns * FL_PPB / 8;
   if (n) for (let i = 0; i < Math.min(6, n / 20); i++) P_({ x: pt[0] + (Math.random() - 0.5) * r, y: pt[1] + (Math.random() - 0.5) * r, z: pt[2] + (Math.random() - 0.5) * r, vy: 0.5, life: 0.5, size: 0.08, r: 0.6, g: 0.75, b: 1, a: 0.6, grav: 4, layer: TEX.drip });
   return n;
 }

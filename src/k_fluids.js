@@ -81,7 +81,9 @@ function fluidTick(w, x, y, z) {
   // 3) presión (solo agua): pasar un octavo a una celda del mismo cuerpo 2 octavos más baja
   if (liq === 1 && a >= 2) { const t = pressureTarget(w, x, y, z, a); if (t) { setVol(w, t[0], y, t[1], 1, t[2] + 1, false); setVol(w, x, y, z, 1, a - 1, fallNow); w.scheduleTick(x, y, z, delay, 0); return; } }
   // celda en reposo: actualizar la marca de chorro si cambió
-  const fallBit = (meta & LIQ_FALL) !== 0; if (fallBit !== fallNow) w.set(x, y, z, id, liqMeta(a, fallNow, false));
+  // (solo cambia la marca, no el volumen: sin despertar a las vecinas, o un lago entero se recalcula en cascada)
+  const fallBit = (meta & LIQ_FALL) !== 0;
+  if (fallBit !== fallNow) { const m2 = liqMeta(a, fallNow, false); w.set(x, y, z, id, m2, true); markDirty(w, x, z, true); if (G.net && G.net.role === 'host' && !G.applyingNet) NETBATCH.push([w.dim, x, y, z, id, m2]); }
   // 4) una celda llena rodeada de océano pasa a ser océano (tapar y destapar un hueco en el mar no deja un parche quieto)
   if (liq === 1 && a === 8 && y <= SEA) { let oc = 0; for (const [dx, dz] of N4) if (isOcean(w, x + dx, y, z + dz)) oc++; if (oc >= 2 || (oc >= 1 && isOcean(w, x, y + 1, z))) w.set(x, y, z, ID.water, LIQ_OCEAN); }
 }
@@ -174,7 +176,7 @@ function bucketPour(w, x, y, z, liq) {
 function liquidSurface(world, x, y, z) {
   const b = world.get(x, y, z); const d = b > 0 ? REG[b] : null; if (d && d.inWater) return 1; if (!d || !d.liquid) return typeof flSurfIn === 'function' ? flSurfIn(world, x, y, z) : 0;
   const up = world.get(x, y + 1, z); if (up > 0 && REG[up] && REG[up].liquid === d.liquid) return 1;
-  if (b === ID.water && (world.getMeta(x, y, z) & LIQ_OCEAN)) return clamp(0.92 + oceanWaveAt(x + 0.5, z + 0.5).h * oceanShoreW(world, x + 0.5, y, z + 0.5), 0, 1.6); // mar: con olas y marea
+  if (b === ID.water && (world.getMeta(x, y, z) & LIQ_OCEAN)) return clamp(0.92 + oceanWaveAt(x + 0.5, z + 0.5).h * oceanShoreW(world, x + 0.5, y, z + 0.5), 0, 2.6); // mar: con olas y marea
   const m = world.getMeta(x, y, z); if (m & LIQ_FALL) return 1; return liqAmt(m) / 8 * 0.92; // igual que la superficie dibujada (liqTopH)
 }
 // depuración: suma de volumen (en octavos) de un líquido en una caja
@@ -190,27 +192,79 @@ function migrateFluidChunk(w, c) {
     M[i] = nm;
   }
 }
-// ---- océano: oleaje Gerstner y marea, idénticos a los del shader (VS_CHUNK/oceanWave), para flotar con las olas
+// ---- océano: oleaje Gerstner y marea, idénticos a los del shader (COMMON/oceanWave y q_fluid/seaWave), para flotar con las olas
+// Las tres olas largas (mar de fondo) avanzan hacia la costa más cercana: su fase es la distancia a tierra (WD, más abajo),
+// así las crestas van paralelas a la orilla y rompen contra ella. Mar adentro (lejos de cualquier costa) se funden con un
+// oleaje global de dirección fija. Las dos cortas (picado del viento) son siempre globales.
 const OCEAN_W = [[0.81, 0.59, 22.0, 0.42], [0.97, -0.24, 13.0, 0.26], [0.45, 0.89, 8.5, 0.16], [-0.2, 0.98, 5.2, 0.09], [0.7, -0.71, 3.4, 0.05]];
 function oceanTide() { return 0.28 * Math.sin(((G.time || 0) % 24000) / 12000 * Math.PI * 2); } // dos mareas por día
-const _OWV = { h: 0, ux: 0, uz: 0 };
+// ---- distancia a la costa: rejilla de WD.N×WD.N muestras cada WD.S bloques alrededor de la cámara, según el relieve generado
+// (las estructuras y lo construido no cuentan); se recalcula por partes cuando la cámara se aleja y se sube como textura
+const WD = { N: 64, S: 8, D: 160, cur: null, job: null, tex: null, gl: null, up: false };
+function wdTick() {
+  const w = G.worlds && G.worlds.overworld; const p = G.player; if (!w || !w.gen || !p || p.dim !== 'overworld') return;
+  const N = WD.N, S = WD.S, half = N * S / 2;
+  if (!WD.job) {
+    const c = WD.cur; if (c && c.w === w && Math.abs(p.x - (c.ox + half)) < 96 && Math.abs(p.z - (c.oz + half)) < 96) return;
+    const ox = Math.floor((p.x - half) / S) * S, oz = Math.floor((p.z - half) / S) * S;
+    WD.job = { w, ox, oz, land: new Uint8Array(N * N), i: 0 };
+  }
+  const J = WD.job; const t0 = performance.now();
+  while (J.i < N * N && performance.now() - t0 < 4) { const i = J.i++; const x = J.ox + (i % N) * S, z = J.oz + ((i / N) | 0) * S; J.land[i] = J.w.gen.col(x, z).h >= SEA ? 1 : 0; }
+  if (J.i < N * N) return;
+  // transformada de distancia (chaflán 3-4, dos pasadas) en bloques, con tope WD.D
+  const d = new Float32Array(N * N); const INF = 1e9; for (let i = 0; i < N * N; i++) d[i] = J.land[i] ? 0 : INF;
+  const a = S, b = S * Math.SQRT2;
+  for (let z = 0; z < N; z++) for (let x = 0; x < N; x++) { const i = x + z * N; let v = d[i]; if (x > 0) v = Math.min(v, d[i - 1] + a); if (z > 0) { v = Math.min(v, d[i - N] + a); if (x > 0) v = Math.min(v, d[i - N - 1] + b); if (x < N - 1) v = Math.min(v, d[i - N + 1] + b); } d[i] = v; }
+  for (let z = N - 1; z >= 0; z--) for (let x = N - 1; x >= 0; x--) { const i = x + z * N; let v = d[i]; if (x < N - 1) v = Math.min(v, d[i + 1] + a); if (z < N - 1) { v = Math.min(v, d[i + N] + a); if (x < N - 1) v = Math.min(v, d[i + N + 1] + b); if (x > 0) v = Math.min(v, d[i + N - 1] + b); } d[i] = v; }
+  for (let i = 0; i < N * N; i++) d[i] = Math.min(WD.D, d[i]);
+  WD.cur = { w, ox: J.ox, oz: J.oz, d }; WD.job = null; WD.up = true;
+}
+// distancia a tierra (bilineal) y su gradiente: [d, dd/dx, dd/dz]; fuera de la rejilla, mar abierto
+const _WDS = [0, 0, 0];
+function wdSample(x, z) {
+  const c = WD.cur; _WDS[0] = 1e4; _WDS[1] = 0; _WDS[2] = 0; if (!c) return _WDS;
+  const N = WD.N, qx = (x - c.ox) / WD.S, qz = (z - c.oz) / WD.S; const bx = Math.floor(qx), bz = Math.floor(qz);
+  if (bx < 0 || bz < 0 || bx >= N - 1 || bz >= N - 1) return _WDS;
+  const fx = qx - bx, fz = qz - bz, i = bx + bz * N; const a = c.d[i], b = c.d[i + 1], e = c.d[i + N], f = c.d[i + N + 1];
+  _WDS[0] = lerp(lerp(a, b, fx), lerp(e, f, fx), fz); _WDS[1] = lerp(b - a, f - e, fz) / WD.S; _WDS[2] = lerp(e - a, f - b, fx) / WD.S; return _WDS;
+}
+// textura R32F con las distancias (unidad 12) para los shaders del agua y del fluido continuo
+function wdBind(P) {
+  const gl = R.gl; const u = P.u; if (!u.u_wdist) return;
+  if (WD.gl !== gl) { WD.gl = gl; WD.tex = gl.createTexture(); gl.activeTexture(gl.TEXTURE12); gl.bindTexture(gl.TEXTURE_2D, WD.tex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, WD.N, WD.N, 0, gl.RED, gl.FLOAT, new Float32Array(WD.N * WD.N).fill(WD.D)); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST); WD.up = !!WD.cur; }
+  gl.activeTexture(gl.TEXTURE12); gl.bindTexture(gl.TEXTURE_2D, WD.tex);
+  if (WD.up && WD.cur) { gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, WD.N, WD.N, gl.RED, gl.FLOAT, WD.cur.d); WD.up = false; }
+  gl.uniform1i(u.u_wdist, 12); gl.activeTexture(gl.TEXTURE0);
+  if (u.u_wdRect) { const c = WD.cur; gl.uniform4f(u.u_wdRect, c ? c.ox : 0, c ? c.oz : 0, 1 / WD.S, c && R.dimIdx === 0 ? 1 : 0); }
+}
+// altura con olas → desplazamiento de la superficie: nivel medio casi en el de reposo y valles más planos que las crestas
+// (antes todo el mar bajaba ~1,5·A y con olas grandes dejaba al aire la arena de la orilla)
+function waveLift(h, A) { const v = h * 0.85 + A * 0.2; return (v < 0 ? v * 0.5 : v) - 0.05; }
+const _OWV = { h: 0, ux: 0, uz: 0, raw: 0 };
 // desplazamiento de la superficie respecto al nivel quieto (h) y velocidad orbital horizontal del agua (ux, uz)
 function oceanWaveAt(x, z) {
   const t = (typeof R !== 'undefined' && R.time) ? R.time : performance.now() / 1000; const A = (0.16 + (G.rainLevel || 0) * 0.55) * (typeof R !== 'undefined' && R.gfxU ? R.gfxU[0] : 1); let h = 0, ux = 0, uz = 0;
-  for (let i = 0; i < 5; i++) { const W = OCEAN_W[i]; const k = 6.2832 / W[2], c = Math.sqrt(9.8 / k); const ph = k * (W[0] * x + W[1] * z - c * t * 0.55) + i * 1.7; const a = A * W[3] * 2.2; const s = Math.sin(ph);
-    h += a * (Math.pow(s * 0.5 + 0.5, 1.6) * 2 - 1); const om = k * c * 0.55; ux += a * om * s * W[0]; uz += a * om * s * W[1]; }
-  _OWV.h = h * 0.85 - A * 1.1 - 0.05 + oceanTide(); _OWV.ux = ux; _OWV.uz = uz; return _OWV;
+  const sd = (typeof R === 'undefined' || R.dimIdx === 0) ? wdSample(x, z) : [1e4, 0, 0];
+  const wf = smooth(clamp((sd[0] - (WD.D - 60)) / 50, 0, 1)); let gx = -sd[1], gz = -sd[2]; const gl = Math.hypot(gx, gz); if (gl > 1e-4) { gx /= gl; gz /= gl; } else { gx = 0.81; gz = 0.59; }
+  const Sp = sd[0] + 2.5 * Math.sin(x * 0.045 + z * 0.02) * Math.sin(z * 0.05 - x * 0.015);
+  const comp = (dx, dz, ph, k, c, a) => { const s = Math.sin(ph); h += a * (Math.pow(s * 0.5 + 0.5, 1.6) * 2 - 1); const om = k * c * 0.55; ux += a * om * s * dx; uz += a * om * s * dz; };
+  for (let i = 0; i < 5; i++) { const W = OCEAN_W[i]; const k = 6.2832 / W[2], c = Math.sqrt(9.8 / k); const a = A * W[3] * 2.2;
+    const gw = i < 3 ? wf : 1;
+    if (gw > 0.001) comp(W[0], W[1], k * (W[0] * x + W[1] * z - c * t * 0.55) + i * 1.7, k, c, a * gw);
+    if (gw < 0.999) comp(gx, gz, k * (-Sp - c * t * 0.55) + i * 1.7, k, c, a * (1 - gw)); }
+  _OWV.raw = h; _OWV.h = waveLift(h, A) + oceanTide(); _OWV.ux = ux; _OWV.uz = uz; return _OWV;
 }
 // lo mismo que shoreW (d_mesh) pero contra el mundo: peso del oleaje (0 junto a la orilla) para flotación y nado
 const OSHORE = new Map();
 function oceanShoreW(w, x, y, z) {
-  if (MESH_SHORE <= 0) return 1;
+  if (MESH_SHORE <= 0) return 1; if (!SHORE_B) shoreTable();
   const key = ((Math.round(x * 4) + 4e5) * 8e5 + Math.round(z * 4) + 4e5) * 512 + y; let r = OSHORE.get(key); if (r !== undefined) return r;
   if (OSHORE.size > 20000) OSHORE.clear();
   const R = Math.min(13, MESH_SHORE + SHORE_RAMP); let best = R + 1;
   for (let b = Math.floor(z - R); b < Math.ceil(z + R); b++) { const dz = Math.max(b - z, 0, z - (b + 1)); if (dz >= best) continue;
     for (let a = Math.floor(x - R); a < Math.ceil(x + R); a++) { const dx = Math.max(a - x, 0, x - (a + 1)); if (dx >= best) continue;
-      const bb = w.get(a, y, b); if (bb < 0 || (bb > 0 && (REG[bb].liquid === 1 || REG[bb].inWater))) continue; const d = Math.hypot(dx, dz); if (d < best) best = d; } }
+      const bb = w.get(a, y, b); if (bb < 0 || (bb > 0 && (REG[bb].liquid === 1 || REG[bb].inWater || !SHORE_B[bb]))) continue; const d = Math.hypot(dx, dz); if (d < best) best = d; } }
   const t = clamp((best - MESH_SHORE) / SHORE_RAMP, 0, 1); r = t * t * (3 - 2 * t); OSHORE.set(key, r); return r;
 }
 // celda de mar con aire (o algo no líquido) encima
@@ -229,8 +283,8 @@ function waterSurfaceAt(w, x, y, z) {
   return by + liquidSurface(w, bx, by, bz);
 }
 // ---- cubos con capacidad: 10 L (10000 ml) = un bloque de líquido; cada partícula del fluido continuo son 0,08 L
-const BUCKET_ML = 10000, ML_PER_EIGHTH = 1250; const ML_PER_PART = BUCKET_ML / 216; // (216 = FL_PPB, que se define después) un cubo (10 L) = un bloque = 216 partículas
-function bucketLabel(s) { const d = s && REG[s.id]; if (!d || d.bucket === undefined || !d.bucket) return ''; return ' (' + (((s.ml ?? BUCKET_ML)) / 1000).toFixed(1) + ' L)'; }
+const BUCKET_ML = 10000, ML_PER_EIGHTH = 1250; const mlPerPart = () => BUCKET_ML / (typeof FL_PPB !== 'undefined' ? FL_PPB : 216); // un cubo (10 L) = un bloque = FL_PPB partículas (216 o 1728 según el tamaño)
+function bucketLabel(s) { const d = s && REG[s.id]; if (d && d.diffuser) return s.mode === 'pbf' ? ' (modo PBF)' : ' (modo Líquido)'; if (d && d.tubeTool) return ' (' + TUBE_MODE_NAME[tubeMode(s)] + ')'; if (!d || d.bucket === undefined || !d.bucket) return ''; return ' (' + (((s.ml ?? BUCKET_ML)) / 1000).toFixed(1) + ' L)'; }
 const BKT_ACC = new Map();
 // recoge hasta `room` ml del líquido que hay en una caja pequeña e invisible alrededor de donde apunta el jugador
 // cont: 0 vacío (acepta el primero que encuentre), 1 agua, 2 lava (solo ese). Devuelve { liq, ml }
@@ -241,20 +295,21 @@ function bucketCollect(w, p, dir, cont, room) {
     const b = w.get(Math.floor(x), Math.floor(y), Math.floor(z));
     if (b > 0 && REG[b] && REG[b].solid && !REG[b].liquid) break;
     const oc = typeof FL !== 'undefined' && FL.occ && w === FL.world ? FL.occ.get(FLK(Math.floor(x), Math.floor(y), Math.floor(z))) : null;
-    if (oc && oc.idx.length >= 2 && y < oc.top + 0.2) { c = [x, y, z]; liq = oc.nl > oc.nw ? 2 : 1; break; }
+    if (oc && oc.idx.length >= 2 && y < oc.top + 0.2) { c = [x, y, z]; liq = flKind(oc); if (liq === 1 && oc.nm * 2 > oc.nw) liq = 5; break; } // 1 agua, 2 lava, 4 miel, 5 leche
     const sl = b > 0 && REG[b] ? (REG[b].liquid || (REG[b].inWater ? 1 : 0)) : 0; if (sl) { c = [x, y, z]; liq = sl; isStatic = true; break; }
   }
   if (!c || (cont && cont !== liq)) return { liq: cont, ml: 0 };
   if (!isStatic) { // partículas dentro de la caja (de la última lectura de la GPU)
-    const rb = FL.rb, o = rb.orgNow; if (!rb.ready) return { liq, ml: 0 }; const want = Math.min(26, Math.floor(room / ML_PER_PART)); let n = 0;
+    const rb = FL.rb, o = rb.orgNow; if (!rb.ready) return { liq, ml: 0 }; const want = Math.min(Math.round(26 * FL_PPB / 216), Math.floor(room / mlPerPart())); let n = 0;
     const bx = Math.floor(c[0]), by = Math.floor(c[1]), bz = Math.floor(c[2]);
     for (let dy = -1; dy <= 1 && n < want; dy++) for (let dz = -1; dz <= 1 && n < want; dz++) for (let dx = -1; dx <= 1 && n < want; dx++) {
       const cell = FL.occ.get(FLK(bx + dx, by + dy, bz + dz)); if (!cell) continue;
-      for (const i of cell.idx) { if (n >= want) break; const ph = FL.phase[i]; if (!ph || (ph === 2) !== (liq === 2) || FL.dying.has(i)) continue; const k = i * 4;
+      for (const i of cell.idx) { if (n >= want) break; const ph = FL.phase[i]; if (!ph || phLiq(ph) !== liq || FL.dying.has(i)) continue; const k = i * 4;
         if (Math.abs(rb.pos[k] + o[0] - c[0]) > 0.6 || Math.abs(rb.pos[k + 1] + o[1] - c[1]) > 0.6 || Math.abs(rb.pos[k + 2] + o[2] - c[2]) > 0.6) continue;
-        flKill(i); n++; }
+        flKill(i); n++; if (G.net && G.net.role === 'client') (BKT_ACC.slots || (BKT_ACC.slots = [])).push(i); }
     }
-    return { liq, ml: n * ML_PER_PART };
+    if (BKT_ACC.slots && BKT_ACC.slots.length) { netSend({ t: 'pkill', l: BKT_ACC.slots }); BKT_ACC.slots = null; } // multijugador: el anfitrión quita las mismas
+    return { liq, ml: n * mlPerPart() };
   }
   // agua o lava quieta: 1 L cada décima de segundo; el mar no se gasta; un lago pierde 1/8 de bloque cada 1,25 L
   const x = Math.floor(c[0]), y = Math.floor(c[1]), z = Math.floor(c[2]); const take = Math.min(1000, room);
@@ -265,20 +320,30 @@ function bucketCollect(w, p, dir, cont, room) {
   }
   return { liq, ml: take };
 }
-// vacía de golpe todo el contenido delante del jugador
+// líquido de un cubo (1 agua, 2 lava, 4 miel, 5 leche) ↔ fase de sus partículas (3 agua puesta, 2, 4, 5)
+const phLiq = ph => ph === 2 ? 2 : ph === 4 ? 4 : ph === 5 ? 5 : 1;
+const liqPh = liq => liq === 1 ? 3 : liq;
+const LIQ_NAME = { 1: 'Agua', 2: 'Lava', 4: 'Miel', 5: 'Leche' };
+// vacía de golpe todo el contenido delante del jugador; false si no se pudo (miel y leche solo existen como partículas)
 function bucketPourMl(w, p, dir, hit, liq, ml) {
   let d = 1.6; if (hit && !hit.ent && hit.t !== undefined) d = Math.max(0.6, Math.min(d, hit.t - 0.4));
   const cx = p.x + dir[0] * d, cy = p.eye + dir[1] * d - 0.2, cz = p.z + dir[2] * d;
   if (liq === 1 && p.dim === 'nether') { fizz(w, Math.floor(cx), Math.floor(cy), Math.floor(cz)); return; }
+  // multijugador: con el fluido continuo del anfitrión activado, vierte él (y las partículas llegan por la red)
+  if (G.net && G.net.role === 'client' && physCfg('liquids').continuous !== false) { netSend({ t: 'pour', c: [cx, cy, cz].map(v => +v.toFixed(2)), d: dir.map(v => +v.toFixed(3)), l: liq, ml, v: [p.vx || 0, p.vz || 0] }); if (liq === 1 || liq === 5) splashFX(w, Math.floor(cx), Math.floor(cy), Math.floor(cz), 4); return true; }
+  return bucketPourAt(w, cx, cy, cz, dir, liq, ml, p.vx || 0, p.vz || 0);
+}
+function bucketPourAt(w, cx, cy, cz, dir, liq, ml, pvx, pvz) {
   if (typeof flCanSim === 'function' && flCanSim(w, Math.floor(cx), Math.floor(cy), Math.floor(cz))) {
-    const n = Math.max(1, Math.round(ml / ML_PER_PART)); const r = Math.cbrt(n * FL_S * FL_S * FL_S * 3 / (4 * Math.PI)) + 0.05;
+    const n = Math.max(1, Math.round(ml / mlPerPart())); const r = Math.cbrt(n * FL_S * FL_S * FL_S * 3 / (4 * Math.PI)) + 0.05;
     for (let i = 0; i < n; i++) { let ox, oy, oz; do { ox = Math.random() * 2 - 1; oy = Math.random() * 2 - 1; oz = Math.random() * 2 - 1; } while (ox * ox + oy * oy + oz * oz > 1);
-      flSpawn(cx + ox * r, cy + oy * r, cz + oz * r, dir[0] * 2.5 + (p.vx || 0), dir[1] * 2.5 + 0.5, dir[2] * 2.5 + (p.vz || 0), liq === 1 ? 3 : 2); }
-    if (liq === 1) splashFX(w, Math.floor(cx), Math.floor(cy), Math.floor(cz), 4); return;
+      flSpawn(cx + ox * r, cy + oy * r, cz + oz * r, dir[0] * 2.5 + pvx, dir[1] * 2.5 + 0.5, dir[2] * 2.5 + pvz, liqPh(liq)); }
+    if (liq === 1 || liq === 5) splashFX(w, Math.floor(cx), Math.floor(cy), Math.floor(cz), 4); return true;
   }
+  if (liq >= 4) { showActionMsg((LIQ_NAME[liq] || 'Este líquido') + ' solo existe como fluido continuo (calidad Alta o Ultra con partículas activadas)'); return false; }
   // sin fluido continuo: el volumen va a la celda (octavos)
   const x = Math.floor(cx), y = Math.floor(cy), z = Math.floor(cz); const id = liq === 1 ? ID.water : ID.lava; const cur = w.get(x, y, z);
-  if (cur !== 0 && cur !== id && !(cur > 0 && REG[cur].replace)) return;
+  if (cur !== 0 && cur !== id && !(cur > 0 && REG[cur].replace)) return false;
   const a = Math.max(1, Math.min(8, Math.round(ml / ML_PER_EIGHTH))); const v = cur === id ? liqAmt(w.getMeta(x, y, z)) : 0;
-  setBlockNet(w, x, y, z, id, liqMeta(Math.min(8, v + a), false, false) | (liq === 1 ? 16 : 0));
+  setBlockNet(w, x, y, z, id, liqMeta(Math.min(8, v + a), false, false) | (liq === 1 ? 16 : 0)); return true;
 }

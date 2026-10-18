@@ -5,7 +5,7 @@ const R = { gl: null, q: 2, dyn: 1, progs: {}, fbo: {}, w: 1, h: 1, view: M4.cre
 const GLSL_COMMON = `
 precision highp float; precision highp int; precision highp sampler2DArray; precision highp sampler2DShadow;
 uniform vec3 u_sunDir; uniform vec3 u_sunReal; uniform vec3 u_sunCol; uniform vec3 u_amb; uniform vec3 u_camPos;
-uniform float u_time; uniform float u_tide; uniform int u_dim; uniform float u_rain; uniform float u_wet; uniform vec3 u_fogCol; uniform vec2 u_fog; uniform float u_under; uniform float u_bright; uniform float u_expo;
+uniform float u_time; uniform float u_tide; uniform int u_dim; uniform float u_rain; uniform float u_wet; uniform vec3 u_fogCol; uniform vec2 u_fog; uniform float u_under; uniform vec3 u_uT, u_uS; uniform float u_bright; uniform float u_expo;
 uniform sampler2DShadow u_shadow; uniform mat4 u_shadowVP; uniform float u_shadowOn; uniform float u_shadowTexel;
 uniform sampler2DShadow u_shadow2; uniform mat4 u_shadowVP2; uniform float u_shadowTexel2; uniform float u_shadowFar;
 uniform vec4 u_lp[8]; uniform vec3 u_lc[8]; uniform int u_nl;
@@ -61,8 +61,8 @@ vec3 dynLights(vec3 p){ vec3 s=vec3(0); for(int i=0;i<8;i++){ if(i>=u_nl) break;
 uniform float u_camSky;
 vec3 applyFog(vec3 col, vec3 p, float sv){
   float d=length(p);
-  if(u_under>0.5){ // bajo el agua: el rojo se apaga primero; la luz dispersada viene del sol y del cielo y se oscurece con la profundidad
-    vec3 sT=vec3(0.47,0.105,0.09); vec3 Tr=exp(-sT*d*0.85); vec3 Lw=(u_sunCol*0.45+u_amb*1.2)*vec3(0.106,0.62,0.74)*0.8*(0.15+0.85*u_camSky*u_camSky);
+  if(u_under>0.5){ // dentro de un líquido (agua, miel, leche: u_uT absorción, u_uS color de la luz dispersada); se oscurece con la profundidad
+    vec3 sT=u_uT; vec3 Tr=exp(-sT*d*0.85); vec3 Lw=(u_sunCol*0.45+u_amb*1.2)*u_uS*0.8*(0.15+0.85*u_camSky*u_camSky);
     return col*Tr+Lw*(1.0-Tr); }
   float f=smoothstep(u_fog.x,u_fog.y,d);
   // la niebla solo toma el color del cielo (y el brillo del sol) donde hay cielo visible
@@ -76,12 +76,23 @@ vec3 applyFog(vec3 col, vec3 p, float sv){
 vec3 aces(vec3 x){ return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14),0.0,1.0); }
 // olas de océano (Gerstner, solo altura): devuelve [altura, dh/dx, dh/dz]; amplitud según el tiempo (lluvia = mar picado)
 float waveA(){ return (0.16+u_rain*0.55)*u_gfx.x; }
+// distancia a la costa (textura de k_fluids/WD, bilineal) y su gradiente; fuera de la rejilla, mar abierto
+uniform highp sampler2D u_wdist; uniform vec4 u_wdRect;
+vec3 shoreDist(vec2 p){ if(u_wdRect.w<0.5) return vec3(1e4,0.0,0.0); vec2 q=(p-u_wdRect.xy)*u_wdRect.z; ivec2 b=ivec2(floor(q)); vec2 f=q-vec2(b);
+  if(b.x<0||b.y<0||b.x>=63||b.y>=63) return vec3(1e4,0.0,0.0);
+  float a=texelFetch(u_wdist,b,0).r, c=texelFetch(u_wdist,b+ivec2(1,0),0).r, d=texelFetch(u_wdist,b+ivec2(0,1),0).r, e=texelFetch(u_wdist,b+ivec2(1,1),0).r;
+  return vec3(mix(mix(a,c,f.x),mix(d,e,f.x),f.y), mix(c-a,e-d,f.y)*u_wdRect.z, mix(d-a,e-c,f.x)*u_wdRect.z); }
+// nivel medio casi en el de reposo y valles más planos que las crestas (igual que waveLift en k_fluids)
+float waveLift(float h, float A){ float v=h*0.85+A*0.2; return (v<0.0?v*0.5:v)-0.05; }
+// las 3 olas largas avanzan hacia la costa (fase = -distancia a tierra); mar adentro se funden con el oleaje global
 vec3 oceanWave(vec2 p){
   float A=waveA(); vec3 r=vec3(0.0);
   const vec4 W[5]=vec4[5](vec4(0.81,0.59,22.0,0.42),vec4(0.97,-0.24,13.0,0.26),vec4(0.45,0.89,8.5,0.16),vec4(-0.2,0.98,5.2,0.09),vec4(0.7,-0.71,3.4,0.05));
-  for(int i=0;i<5;i++){ vec2 d=W[i].xy; float k=6.2832/W[i].z; float c=sqrt(9.8/k); float ph=k*(dot(d,p)-c*u_time*0.55)+float(i)*1.7;
-    float a=A*W[i].w*2.2; float s=sin(ph), co=cos(ph); float sh=pow(s*0.5+0.5,1.6)*2.0-1.0; // crestas más agudas que los valles
-    r.x+=a*sh; r.yz+=a*k*co*d*0.9; }
+  vec3 sd=shoreDist(p); float wf=smoothstep(100.0,150.0,sd.x); vec2 gs=length(sd.yz)>1e-4?-normalize(sd.yz):vec2(0.81,0.59);
+  float Sp=sd.x+2.5*sin(p.x*0.045+p.y*0.02)*sin(p.y*0.05-p.x*0.015);
+  for(int i=0;i<5;i++){ float k=6.2832/W[i].z; float c=sqrt(9.8/k); float a=A*W[i].w*2.2; float gw=i<3?wf:1.0;
+    if(gw>0.001){ vec2 d=W[i].xy; float ph=k*(dot(d,p)-c*u_time*0.55)+float(i)*1.7; float s=sin(ph), co=cos(ph); r.x+=a*gw*(pow(s*0.5+0.5,1.6)*2.0-1.0); r.yz+=a*gw*k*co*d*0.9; } // crestas más agudas que los valles
+    if(gw<0.999){ float ph=k*(-Sp-c*u_time*0.55)+float(i)*1.7; float s=sin(ph), co=cos(ph); r.x+=a*(1.0-gw)*(pow(s*0.5+0.5,1.6)*2.0-1.0); r.yz+=a*(1.0-gw)*k*co*gs*0.9; } }
   return r;
 }
 `;
@@ -107,7 +118,7 @@ void main(){
   uint tc=uint(a_lit.w*255.0+0.5);
   if((fl&64u)!=0u && (fl&7u)==2u){
     float ow=(fl&32768u)!=0u ? oceanW : (tc<200u?1.0:0.0); // peso del oleaje: 1 en mar abierto, fracción donde el mar toca agua dulce (sin escalones)
-    if(ow>0.0){ float A=waveA(); p.y+=(oceanWave(w.xz).x*0.85 - A*1.1 - 0.05 + u_tide)*ow; } // oleaje + marea
+    if(ow>0.0){ float A=waveA(); p.y+=(waveLift(oceanWave(w.xz).x,A) + u_tide)*ow; } // oleaje + marea
   }
   // chorro que cae: el tubo ondula como un líquido de verdad
   if((fl&32768u)!=0u && tc==201u){ float wv=sin(w.y*2.3-u_time*9.0+w.x*1.7)*0.035+sin(w.y*5.1-u_time*14.0+w.z*2.3)*0.018; p.x+=wv*v_n.x+wv*0.5; p.z+=wv*v_n.z-wv*0.4; }
@@ -853,14 +864,17 @@ function computeEnv(dim, camY, under, biome) {
   } else {
     ENV.sunDir = [0, 1, 0]; ENV.sunCol = [0, 0, 0]; ENV.fogCol = [0.04, 0.03, 0.06]; ENV.amb = [0.32, 0.28, 0.4]; ENV.fog = [60, SETTINGS.rd * 16];
   }
-  if (under) { ENV.fogCol = [0.015, 0.07, 0.1]; }
+  // dentro de un líquido: niebla y tinte según cuál (agua azulada, miel ámbar, leche blanca)
+  const UK = { 1: [[0.015, 0.07, 0.1], [0.47, 0.105, 0.09], [0.106, 0.62, 0.74], [0.5, 0.85, 1.1]], 4: [[0.36, 0.17, 0.02], [0.7, 1.35, 2.6], [1.0, 0.52, 0.1], [1.25, 0.78, 0.32]], 5: [[0.88, 0.88, 0.85], [2.15, 2.15, 2.25], [1.15, 1.15, 1.12], [1.12, 1.12, 1.1]] };
+  const uk = UK[R.underKind || 1]; ENV.uT = uk[1]; ENV.uS = uk[2]; ENV.uCol = uk[3];
+  if (under) { ENV.fogCol = uk[0]; }
 }
 function setCommon(P) {
   const gl = R.gl, u = P.u;
   if (u.u_sunDir) gl.uniform3fv(u.u_sunDir, ENV.sunDir); if (u.u_sunReal) gl.uniform3fv(u.u_sunReal, ENV.sunReal); if (u.u_sunCol) gl.uniform3fv(u.u_sunCol, ENV.sunCol);
   if (u.u_amb) gl.uniform3fv(u.u_amb, ENV.amb); if (u.u_camPos) gl.uniform3fv(u.u_camPos, R.cam); if (u.u_time) gl.uniform1f(u.u_time, R.time); if (u.u_tide) gl.uniform1f(u.u_tide, oceanTide());
   if (u.u_dim) gl.uniform1i(u.u_dim, R.dimIdx); if (u.u_rain) gl.uniform1f(u.u_rain, G.rainLevel || 0); if (u.u_wet) gl.uniform1f(u.u_wet, G.mode === 'game' ? G.wet || 0 : 0); if (u.u_fogCol) gl.uniform3fv(u.u_fogCol, ENV.fogCol);
-  if (u.u_fog) gl.uniform2fv(u.u_fog, ENV.fog); if (u.u_under) gl.uniform1f(u.u_under, R.under ? 1 : 0); if (u.u_bright) gl.uniform1f(u.u_bright, SETTINGS.brightness); if (u.u_expo) gl.uniform1f(u.u_expo, R.expo || 0.3); if (u.u_camSky) gl.uniform1f(u.u_camSky, R.camSky ?? 1);
+  if (u.u_fog) gl.uniform2fv(u.u_fog, ENV.fog); if (u.u_under) gl.uniform1f(u.u_under, R.under ? 1 : 0); if (u.u_uT) { gl.uniform3fv(u.u_uT, ENV.uT || [0.47, 0.105, 0.09]); gl.uniform3fv(u.u_uS, ENV.uS || [0.106, 0.62, 0.74]); } if (u.u_bright) gl.uniform1f(u.u_bright, SETTINGS.brightness); if (u.u_expo) gl.uniform1f(u.u_expo, R.expo || 0.3); if (u.u_camSky) gl.uniform1f(u.u_camSky, R.camSky ?? 1);
   if (u.u_shadowOn) gl.uniform1f(u.u_shadowOn, R.shadowActive ? 1 : 0); if (u.u_shadowVP) gl.uniformMatrix4fv(u.u_shadowVP, false, R.shadowVP);
   if (u.u_shadowTexel) gl.uniform1f(u.u_shadowTexel, 1 / (R.shadowSize || 1));
   if (u.u_shadow) { gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, R.fbo.shadow ? R.fbo.shadow.tex : R.dummyShadow); gl.uniform1i(u.u_shadow, 1); }
@@ -869,6 +883,7 @@ function setCommon(P) {
   if (u.u_nl !== undefined && u.u_nl) { const n = SETTINGS.gfx.dlights === false ? 0 : Math.min(8, R.plights.length); gl.uniform1i(u.u_nl, n); if (n) { const lp = new Float32Array(32), lc = new Float32Array(24); R.plights.slice(0, 8).forEach((l, i) => { lp.set([l.x - R.cam[0], l.y - R.cam[1], l.z - R.cam[2], l.r], i * 4); lc.set(l.c, i * 3); }); gl.uniform4fv(u.u_lp, lp); gl.uniform3fv(u.u_lc, lc); } }
   if (u.u_grass) { gl.uniform3fv(u.u_grass, GRASS_U); gl.uniform3fv(u.u_foli, FOLI_U); }
   if (u.u_gfx) gl.uniform4fv(u.u_gfx, R.gfxU);
+  if (u.u_wdist) wdBind(P);
   if (u.u_tintTex) { gl.activeTexture(gl.TEXTURE11); gl.bindTexture(gl.TEXTURE_2D_ARRAY, R.tintTex); gl.uniform1i(u.u_tintTex, 11); gl.activeTexture(gl.TEXTURE0); gl.uniform1f(u.u_tintOn, R.tintTex && R.tintWorld ? 1 : 0); }
 }
 function frustumPlanes(m) {
@@ -885,7 +900,7 @@ function renderWorld(world, cam, yaw, pitch, opts = {}) {
   if (R.lost) return; // contexto de GPU perdido: esperar a que se restaure
   const gl = R.gl; resize(); R.time = (G.mode === 'game' && G.wclock !== undefined) ? G.wclock : performance.now() / 1000; // reloj del mundo: /tick freeze también para olas, hojas, nubes y llamas
   R.dimIdx = world.dim === 'overworld' ? 0 : world.dim === 'nether' ? 1 : 2;
-  R.cam = cam; R.under = !!opts.under;
+  R.cam = cam; R.under = !!opts.under; R.underKind = opts.underKind || 1;
   const fov = (opts.fov || SETTINGS.fov) * Math.PI / 180; const far = Math.max(160, SETTINGS.rd * 16 * 1.6 + 48);
   R.near = 0.05; R.far = far;
   M4.persp(R.proj, fov, R.w / R.h, R.near, far);
@@ -957,7 +972,8 @@ function renderWorld(world, cam, yaw, pitch, opts = {}) {
   { const P = R.progs.chunk; gl.useProgram(P.p); setCommon(P); gl.uniformMatrix4fv(P.u.u_vp, false, R.vp); gl.uniform1f(P.u.u_pass, 0);
     for (const c of vis) { const m = c.mesh.o; if (!m) continue; gl.uniform3f(P.u.u_off, c.cx * 16 - cam[0], -cam[1], c.cz * 16 - cam[2]); gl.bindVertexArray(m.vao); gl.drawElements(gl.TRIANGLES, m.count, gl.UNSIGNED_INT, 0); R.stats.tris += m.count / 3; R.stats.draws++; } }
   // entidades
-  if (opts.drawEntities) { const P = R.progs.box; gl.useProgram(P.p); setCommon(P); gl.uniformMatrix4fv(P.u.u_vp, false, R.vp); gl.bindVertexArray(R.cube); opts.drawEntities(); }
+  if (opts.drawEntities) { const P = R.progs.box; gl.useProgram(P.p); setCommon(P); gl.uniformMatrix4fv(P.u.u_vp, false, R.vp); gl.bindVertexArray(R.cube); R.boatMasks = []; opts.drawEntities();
+    if (R.boatMasks.length) { gl.colorMask(false, false, false, false); for (const m of R.boatMasks) drawBox(m, TEX.boat_wood, null, null, null, 0); gl.colorMask(true, true, true, true); } R.boatMasks = null; } // el agua no entra en los botes
   if (typeof flDrawDebug === 'function') flDrawDebug();
   if (opts.drawOverlay) opts.drawOverlay(false);
   // copia para agua
@@ -1046,7 +1062,7 @@ function postProcess(world, opts) {
   const warm = Math.exp(-Math.max(0, s[1]) * 4); gl.uniform3f(P.u.u_rayCol, 1.0, lerp(0.85, 0.55, warm), lerp(0.7, 0.3, warm));
   expoU(P, R.fbo.b1.tex); if (P.u.u_shock) gl.uniform4fv(P.u.u_shock, typeof boomShock === 'function' ? boomShock() : [0, 0, 0, 0]);
   gl.uniform1f(P.u.u_under, R.under ? 1 : 0); gl.uniform1f(P.u.u_time, R.time); gl.uniform1f(P.u.u_exposure, opts.exposure || 1.0); gl.uniform1f(P.u.u_q, R.q);
-  gl.uniform1f(P.u.u_nether, world.dim === 'nether' ? 1 : 0); gl.uniform3f(P.u.u_underCol, 0.5, 0.85, 1.1);
+  gl.uniform1f(P.u.u_nether, world.dim === 'nether' ? 1 : 0); const uc = ENV.uCol || [0.5, 0.85, 1.1]; gl.uniform3f(P.u.u_underCol, uc[0], uc[1], uc[2]);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
   gl.enable(gl.DEPTH_TEST);
 }

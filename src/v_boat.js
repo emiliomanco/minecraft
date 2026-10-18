@@ -42,7 +42,7 @@ function boatTick(e, dt, w) {
 }
 function boatStep(e, h, w) {
   const R = e.rot; let fx = 0, fy = -9.8, fz = 0, tx = 0, ty = 0, tz = 0; let wet = 0, ux = 0, uz = 0;
-  const kB = 9.8 / (10 * 0.15); // con unos 10 puntos hundidos 0,15 se equilibra: más reserva de flotación (aguanta olas y peso, pero inundado de lado o volcado sí se hunde más)
+  const kB = 9.8 / (10 * 0.1); // con unos 10 puntos hundidos 0,1 se equilibra: va alto y con reserva de flotación (aguanta olas y al jinete; inundado de lado o volcado sí se hunde más)
   for (const P of BOAT_PTS) {
     const r = bMul(R, P); const px = e.x + r[0], py = e.y + r[1], pz = e.z + r[2];
     // velocidad del punto: v + ω × r
@@ -58,8 +58,8 @@ function boatStep(e, h, w) {
   }
   if (wet) { fx += (ux / wet - e.vx) * 0.6; fz += (uz / wet - e.vz) * 0.6; }
   // remos del jinete
-  if (e.rider && !e.capsized && e.ctl) { const c = e.ctl; const fwd = [-R[6], 0, -R[8]]; const th = (c.f ? 24 : 0) - (c.b ? 12 : 0); /* 4 veces el empuje inicial (se pidió el doble dos veces) */ fx += fwd[0] * th * (wet ? 1 : 0.04); fz += fwd[2] * th * (wet ? 1 : 0.04); ty += ((c.l ? 1 : 0) - (c.r ? 1 : 0)) * 5 * (wet ? 1 : 0.3); }
-  if (e.rider) fy -= 2.5; // peso del jinete (centro de masa más alto: vuelca antes)
+  if (e.rider && !e.capsized && e.ctl) { const c = e.ctl; const fwd = [-R[6], 0, -R[8]]; const th = (c.f ? 48 : 0) - (c.b ? 24 : 0); /* 8 veces el empuje inicial (se pidió el doble tres veces) */ fx += fwd[0] * th * (wet ? 1 : 0.04); fz += fwd[2] * th * (wet ? 1 : 0.04); ty += ((c.l ? 1 : 0) - (c.r ? 1 : 0)) * 5 * (wet ? 1 : 0.3); }
+  if (e.rider) fy -= 1.8; // peso del jinete (centro de masa más alto: vuelca antes)
   const I = [1.1, 1.6, 0.55]; // inercia: cabeceo (x) cuesta más que el balanceo (z)
   e.vx += fx * h; e.vy += fy * h; e.vz += fz * h;
   e.wx += tx / I[0] * h; e.wy += ty / I[1] * h; e.wz += tz / I[2] * h;
@@ -129,10 +129,16 @@ function drawBoat(e, x, y, z, light, alpha) {
   const cam = R.cam; const r0 = e.prot || e.rot, r1 = e.rot; const r = r1.map((v, i) => lerp(r0[i], v, alpha));
   const flash = e.hurtTime > 0 ? [0.7, 0, 0, 0.35] : null; const L = TEX.boat_wood;
   for (const [ox, oy, oz, sx, sy, sz] of BOAT_BOXES) {
-    const S = [sx * BOAT_W, sy * BOAT_H / 0.6, sz * BOAT_L]; const o = [ox * BOAT_W, oy * BOAT_H / 0.6 - 0.12, oz * BOAT_L];
+    const S = [sx * BOAT_W, sy * BOAT_H / 0.6, sz * BOAT_L]; const o = [ox * BOAT_W, oy * BOAT_H / 0.6 - 0.04, oz * BOAT_L];
     const m = _bm; for (let c = 0; c < 3; c++) { m[c * 4] = r[c * 3] * S[c]; m[c * 4 + 1] = r[c * 3 + 1] * S[c]; m[c * 4 + 2] = r[c * 3 + 2] * S[c]; m[c * 4 + 3] = 0; }
     const t = bMul(r, o); m[12] = x + t[0] - cam[0]; m[13] = y + t[1] - cam[1]; m[14] = z + t[2] - cam[2]; m[15] = 1;
     drawBox(m, L, light, null, flash, 0);
+  }
+  // hueco del casco: caja invisible que solo escribe profundidad (se dibuja al final de las entidades) para que el agua no se vea dentro del bote
+  if (!e.capsized && R.boatMasks) {
+    const S = [0.8 * BOAT_W, 0.46 * BOAT_H / 0.6, 0.86 * BOAT_L], o = [-0.4 * BOAT_W, 0.12 * BOAT_H / 0.6 - 0.04, -0.43 * BOAT_L]; const m = new Float32Array(16);
+    for (let c = 0; c < 3; c++) { m[c * 4] = r[c * 3] * S[c]; m[c * 4 + 1] = r[c * 3 + 1] * S[c]; m[c * 4 + 2] = r[c * 3 + 2] * S[c]; }
+    const t = bMul(r, o); m[12] = x + t[0] - cam[0]; m[13] = y + t[1] - cam[1]; m[14] = z + t[2] - cam[2]; m[15] = 1; R.boatMasks.push(m);
   }
 }
 // ---- multijugador: el anfitrión simula; los clientes ven réplicas y mandan sus acciones

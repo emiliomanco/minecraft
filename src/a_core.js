@@ -128,7 +128,7 @@ const GFX_DEF = { shadows: -1, shadowDist: 1, sunRays: true, bloom: 1, dlights: 
 // físicas: cada apartado tiene modo 'real' (físicas de Minecraft 2) o 'vanilla' (como el juego original) y sus valores
 const PHYS_DEF = {
   oceans: { mode: 'real', waves: 1, foam: true, shore: 3 },
-  liquids: { mode: 'real', waterSpeed: 1, lavaVisc: 1, splash: true, continuous: true },
+  liquids: { mode: 'real', waterSpeed: 1, lavaVisc: 1, splash: true, continuous: true, pbfSize: 1 },
   snow: { mode: 'real', depth: 1 },
   ragdoll: { mode: 'real', corpse: 4, knock: 6, fall: 32, max: 20 },
   fire: { mode: 'real', height: 1, spread: 1 },
@@ -151,7 +151,7 @@ for (const k in PHYS_DEF) {
 if (!SETTINGS._ragFall2) { SETTINGS._ragFall2 = true; SETTINGS.physics.ragdoll.fall = Math.max(SETTINGS.physics.ragdoll.fall || 0, 32); }
 // valores efectivos de un apartado de físicas; real = false si está en modo vanilla
 function physCfg(sec) { const o = Object.assign({}, PHYS_DEF[sec], (SETTINGS.physics || {})[sec] || {}); o.real = o.mode !== 'vanilla'; return o; }
-function saveSettings() { try { localStorage.setItem('mc2-settings', JSON.stringify(SETTINGS)); } catch (e) { } }
+function saveSettings() { try { const own = typeof G !== 'undefined' && G.netPhysOwn; localStorage.setItem('mc2-settings', JSON.stringify(own ? Object.assign({}, SETTINGS, { physics: own }) : SETTINGS)); } catch (e) { } } // en el mundo de otro: se guardan las físicas propias, no las del anfitrión
 function keyLabel(code) {
   if (!code) return '-';
   if (code.startsWith('Mouse')) return ['Botón izq.', 'Botón central', 'Botón der.', 'Botón 4', 'Botón 5'][+code.slice(5)] || code;

@@ -401,7 +401,11 @@ function updatePlayerPhysics(p, dt, input) {
   const lf = liquidAt(w, p.x, p.y + 0.1, p.z), lm = liquidAt(w, p.x, p.y + 0.9, p.z), le = liquidAt(w, p.x, p.eye, p.z);
   p.inWater = lf === 1 || lm === 1; p.inLava = lf === 2 || lm === 2; p.eyeInWater = le === 1; p.eyeInLava = le === 2;
   const climb = entityInBlock(w, p, d => d.climb);
-  const web = entityInBlock(w, p, d => d.slow);
+  // miel (partículas): pegajosa, frena como una telaraña; leche: al tocarla se anulan los efectos de poción
+  const honey = typeof flHoneyAt === 'function' && !spectator && !p.flying && (flHoneyAt(w, p.x, p.y + 0.05, p.z) || flHoneyAt(w, p.x, p.y + 0.9, p.z));
+  if (honey) { const k = Math.exp(-9 * dt); p.vx *= k; p.vz *= k; if (p.vy < -1) p.vy = -1; } // pegado: frena también lo que ya traía
+  const web = entityInBlock(w, p, d => d.slow) || honey;
+  if (typeof flMilkAt === 'function' && !spectator && (flMilkAt(w, p.x, p.y + 0.02, p.z) || flMilkAt(w, p.x, p.y + 0.9, p.z)) && Object.keys(p.effects).length) { p.effects = {}; if (p === G.player) { showActionMsg('La leche anuló los efectos'); updateHUD(); } }
   const below = blockAt(w, p.x, p.y - 0.05, p.z); const bd = below > 0 ? REG[below] : null;
   // dirección deseada
   let fx = 0, fz = 0; if (input.f) fz -= 1; if (input.b) fz += 1; if (input.l) fx -= 1; if (input.r) fx += 1;
@@ -412,7 +416,8 @@ function updatePlayerPhysics(p, dt, input) {
   if (p.flying || spectator) {
     const sp = (p.sprinting ? 21.6 : 10.9) * (spectator ? 1.4 : 1);
     p.vx = lerp(p.vx, wx * sp, Math.min(1, dt * 8)); p.vz = lerp(p.vz, wz * sp, Math.min(1, dt * 8));
-    p.vy = lerp(p.vy, (input.jump ? 8 : 0) - (input.sneak ? 8 : 0), Math.min(1, dt * 10));
+    const up = input.jump && input.sneak ? input.lastVert !== 'sneak' : input.jump, down = input.jump && input.sneak ? input.lastVert === 'sneak' : input.sneak; // las dos a la vez: manda la última que se pulsó
+    p.vy = lerp(p.vy, (up ? 8 : 0) - (down ? 8 : 0), Math.min(1, dt * 10));
     if (spectator) { p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt; } else { moveEntity(w, p, p.vx * dt, p.vy * dt, p.vz * dt); if (p.onGround) p.flying = false; }
     p.fallDist = 0; return;
   }
@@ -449,9 +454,9 @@ function updatePlayerPhysics(p, dt, input) {
     if (p.inWater && input.sprint && input.f && p.eyeInWater) { const ly = Math.sin(p.pitch); p.vy = lerp(p.vy, ly * 5, dt * 4); }
     else {
       if (p.inLava) p.vy -= 6 * dt;
-      else { // empuje de Arquímedes según la parte del cuerpo bajo la superficie (el mar sube y baja con las olas)
-        const surf = waterSurfaceAt(w, p.x, p.y + 0.1, p.z); const frac = clamp((surf - p.y) / 1.8, 0, 1);
-        p.vy += clamp(9.8 * (frac / 0.83 - 1), -6, 7) * dt;
+      else { // sin pulsar nada el jugador se hunde despacio (como en el clásico); para quedarse arriba hay que nadar
+        const surf = waterSurfaceAt(w, p.x, p.y + 0.1, p.z);
+        p.vy = lerp(p.vy, -0.75, Math.min(1, dt * 2.5));
         const ow = isOceanTop(w, Math.floor(p.x), Math.floor(surf - 0.92 + 0.001), Math.floor(p.z)) ? oceanWaveAt(p.x, p.z) : null; if (ow && !input.f) { p.vx += ow.ux * dt * 1.5; p.vz += ow.uz * dt * 1.5; }
       }
       if (input.jump) p.vy = lerp(p.vy, p.inLava ? 2 : 3.6, dt * 8); else if (input.sneak) p.vy = lerp(p.vy, -3, dt * 4); p.vy = Math.max(p.vy, -3.5); p.vy *= Math.exp(-2.4 * dt); }
@@ -467,7 +472,7 @@ function updatePlayerPhysics(p, dt, input) {
       p.fallDist = 0;
     }
     p.vy -= 32 * dt; if (web) p.vy = Math.max(p.vy, -1); p.vy = Math.max(p.vy, -78);
-    if (input.jump && p.onGround && !p.jumpCool) { p.vy = p.effects.jump ? 11 : 9; if (p.sprinting) { p.vx += -Math.sin(p.yaw) * 2; p.vz += -Math.cos(p.yaw) * 2; } p.exh += p.sprinting ? 0.2 : 0.05; p.jumpCool = 0.1; if (bd && bd.sticky) p.vy = 4; }
+    if (input.jump && p.onGround && !p.jumpCool) { p.vy = p.effects.jump ? 11 : 9; if (p.sprinting) { p.vx += -Math.sin(p.yaw) * 2; p.vz += -Math.cos(p.yaw) * 2; } p.exh += p.sprinting ? 0.2 : 0.05; p.jumpCool = 0.1; if ((bd && bd.sticky) || honey) p.vy = 4; }
     if (p.jumpCool) p.jumpCool = Math.max(0, p.jumpCool - dt);
     // agacharse: no caer por bordes
     let mx = p.vx * dt, mz = p.vz * dt;
@@ -549,6 +554,8 @@ function entityTick(e, dt) {
   if (e.dead) { e.deathTime++; if (e.deathTime === 1) mobDie(e); if (e.deathTime > (e.type === 'ender_dragon' ? 100 : 20)) e.removed = true; if (e.type === 'ender_dragon') { e.y += 0.1; if (e.deathTime % 3 === 0) explosionFX(e.dim, e.x + (Math.random() - 0.5) * 8, e.y + Math.random() * 4, e.z + (Math.random() - 0.5) * 8, 2); } return; }
   // medio
   const feet = liquidAt(w, e.x, e.y + 0.2, e.z); e.inWater = feet === 1; e.inLava = feet === 2;
+  e._honey = typeof flHoneyAt === 'function' && flHoneyAt(w, e.x, e.y + 0.2, e.z); // en miel: muy despacio
+  if (e.effects && typeof flMilkAt === 'function' && flMilkAt(w, e.x, e.y + 0.2, e.z)) e.effects = {}; // la leche anula los efectos
   if (e.inLava && !d.fireImmune) { e.fire = 300; if (e.age % 10 === 0) hurtEntity(e, 4, null, 0, 0, 0, 'lava'); }
   if (e.fire > 0) { e.fire--; if (e.inWater) e.fire = 0; if (e.age % 20 === 0 && !d.fireImmune) hurtEntity(e, 1, null, 0, 0, 0, 'fire'); if (Math.random() < 0.3) flame(e.x, e.y + Math.random() * e.h, e.z, { size: 0.3 }); }
   if (d.burns && w.dim === 'overworld' && isDay() && !e.inWater && (G.rainLevel || 0) < 0.5 && e.age % 20 === 0) { const L = w.light(Math.floor(e.x), Math.floor(e.y + e.h), Math.floor(e.z)); if (L[0] >= 15 && e.target !== null || L[0] >= 15) e.fire = Math.max(e.fire, 160); }
@@ -650,6 +657,7 @@ function entityTick(e, dt) {
   if (moving && e.hc && e.onGround && e.navT !== e.age) e.vy = 10; // salto de ~1,3 bloques con el paso de 0,05 s (8,5 no superaba un bloque)
   if (e.onGround) { const fr = w.get(Math.floor(e.x), Math.floor(e.y - 0.05), Math.floor(e.z)) === ID.snow ? 0.7 : 0.82; e.vx *= fr; e.vz *= fr; } // en nieve profunda cuesta avanzar
   e.vy = Math.max(e.vy, -60);
+  if (e._honey) { e.vx *= 0.25; e.vz *= 0.25; e.vy = clamp(e.vy, -1, 3); }
   const vyB = e.vy; moveEntity(w, e, e.vx * dt, e.vy * dt, e.vz * dt);
   if (vyB < 0 && !e.onGround) e.fallDist += -vyB * dt;
   if (vyB < -12 && typeof ragFallCheck === 'function' && !d.climb && !d.noGrav) ragFallCheck(e, vyB);
@@ -671,6 +679,7 @@ function itemTick(e, dt, w) {
   if (inW) { const bx = Math.floor(e.x), bz = Math.floor(e.z); let by = Math.floor(e.y + 0.1); while (liquidAt(w, e.x, by + 1.02, e.z) === inW && by < e.y + 4) by++; const sy = by + liquidSurface(w, bx, by, bz); const tgt = clamp((sy - 0.12 - e.y) * (inW === 2 ? 2 : 7), -2.5, 2.5) + Math.sin(e.age * 0.12 + e.id) * 0.15; e.vy = lerp(e.vy, tgt, inW === 2 ? 0.08 : 0.22); e.vx *= inW === 2 ? 0.7 : 0.9; e.vz *= inW === 2 ? 0.7 : 0.9; const fv = flowVec(w, Math.floor(e.x), Math.floor(e.y + 0.1), Math.floor(e.z)); e.vx += fv[0] * 0.5; e.vz += fv[1] * 0.5; if (inW === 2 && !(e.stack.id === ID.netherite_ingot || REG[e.stack.id].name.startsWith('netherite'))) { e.removed = true; smoke(e.x, e.y, e.z, { size: 0.3 }); return; } }
   else e.vy -= 20 * dt;
   if (e.onGround) { e.vx *= 0.6; e.vz *= 0.6; }
+  if (typeof flHoneyAt === 'function' && flHoneyAt(w, e.x, e.y + 0.1, e.z)) { e.vx *= 0.5; e.vz *= 0.5; e.vy = Math.max(e.vy, -0.6); } // pegado en la miel
   // dentro de un bloque sólido: empujar arriba
   const b = blockAt(w, e.x, e.y + 0.1, e.z); if (b > 0 && T_FULL[b]) { e.y += 0.2; e.vy = 1; }
   moveEntity(w, e, e.vx * dt, e.vy * dt, e.vz * dt);
