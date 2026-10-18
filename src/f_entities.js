@@ -416,7 +416,8 @@ function updatePlayerPhysics(p, dt, input) {
   if (p.flying || spectator) {
     const sp = (p.sprinting ? 21.6 : 10.9) * (spectator ? 1.4 : 1);
     p.vx = lerp(p.vx, wx * sp, Math.min(1, dt * 8)); p.vz = lerp(p.vz, wz * sp, Math.min(1, dt * 8));
-    p.vy = lerp(p.vy, (input.jump ? 8 : 0) - (input.sneak ? 8 : 0), Math.min(1, dt * 10));
+    const up = input.jump && input.sneak ? input.lastVert !== 'sneak' : input.jump, down = input.jump && input.sneak ? input.lastVert === 'sneak' : input.sneak; // las dos a la vez: manda la última que se pulsó
+    p.vy = lerp(p.vy, (up ? 8 : 0) - (down ? 8 : 0), Math.min(1, dt * 10));
     if (spectator) { p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt; } else { moveEntity(w, p, p.vx * dt, p.vy * dt, p.vz * dt); if (p.onGround) p.flying = false; }
     p.fallDist = 0; return;
   }

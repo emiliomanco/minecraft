@@ -342,7 +342,7 @@ function gameFrame(dt) {
   const wdt = pausedSP ? 0 : Math.min(0.1, dt * rate);
   if (G.wclock === undefined) G.wclock = performance.now() / 1000; G.wclock += pausedSP ? 0 : dt * rate; // reloj de las animaciones del mundo
   const typing = $('chatIn').classList.contains('on');
-  const input = (UI.open || typing || G.paused || p.dead) ? {} : { f: held('forward'), b: held('back'), l: held('left'), r: held('right'), jump: held('jump'), sneak: SETTINGS.ctl.toggleSneak ? !!INPUT.tSneak : held('sneak'), sprint: SETTINGS.ctl.toggleSprint ? (held('forward') ? !!INPUT.tSprint : (INPUT.tSprint = false)) : held('sprint'), useHeld: p.eatT > 0 || p.bowT > 0 };
+  const input = (UI.open || typing || G.paused || p.dead) ? {} : { f: held('forward'), b: held('back'), l: held('left'), r: held('right'), jump: held('jump'), sneak: SETTINGS.ctl.toggleSneak && !p.flying ? !!INPUT.tSneak : held('sneak'), lastVert: INPUT.lastVert, sprint: SETTINGS.ctl.toggleSprint ? (held('forward') ? !!INPUT.tSprint : (INPUT.tSprint = false)) : held('sprint'), useHeld: p.eatT > 0 || p.bowT > 0 };
   if (!pausedSP && !p.dead && !p.ragdoll && p.boat) { p.savePrev(); boatRide(p, dt, input, pausedSP ? 1 : clamp(acc / 50, 0, 1)); }
   else if (!pausedSP && !p.dead && !p.ragdoll) { p.savePrev(); const steps = dt > 0.034 ? 2 : 1; for (let i = 0; i < steps; i++) updatePlayerPhysics(p, dt / steps, input); }
   if (!pausedSP && p.ragdoll && input.jump && p.ragdoll.alive && p.ragdoll.t > 0.5) p.ragdoll.dur = 0; // saltar = levantarse
@@ -775,6 +775,7 @@ function setupInput() {
   window.addEventListener('wheel', e => { if (G.mode !== 'game' || UI.open || G.paused) return; if (held('zoom')) { G.zoomMag = clamp((G.zoomMag || 4) * (e.deltaY > 0 ? 0.85 : 1.18), 2, 12); return; } const p = G.player; p.sel = (p.sel + (e.deltaY > 0 ? 1 : 8)) % 9; updateHUD(); showItemName(); }, { passive: true });
   document.addEventListener('pointerlockchange', () => { INPUT.lockT = performance.now(); INPUT.mAvg = 0; if (G.mode === 'game' && document.pointerLockElement !== $('gl') && !UI.open && !G.paused && !$('chatIn').classList.contains('on') && !G.player.dead && !$('sCredits').classList.contains('on')) pauseGame(true); INPUT.mouse = {}; });
   window.addEventListener('blur', () => { INPUT.keys = {}; INPUT.mouse = {}; });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { INPUT.keys = {}; INPUT.mouse = {}; } }); // pestaña oculta: las teclas soltadas fuera no llegan
   window.addEventListener('resize', () => { drawLogo(); });
   window.addEventListener('beforeunload', e => { if (G.mode === 'game') { if (!G.net || G.net.role === 'host') { try { saveWorld(true); } catch (err) { } } e.preventDefault(); e.returnValue = '¿Salir de Minecraft 2?'; return e.returnValue; } });
   $('sInv').addEventListener('mousedown', e => { if (e.target === $('sInv') && UI.cursor) { const p = G.player; const n = e.button === 2 ? 1 : UI.cursor.c; dropItem(p.dim, p.x, p.eye - 0.3, p.z, { ...UI.cursor, c: n }, -Math.sin(p.yaw) * 4, 2, -Math.cos(p.yaw) * 4, 40); UI.cursor.c -= n; if (UI.cursor.c <= 0) UI.cursor = null; refreshInvUI(); } });

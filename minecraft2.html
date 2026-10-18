@@ -5132,7 +5132,8 @@ function updatePlayerPhysics(p, dt, input) {
   if (p.flying || spectator) {
     const sp = (p.sprinting ? 21.6 : 10.9) * (spectator ? 1.4 : 1);
     p.vx = lerp(p.vx, wx * sp, Math.min(1, dt * 8)); p.vz = lerp(p.vz, wz * sp, Math.min(1, dt * 8));
-    p.vy = lerp(p.vy, (input.jump ? 8 : 0) - (input.sneak ? 8 : 0), Math.min(1, dt * 10));
+    const up = input.jump && input.sneak ? input.lastVert !== 'sneak' : input.jump, down = input.jump && input.sneak ? input.lastVert === 'sneak' : input.sneak; // las dos a la vez: manda la última que se pulsó
+    p.vy = lerp(p.vy, (up ? 8 : 0) - (down ? 8 : 0), Math.min(1, dt * 10));
     if (spectator) { p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt; } else { moveEntity(w, p, p.vx * dt, p.vy * dt, p.vz * dt); if (p.onGround) p.flying = false; }
     p.fallDist = 0; return;
   }
@@ -7143,7 +7144,7 @@ function onKeyDown(e) {
   if ($('chatIn').classList.contains('on')) { if (e.code === 'Escape') { closeChat(); e.preventDefault(); } return; }
   const a = actionFor(e.code);
   // agacharse / correr en modo «alternar» (Opciones → Controles)
-  if (!e.repeat && !UI.open && !G.paused) { if (a === 'sneak' && SETTINGS.ctl.toggleSneak) INPUT.tSneak = !INPUT.tSneak; if (a === 'sprint' && SETTINGS.ctl.toggleSprint) INPUT.tSprint = !INPUT.tSprint; }
+  if (!e.repeat && !UI.open && !G.paused) { if (a === 'jump' || a === 'sneak') INPUT.lastVert = a; if (a === 'sneak' && SETTINGS.ctl.toggleSneak && !(G.player && G.player.flying)) INPUT.tSneak = !INPUT.tSneak; if (a === 'sprint' && SETTINGS.ctl.toggleSprint) INPUT.tSprint = !INPUT.tSprint; }
   if (e.code === 'F3' || a === 'debug') { e.preventDefault(); if (!e.repeat && !INPUT.keys.F3) { F3 = !F3; setF3Display(); } INPUT.keys.F3 = true; INPUT.f3used = false; return; }
   if (INPUT.keys.F3 && !INPUT.f3used && (/^Key[BGNQ]$/.test(e.code) || e.code === 'F4')) { F3 = !F3; setF3Display(); }
   if (INPUT.keys.F3 && e.code === 'F4') { e.preventDefault(); INPUT.f3used = true; if (!e.repeat) gmSwitchStep(); return; }
@@ -7166,7 +7167,7 @@ function onKeyDown(e) {
     case 'command': openChat('/'); e.preventDefault(); break;
     case 'perspective': perspective = (perspective + 1) % 3; e.preventDefault(); break;
     case 'hideHud': hudHidden = !hudHidden; $('hud').style.display = hudHidden ? 'none' : 'block'; e.preventDefault(); break;
-    case 'jump': { const now = performance.now(); if ((G.gameMode === 'creative') && now - lastSpace < 300) { G.player.flying = !G.player.flying; G.player.vy = 0; } lastSpace = now; const p = G.player; const el = p.armor[1] && p.armor[1].id === ID.elytra; if (el && !p.onGround && !p.flying && !p.inWater && p.vy < 0 && !p.gliding) { p.gliding = true; } break; }
+    case 'jump': { if (e.repeat) break; const now = performance.now(); if ((G.gameMode === 'creative') && now - lastSpace < 300) { G.player.flying = !G.player.flying; G.player.vy = 0; INPUT.tSneak = false; lastSpace = 0; } else lastSpace = now; /* las repeticiones del teclado al mantener Espacio no cuentan como doble toque */ const p = G.player; const el = p.armor[1] && p.armor[1].id === ID.elytra; if (el && !p.onGround && !p.flying && !p.inWater && p.vy < 0 && !p.gliding) { p.gliding = true; } break; }
     case 'ragdoll': if (!INPUT.keys.F3 && typeof playerRagdollToggle === 'function') playerRagdollToggle(); break;
   }
   if (e.code === 'F2') { e.preventDefault(); screenshot(); }
@@ -12004,7 +12005,7 @@ function gameFrame(dt) {
   const wdt = pausedSP ? 0 : Math.min(0.1, dt * rate);
   if (G.wclock === undefined) G.wclock = performance.now() / 1000; G.wclock += pausedSP ? 0 : dt * rate; // reloj de las animaciones del mundo
   const typing = $('chatIn').classList.contains('on');
-  const input = (UI.open || typing || G.paused || p.dead) ? {} : { f: held('forward'), b: held('back'), l: held('left'), r: held('right'), jump: held('jump'), sneak: SETTINGS.ctl.toggleSneak ? !!INPUT.tSneak : held('sneak'), sprint: SETTINGS.ctl.toggleSprint ? (held('forward') ? !!INPUT.tSprint : (INPUT.tSprint = false)) : held('sprint'), useHeld: p.eatT > 0 || p.bowT > 0 };
+  const input = (UI.open || typing || G.paused || p.dead) ? {} : { f: held('forward'), b: held('back'), l: held('left'), r: held('right'), jump: held('jump'), sneak: SETTINGS.ctl.toggleSneak && !p.flying ? !!INPUT.tSneak : held('sneak'), lastVert: INPUT.lastVert, sprint: SETTINGS.ctl.toggleSprint ? (held('forward') ? !!INPUT.tSprint : (INPUT.tSprint = false)) : held('sprint'), useHeld: p.eatT > 0 || p.bowT > 0 };
   if (!pausedSP && !p.dead && !p.ragdoll && p.boat) { p.savePrev(); boatRide(p, dt, input, pausedSP ? 1 : clamp(acc / 50, 0, 1)); }
   else if (!pausedSP && !p.dead && !p.ragdoll) { p.savePrev(); const steps = dt > 0.034 ? 2 : 1; for (let i = 0; i < steps; i++) updatePlayerPhysics(p, dt / steps, input); }
   if (!pausedSP && p.ragdoll && input.jump && p.ragdoll.alive && p.ragdoll.t > 0.5) p.ragdoll.dur = 0; // saltar = levantarse
@@ -12437,6 +12438,7 @@ function setupInput() {
   window.addEventListener('wheel', e => { if (G.mode !== 'game' || UI.open || G.paused) return; if (held('zoom')) { G.zoomMag = clamp((G.zoomMag || 4) * (e.deltaY > 0 ? 0.85 : 1.18), 2, 12); return; } const p = G.player; p.sel = (p.sel + (e.deltaY > 0 ? 1 : 8)) % 9; updateHUD(); showItemName(); }, { passive: true });
   document.addEventListener('pointerlockchange', () => { INPUT.lockT = performance.now(); INPUT.mAvg = 0; if (G.mode === 'game' && document.pointerLockElement !== $('gl') && !UI.open && !G.paused && !$('chatIn').classList.contains('on') && !G.player.dead && !$('sCredits').classList.contains('on')) pauseGame(true); INPUT.mouse = {}; });
   window.addEventListener('blur', () => { INPUT.keys = {}; INPUT.mouse = {}; });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { INPUT.keys = {}; INPUT.mouse = {}; } }); // pestaña oculta: las teclas soltadas fuera no llegan
   window.addEventListener('resize', () => { drawLogo(); });
   window.addEventListener('beforeunload', e => { if (G.mode === 'game') { if (!G.net || G.net.role === 'host') { try { saveWorld(true); } catch (err) { } } e.preventDefault(); e.returnValue = '¿Salir de Minecraft 2?'; return e.returnValue; } });
   $('sInv').addEventListener('mousedown', e => { if (e.target === $('sInv') && UI.cursor) { const p = G.player; const n = e.button === 2 ? 1 : UI.cursor.c; dropItem(p.dim, p.x, p.eye - 0.3, p.z, { ...UI.cursor, c: n }, -Math.sin(p.yaw) * 4, 2, -Math.cos(p.yaw) * 4, 40); UI.cursor.c -= n; if (UI.cursor.c <= 0) UI.cursor = null; refreshInvUI(); } });
